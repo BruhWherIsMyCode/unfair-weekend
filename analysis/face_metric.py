@@ -182,9 +182,9 @@ def frame_reading(obs: Optional[FrameObservation]) -> Optional[FrameReading]:
     reason = None
     if unit < config.MIN_EYE_DISTANCE_PX:
         reason = "face too small or far away"
-    elif obs.yaw_deg is not None and abs(obs.yaw_deg) > config.MAX_YAW_DEG:
+    elif config.CHECK_HEAD_ANGLES and obs.yaw_deg is not None and abs(obs.yaw_deg) > config.MAX_YAW_DEG:
         reason = "head turned too far"
-    elif obs.pitch_deg is not None and abs(obs.pitch_deg) > config.MAX_PITCH_DEG:
+    elif config.CHECK_HEAD_ANGLES and obs.pitch_deg is not None and abs(obs.pitch_deg) > config.MAX_PITCH_DEG:
         reason = "head tipped too far"
 
     return FrameReading(

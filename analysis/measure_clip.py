@@ -29,7 +29,11 @@ def main(argv=None) -> int:
     parser.add_argument("--person-file", default=None)
     parser.add_argument("--label", default="live", choices=list(baseline_mod.VALID_LABELS))
     parser.add_argument("--save", action="store_true")
+    parser.add_argument("--no-angle-check", action="store_true",
+                        help="do not drop frames on head angle")
     args = parser.parse_args(argv)
+    if args.no_angle_check:
+        config.CHECK_HEAD_ANGLES = False
 
     if args.save and not args.person_file:
         print("--save needs --person-file", file=sys.stderr)

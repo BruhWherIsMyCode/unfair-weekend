@@ -34,6 +34,7 @@ MOUTH_CORNER_IDS = (61, 291)  # mouth corners, from memory, confirm with the win
 MIN_EYE_DISTANCE_PX = 40.0  # smaller face than this (pixels between eyes) is unusable; first guess
 MAX_YAW_DEG = 20.0  # head turned more than this left/right is unusable; first guess
 MAX_PITCH_DEG = 20.0  # head tipped more than this up/down is unusable; first guess
+CHECK_HEAD_ANGLES = True  # set False (or pass --no-angle-check) if the unverified angle maths marks a frontal face unusable
 
 # ---- Clip reading -----------------------------------------------------------
 RELAXED_FRACTION = 0.2  # share of usable frames (weakest smile) taken as the relaxed face; first guess

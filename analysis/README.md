@@ -34,7 +34,7 @@ This answers one question: does an acted one-sided droop move a reading clearly 
 
 1. Run `python -m analysis.live_face --person yourname`. Add `--mirrored` if you know your camera mirrors.
 2. Sit at arm's length, in good light, face straight at the camera.
-3. **Wink check first.** Wink your LEFT eye. The window should say `blink: HER LEFT`, and the `HER L` labels should sit on your left (the screen's right: the picture is not a mirror). If it says RIGHT, restart with or without `--mirrored`.
+3. **Wink check first.** Wink your LEFT eye. The window should say `blink: HER LEFT`, and the `HER L` labels should sit on your left (the screen's right: the picture is not a mirror). If it says RIGHT, restart with or without `--mirrored`. If the window says `NOT usable: head turned/tipped too far` while you face the camera straight, the head-angle maths is wrong: restart with `--no-angle-check` and tell the team.
 4. Sit relaxed for a few seconds and look at `jitter`. That is how much the number wobbles by itself.
 5. Press `n`, then `SPACE`, and do a normal smile when it says SMILE. Do this 10 times.
 6. Press `l`, then do 10 acted droops on your left (the left corner stays down while the right smiles). Press `r` and do 10 on your right.

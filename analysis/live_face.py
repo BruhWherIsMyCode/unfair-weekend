@@ -40,7 +40,11 @@ def main(argv=None) -> int:
     parser.add_argument("--mirrored", action="store_true", help="the camera image is mirrored")
     parser.add_argument("--person", default="test")
     parser.add_argument("--record-trials", action="store_true", help="save each trial as mp4")
+    parser.add_argument("--no-angle-check", action="store_true",
+                        help="do not drop frames on head angle (use if a frontal face shows 'head turned/tipped')")
     args = parser.parse_args(argv)
+    if args.no_angle_check:
+        config.CHECK_HEAD_ANGLES = False
 
     if not config.MODEL_PATH.exists():
         print("Model file missing. Run:  python -m analysis.get_models")
