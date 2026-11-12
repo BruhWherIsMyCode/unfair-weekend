@@ -17,11 +17,19 @@ from analysis import config
 LABELS = ("normal", "acted_left", "acted_right")
 
 
+def _mismatched(t: dict) -> bool:
+    """True for an acted trial whose saved matches_asked is "no". A missing or empty
+    value (older CSV rows, normal trials) counts as matching."""
+    return str(t.get("matches_asked") or "").strip().lower() == "no"
+
+
 def _values(trials: Sequence[dict], label: str, metric: str) -> List[float]:
     out = []
     for t in trials:
         if t.get("label") != label or t.get("quality") != "usable":
             continue
+        if label != "normal" and _mismatched(t):
+            continue  # did not look like the droop that was asked: excluded
         v = t.get(metric)
         if v is not None:
             out.append(float(v))
@@ -79,7 +87,13 @@ def summarise(trials: Sequence[dict]) -> dict:
         rel = m["relative_gap"]
         if rel is not None and (best_rel is None or rel > best_rel):
             best, best_rel = metric, rel
-    return {"metrics": metrics, "best_metric": best, "best_relative_gap": best_rel}
+    excluded = {
+        lab: sum(1 for t in trials
+                 if t.get("label") == lab and t.get("quality") == "usable" and _mismatched(t))
+        for lab in ("acted_left", "acted_right")
+    }
+    return {"metrics": metrics, "best_metric": best, "best_relative_gap": best_rel,
+            "excluded": excluded}
 
 
 def _f(v: Optional[float]) -> str:
@@ -100,10 +114,15 @@ def format_summary(summary: dict) -> str:
             v = m["verdicts"][lab]
             extra = ""
             if v["wrong_side"] is not None:
-                extra = " (%d of %d trials not beyond normal on the correct side)" % (
-                    v["wrong_side"], v["count"])
+                extra = " (%d of %d acted trials beyond normal, on the correct side)" % (
+                    v["count"] - v["wrong_side"], v["count"])
             lines.append("%-12s %s%s" % (lab, v["verdict"], extra))
         lines.append("")
+    for lab, short in (("acted_left", "left"), ("acted_right", "right")):
+        n = summary.get("excluded", {}).get(lab, 0)
+        if n:
+            lines.append("%d %s trials did not look like a %s droop (excluded)"
+                         % (n, lab.replace("_", "-"), short))
     if summary["best_metric"]:
         lines.append("best metric: %s (smallest acted-vs-normal gap = %.2f x normal spread)"
                      % (summary["best_metric"], summary["best_relative_gap"]))

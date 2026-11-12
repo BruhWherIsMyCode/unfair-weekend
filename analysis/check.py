@@ -2,7 +2,7 @@
 
 Run from the repo root:
     python -m analysis.check --person NAME [--mirrored] [--camera N] [--hold S]
-        [--only face|hands] [--per-label N] [--per-mode N] [--no-angle-check]
+        [--only face|hands|angle] [--per-pose N] [--per-label N] [--per-mode N] [--no-angle-check]
 
 Both windows run by themselves with big on-screen text; the only key is q.
 At the end both summaries are printed together with the files they were saved to.
@@ -31,8 +31,11 @@ def main(argv=None) -> int:
     parser.add_argument("--camera", type=int, default=0)
     parser.add_argument("--hold", type=float, default=None,
                         help="seconds of the hand hold (default: config.HAND_HOLD_S)")
-    parser.add_argument("--only", choices=("face", "hands"), default=None,
-                        help="run only the face test or only the hand test")
+    parser.add_argument("--only", choices=("face", "hands", "angle"), default=None,
+                        help="run only the face test, only the hand test, or only the angle test "
+                             "(a crooked phone against acted droops; never part of the default run)")
+    parser.add_argument("--per-pose", type=int, default=None,
+                        help="angle test: trials per pose (default: config.GUIDE_ANGLE_PER_POSE)")
     parser.add_argument("--per-label", type=int, default=None,
                         help="face trials per label (default: config.GUIDE_FACE_PER_LABEL)")
     parser.add_argument("--per-mode", type=int, default=None,
@@ -46,6 +49,26 @@ def main(argv=None) -> int:
 
     results = []  # (title, LAST_RESULT copy)
     notes = []
+
+    if args.only == "angle":
+        angle_args = _common(args) + ["--angle"]
+        if args.per_pose is not None:
+            angle_args += ["--per-pose", str(args.per_pose)]
+        code = live_face.main(angle_args)
+        if code != 0:
+            return code
+        res = dict(live_face.LAST_RESULT)
+        print("\n" + "=" * 60)
+        print("ANGLE TEST\n----------")
+        for ln in res.get("verdict_lines", []):  # the verdicts first
+            print(ln)
+        print()
+        print(res.get("summary", "(no summary)"))
+        if res.get("trials"):
+            print("Saved: %s\n       %s\n" % (res.get("csv"), res.get("summary_path")))
+        else:
+            print("No trials were recorded, nothing saved.\n")
+        return 0
 
     if args.only in (None, "face"):
         face_args = _common(args)

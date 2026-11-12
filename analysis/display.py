@@ -12,11 +12,24 @@ import numpy as np
 
 from analysis import config, guide_draw
 from analysis.droop_summary import summarise
+from analysis.face_metric import face_frame
 
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 PANEL_W = 460
 MIN_PICTURE_W = 720
-MIN_HEIGHT = 780  # the panel has many lines; make the window tall enough for them
+MIN_HEIGHT = 960  # the panel has many lines (and a plain-word caption under each); make the window tall enough
+
+# One short plain-word sentence under each panel item.
+TEXT_MOUTH_LEVEL = ("0 = both mouth corners equally high. Off-centre = one corner lower. "
+                    "Everyone is a little uneven; we compare with your own usual.")
+TEXT_MOUTH_LEVEL_3D = ("measured in the face's own 3D frame, so head turn should not count "
+                       "(unverified)")
+TEXT_SMILE = "how strongly you are smiling right now (0 to 1)"
+TEXT_SMILE_BALANCE = ("Google's own guess of which side smiles less. "
+                      "A crooked camera angle also moves it.")
+TEXT_HEAD = "which way your head is turned; big turns make the other numbers less reliable"
+TEXT_STEADINESS = ("how much the mouth-level number wobbles while you hold still; "
+                   "a droop must be much bigger than this")
 PAD = 14
 
 WHITE = (255, 255, 255)
@@ -87,6 +100,23 @@ def _extended_line(img, p1, p2, color):
     cv2.line(img, a, b, color, 2, cv2.LINE_AA)
 
 
+def _draw_face_frame(pic, obs, to_screen):
+    """The face's own axes (x and down) from the eye mid-point, projected with x, y only.
+    They should follow the head when it turns or tips."""
+    frame = face_frame(obs.points3d)
+    if frame is None:
+        return
+    origin, x_axis, down, unit = frame
+    eye_l = obs.points3d["her_left_eye"]
+    mid = ((origin[0] + eye_l[0]) / 2.0, (origin[1] + eye_l[1]) / 2.0)
+    length = 0.8 * unit
+    start = to_screen(mid)
+    for axis, color, name in ((x_axis, ORANGE, "x"), (down, YELLOW, "down")):
+        end = to_screen((mid[0] + axis[0] * length, mid[1] + axis[1] * length))
+        cv2.arrowedLine(pic, start, end, color, 3, cv2.LINE_AA, 0, 0.25)
+        _put(pic, name, end[0] + 6, end[1] + 6, 0.5, color)
+
+
 def _draw_picture(pic, obs, fr, mirrored, scale, show_mesh, phase_text):
     def to_screen(p):
         x = (obs.image_w - p[0]) if mirrored else p[0]
@@ -106,6 +136,8 @@ def _draw_picture(pic, obs, fr, mirrored, scale, show_mesh, phase_text):
         for k, p in pts.items():
             cv2.circle(pic, p, 4, YELLOW, -1)
             _put(pic, names.get(k, k), p[0] + 7, p[1] - 7, 0.45, YELLOW)
+        if show_mesh:
+            _draw_face_frame(pic, obs, to_screen)
 
     if phase_text:
         ph, pw = pic.shape[:2]
@@ -174,7 +206,21 @@ def _draw_panel(panel, obs, fr, label, trials, jitter, guide=None):
         line("level", GREEN, 0.55, 1, 20)
     else:
         line("her %s corner lower by %.3f" % ("LEFT" if v > 0 else "RIGHT", abs(v)), ORANGE, 0.55, 1, 20)
-    grey("measured: height of each mouth corner below the eye line, divided by eye distance")
+    grey(TEXT_MOUTH_LEVEL)
+
+    # 2b. MOUTH LEVEL, angle-corrected
+    heading("MOUTH LEVEL (angle-corrected)")
+    v3 = fr.corner_height_3d if fr is not None else None
+    y += 8
+    _bar(panel, x0, y, bar_w, 14, v3, -0.15, 0.15, GREEN if v3 is not None and abs(v3) < 0.01 else ORANGE)
+    y += 14
+    if v3 is None:
+        line("-", GREY, 0.5, 1, 20)
+    elif abs(v3) < 0.01:
+        line("level", GREEN, 0.55, 1, 20)
+    else:
+        line("her %s corner lower by %.3f" % ("LEFT" if v3 > 0 else "RIGHT", abs(v3)), ORANGE, 0.55, 1, 20)
+    grey(TEXT_MOUTH_LEVEL_3D)
 
     # 3. SMILE
     heading("SMILE")
@@ -183,6 +229,7 @@ def _draw_panel(panel, obs, fr, label, trials, jitter, guide=None):
     _bar(panel, x0, y, bar_w, 12, s, 0.0, 1.0, GREEN)
     y += 12
     line("-" if s is None else ("smiling" if s >= 0.5 else "relaxed"), WHITE, 0.5, 1, 20)
+    grey(TEXT_SMILE)
 
     # 4. SMILE BALANCE
     if has and fr.smile_score is not None:
@@ -196,12 +243,12 @@ def _draw_panel(panel, obs, fr, label, trials, jitter, guide=None):
         else:
             line("her %s side smiles less by %.2f" % ("LEFT" if sc > 0 else "RIGHT", abs(sc)),
                  ORANGE, 0.5, 1, 20)
-        grey("from Google's smile score for each side")
+        grey(TEXT_SMILE_BALANCE)
 
     # 5. HEAD
     heading("HEAD")
     line(_head_text(obs) if obs.face_found else "-", WHITE, 0.5, 1, 20)
-    grey("(angle maths unverified)")
+    grey(TEXT_HEAD + " (angle maths unverified)")
 
     # 6. STEADINESS
     heading("STEADINESS")
@@ -211,6 +258,7 @@ def _draw_panel(panel, obs, fr, label, trials, jitter, guide=None):
         line("steady (%.3f)" % jitter, GREEN, 0.5, 1, 20)
     else:
         line("moving (%.3f)" % jitter, ORANGE, 0.5, 1, 20)
+    grey(TEXT_STEADINESS)
 
     # 7. WINK CHECK
     heading("WINK CHECK")
@@ -244,6 +292,11 @@ def _draw_panel(panel, obs, fr, label, trials, jitter, guide=None):
                 t["trial"], LABEL_NAMES.get(t["label"], t["label"]), t["corner_height"], t["corner_lift"])
             if t["smile_score"] is not None:
                 txt += ", balance %+.2f" % t["smile_score"]
+            if t.get("pose"):
+                txt += ", pose %s, yaw %s, pitch %s" % (
+                    t["pose"],
+                    "?" if t.get("yaw_deg") is None else "%+.0f" % t["yaw_deg"],
+                    "?" if t.get("pitch_deg") is None else "%+.0f" % t["pitch_deg"])
         else:
             reason = (t.get("reason") or "").split(";")[0].split(" (")[0]
             txt = "#%d unusable: %s" % (t["trial"], reason)
@@ -259,7 +312,8 @@ def _draw_panel(panel, obs, fr, label, trials, jitter, guide=None):
         line("need normal trials first", GREY, 0.5, 1, 20)
         return
     summ = summarise(trials)["metrics"]
-    names = {"corner_height": "mouth level", "corner_lift": "lift", "smile_score": "balance"}
+    names = {"corner_height": "mouth level", "corner_lift": "lift", "smile_score": "balance",
+             "corner_height_3d": "level 3D"}
     for metric, nm in names.items():
         m = summ[metric]
         n = m["labels"]["normal"]

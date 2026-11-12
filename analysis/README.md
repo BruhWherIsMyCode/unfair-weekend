@@ -126,6 +126,28 @@ Tasks: `smile`, `hand_left`, `hand_right`. The result has the usual shape plus `
 - `corner_height`: her left mouth corner's distance below the eye line minus her right's, at the smile peak, in units of eye distance.
 - `corner_lift`: how far each corner rose from the relaxed face to the peak; right minus left.
 - `smile_score`: MediaPipe's right smile score minus its left, at the peak.
+- `corner_height_3d`: the same as `corner_height`, but measured in the face's own 3D frame (axes built from the eye corners and a forehead point, which do not move when smiling), so turning or tipping the head, or holding the phone low or to the side, should not count. Written, **not verified**: the forehead point (index 10) was written from memory.
+
+## What the numbers mean
+
+- **MOUTH LEVEL:** 0 = both mouth corners equally high. Off-centre = one corner lower. Everyone is a little uneven; we compare with your own usual.
+- **MOUTH LEVEL (angle-corrected):** measured in the face's own 3D frame, so head turn should not count (unverified).
+- **SMILE:** how strongly you are smiling right now (0 to 1).
+- **SMILE BALANCE:** Google's own guess of which side smiles less. A crooked camera angle also moves it.
+- **HEAD:** which way your head is turned; big turns make the other numbers less reliable.
+- **STEADINESS:** how much the mouth-level number wobbles while you hold still; a droop must be much bigger than this.
+
+**"I saw" after each trial.** The result card says what the tool measured, e.g. `I saw: your LEFT corner lower by 0.08`, `I saw: level`, `I saw: hand steady`, `I saw: hand sank 0.15, palm turned in 0.18`. If you were asked for a LEFT droop and the tool saw level or the other side, a yellow line says so and the trial is saved as you did it (`seen` and `matches_asked` columns in the CSV). Such trials are left out of the separation verdict and counted on their own line.
+
+## The angle test
+
+Does holding the phone crooked move a reading as much as a droop does? This is the main open question of the product.
+
+```
+python -m analysis.check --person NAME --only angle
+```
+
+Six parts, 3 trials each (`GUIDE_ANGLE_PER_POSE`; `--per-pose N`): normal smiles looking straight, chin up (phone held low), head turned to your LEFT, head turned to your RIGHT, then an acted droop on each side looking straight. The head-angle quality check is off during this test, and the panel shows each trial's median yaw and pitch. For each reading the summary gives `angle shift` (the largest move of a normal smile at a crooked pose), `droop size` (the smaller acted droop), their ratio, and a verdict: under 0.5 `angle OK`, 0.5 to 1.0 `angle RISKY`, above 1.0 `angle BREAKS IT`. The last line names the reading that a crooked phone moves least. Written, **not run**; every threshold is a first guess.
 
 ## Conventions
 

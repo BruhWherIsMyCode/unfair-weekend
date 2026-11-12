@@ -25,12 +25,15 @@ from collections import deque
 from datetime import datetime
 
 from analysis import config
+from analysis import angle_summary
 from analysis.droop_summary import format_summary, summarise
-from analysis.face_metric import clip_reading, frame_reading
-from analysis.guide import Guide, Signal, face_plan, verdict_lines
+from analysis.face_metric import (
+    clip_reading, frame_reading, matches_asked, mismatch_warning, seen_side, seen_text_face)
+from analysis.guide import Guide, Signal, angle_plan, face_plan, verdict_lines
 
 LABEL_KEYS = {ord("n"): "normal", ord("l"): "acted_left", ord("r"): "acted_right"}
-CSV_FIELDS = ["trial", "label", "quality", "corner_height", "corner_lift", "smile_score",
+CSV_FIELDS = ["trial", "label", "pose", "quality", "corner_height", "corner_lift", "smile_score",
+              "corner_height_3d", "yaw_deg", "pitch_deg", "seen", "matches_asked",
               "frames_usable", "frames_total", "reason"]
 
 
@@ -53,10 +56,16 @@ def main(argv=None) -> int:
                         help="old key-driven mode (n/l/r label, SPACE starts a trial)")
     parser.add_argument("--per-label", type=int, default=None,
                         help="guided mode: trials per label (default: config.GUIDE_FACE_PER_LABEL)")
+    parser.add_argument("--angle", action="store_true",
+                        help="the angle test: crooked-phone poses against acted droops (guided)")
+    parser.add_argument("--per-pose", type=int, default=None,
+                        help="angle test: trials per pose (default: config.GUIDE_ANGLE_PER_POSE)")
     args = parser.parse_args(argv)
-    if args.no_angle_check:
+    if args.no_angle_check or args.angle:
+        # the angle test wants to SEE the effect of the angle, so frames are not dropped for it
         config.CHECK_HEAD_ANGLES = False
-    guided = not args.manual
+    angle_mode = args.angle
+    guided = angle_mode or not args.manual
     LAST_RESULT.clear()
 
     if not config.MODEL_PATH.exists():
@@ -93,16 +102,26 @@ def main(argv=None) -> int:
             tr["writer"].release()
         clip = clip_reading(tr["readings"])
         n = len(trials) + 1
+        usable = clip.quality == "usable"
+        seen = seen_side(clip.corner_height) if usable else None
+        match = matches_asked(tr["label"], clip.corner_height) if usable else None
         row = {
-            "trial": n, "label": tr["label"], "quality": clip.quality,
+            "trial": n, "label": tr["label"], "pose": tr.get("pose", ""), "quality": clip.quality,
             "corner_height": clip.corner_height, "corner_lift": clip.corner_lift,
-            "smile_score": clip.smile_score, "frames_usable": clip.frames_usable,
+            "smile_score": clip.smile_score, "corner_height_3d": clip.corner_height_3d,
+            "yaw_deg": clip.yaw_deg, "pitch_deg": clip.pitch_deg,
+            "seen": seen or "",
+            "matches_asked": "" if match is None else ("yes" if match else "no"),
+            "frames_usable": clip.frames_usable,
             "frames_total": clip.frames_total, "reason": "; ".join(clip.reasons),
         }
         trials.append(row)
-        print("trial %d | %s | %s | corner_height %s | corner_lift %s | smile_score %s %s" % (
-            n, tr["label"], clip.quality, _fmt(clip.corner_height), _fmt(clip.corner_lift),
-            _fmt(clip.smile_score), ("| " + row["reason"]) if row["reason"] else ""))
+        print("trial %d | %s | %s | %s | corner_height %s | corner_lift %s | smile_score %s "
+              "| corner_height_3d %s | yaw %s pitch %s | seen %s %s" % (
+                  n, tr["label"], tr.get("pose", "") or "-", clip.quality,
+                  _fmt(clip.corner_height), _fmt(clip.corner_lift), _fmt(clip.smile_score),
+                  _fmt(clip.corner_height_3d), _fmt(clip.yaw_deg), _fmt(clip.pitch_deg),
+                  row["seen"] or "-", ("| " + row["reason"]) if row["reason"] else ""))
         new_file = not csv_path.exists()
         with open(csv_path, "a", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=CSV_FIELDS)
@@ -115,7 +134,8 @@ def main(argv=None) -> int:
     cur = None  # guided mode: the trial being measured
     done_since = None
     if guided:
-        guide = Guide(face_plan(args.per_label), "face")
+        plan = angle_plan(args.per_pose) if angle_mode else face_plan(args.per_label)
+        guide = Guide(plan, "face")
 
     # Resizable window that keeps its shape: the full layout is ~1500x780 and
     # may not fit a laptop screen. Drag the corner to shrink it.
@@ -155,7 +175,8 @@ def main(argv=None) -> int:
                                 base, len(trials) + 1, guide.current.label))
                             writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"),
                                                      config.RECORD_FPS, (w, h))
-                        cur = {"label": guide.current.label, "readings": [], "writer": writer}
+                        cur = {"label": guide.current.label, "pose": guide.current.pose,
+                               "readings": [], "writer": writer}
                     cur["readings"].append(fr)
                     if cur["writer"] is not None:
                         cur["writer"].write(frame)
@@ -163,14 +184,23 @@ def main(argv=None) -> int:
                     if cur is not None:
                         row = finish_trial(cur)
                         cur = None
-                        guide.trial_finished(row["quality"] == "usable", row["reason"])
+                        seen_text, warn = "", ""
+                        if row["quality"] == "usable":
+                            seen_text = seen_text_face(row["corner_height"])
+                            warn = mismatch_warning(row["label"], row["corner_height"]) or ""
+                        guide.trial_finished(row["quality"] == "usable", row["reason"],
+                                             seen_text=seen_text, warning=warn)
                     else:  # no frame was collected (camera stalled): count it as unusable
                         guide.trial_finished(False, "too few usable frames")
                 if view.done:
                     if done_since is None:
                         done_since = now
-                        text_now = format_summary(summarise(trials))
-                        guide.summary_lines = tuple(verdict_lines(text_now, "face"))
+                        if angle_mode:
+                            guide.summary_lines = tuple(
+                                angle_summary.format_lines(angle_summary.summarise(trials)))
+                        else:
+                            text_now = format_summary(summarise(trials))
+                            guide.summary_lines = tuple(verdict_lines(text_now, "face"))
                     view = dataclasses.replace(view, summary_lines=guide.summary_lines)
                     label = "normal"
                 elif guide.current is not None:
@@ -221,7 +251,10 @@ def main(argv=None) -> int:
     cap.release()
     cv2.destroyAllWindows()
 
-    text = format_summary(summarise(trials))
+    if angle_mode:
+        text = angle_summary.format_summary(angle_summary.summarise(trials))
+    else:
+        text = format_summary(summarise(trials))
     print("\n" + text)
     if guided and guide.notes:
         print("\nNotes: " + "; ".join(guide.notes))
@@ -230,7 +263,9 @@ def main(argv=None) -> int:
         fh.write(text + "\n")
     print("\nSaved: %s\n       %s" % (csv_path, summary_path))
     LAST_RESULT.update({"summary": text, "csv": csv_path, "summary_path": summary_path,
-                        "trials": len(trials)})
+                        "trials": len(trials), "angle": angle_mode,
+                        "verdict_lines": angle_summary.format_lines(angle_summary.summarise(trials))
+                        if angle_mode else []})
     return 0
 
 

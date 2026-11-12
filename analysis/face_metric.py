@@ -22,8 +22,11 @@ import numpy as np
 from analysis import config
 
 Point = Tuple[float, float]
+Point3 = Tuple[float, float, float]
 
 POINT_NAMES = ("her_left_eye", "her_right_eye", "her_left_mouth", "her_right_mouth")
+# The 3D points: the four above (same sides) plus two that do not move when smiling.
+POINT3_NAMES = POINT_NAMES + ("forehead", "nose_bridge")
 
 
 @dataclass
@@ -40,6 +43,8 @@ class FrameObservation:
     roll_deg: Optional[float] = None
     timestamp_ms: int = 0
     mesh: List[Point] = field(default_factory=list)  # all face points in pixels, for display only
+    # Pixel 3D = (x * w, y * h, z * w). Keys: POINT3_NAMES. Empty when not available.
+    points3d: Dict[str, Point3] = field(default_factory=dict)
 
 
 @dataclass
@@ -50,6 +55,7 @@ class FrameReading:
     below_left: Optional[float] = None  # her left mouth corner below the eye line, in units
     below_right: Optional[float] = None
     corner_height: Optional[float] = None  # below_left - below_right
+    corner_height_3d: Optional[float] = None  # the same, measured in the face's own 3D frame
     smile_strength: Optional[float] = None
     smile_score: Optional[float] = None  # mouthSmileRight - mouthSmileLeft
     yaw_deg: Optional[float] = None
@@ -69,12 +75,16 @@ class ClipReading:
     frames_usable: int = 0
     peak_strength: Optional[float] = None
     relaxed_strength: Optional[float] = None
+    corner_height_3d: Optional[float] = None
+    yaw_deg: Optional[float] = None  # median over the usable frames, None when unknown
+    pitch_deg: Optional[float] = None
 
     def readings(self) -> Dict[str, Optional[float]]:
         return {
             "corner_height": self.corner_height,
             "corner_lift": self.corner_lift,
             "smile_score": self.smile_score,
+            "corner_height_3d": self.corner_height_3d,
         }
 
 
@@ -129,6 +139,100 @@ def angles_from_matrix(matrix) -> Tuple[Optional[float], Optional[float], Option
     pitch = math.degrees(math.asin(max(-1.0, min(1.0, -rot[1, 2]))))
     roll = math.degrees(math.atan2(rot[1, 0], rot[1, 1]))
     return yaw, pitch, roll
+
+
+# ---- The face's own 3D frame -------------------------------------------------------
+
+def face_frame(points3d: Optional[Dict[str, Point3]]):
+    """Axes of the face's own frame, from points that do not move when smiling.
+
+    Returns (origin, x_axis, down_axis, unit) as numpy arrays / float, or None when
+    points are missing or degenerate. origin = her right eye corner; x_axis points to
+    her left; down_axis points from the forehead towards the chin, made
+    perpendicular to x_axis; unit = 3D eye-corner distance.
+    """
+    if not points3d:
+        return None
+    try:
+        eye_l = np.asarray(points3d["her_left_eye"], dtype=float)
+        eye_r = np.asarray(points3d["her_right_eye"], dtype=float)
+        forehead = np.asarray(points3d["forehead"], dtype=float)
+        if eye_l.shape != (3,) or eye_r.shape != (3,) or forehead.shape != (3,):
+            return None
+        vec = eye_l - eye_r
+        unit = float(np.linalg.norm(vec))
+        if not unit > 1e-9:
+            return None
+        x_axis = vec / unit
+        down = (eye_l + eye_r) / 2.0 - forehead
+        down = down - float(np.dot(down, x_axis)) * x_axis  # Gram-Schmidt
+        dn = float(np.linalg.norm(down))
+        if not dn > 1e-9:
+            return None
+        down = down / dn
+        if not (np.all(np.isfinite(x_axis)) and np.all(np.isfinite(down))):
+            return None
+        return eye_r, x_axis, down, unit
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def corner_height_3d(points3d: Optional[Dict[str, Point3]]) -> Optional[float]:
+    """Mouth-corner height difference in the face's own 3D frame (positive = her left lower).
+
+    None when points are missing or degenerate. Never raises.
+    """
+    frame = face_frame(points3d)
+    if frame is None:
+        return None
+    try:
+        origin, _x, down, unit = frame
+        left = np.asarray(points3d["her_left_mouth"], dtype=float)
+        right = np.asarray(points3d["her_right_mouth"], dtype=float)
+        below_l = float(np.dot(left - origin, down)) / unit
+        below_r = float(np.dot(right - origin, down)) / unit
+        value = below_l - below_r
+    except (KeyError, TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
+
+
+# ---- What was seen, in plain words ------------------------------------------------------
+
+def seen_side(corner_height_value: Optional[float]) -> Optional[str]:
+    """'level' / 'left' / 'right' (her own side that is lower), None when unknown."""
+    if corner_height_value is None:
+        return None
+    if abs(corner_height_value) < config.SEEN_LEVEL:
+        return "level"
+    return "left" if corner_height_value > 0 else "right"
+
+
+def seen_text_face(corner_height_value: Optional[float]) -> str:
+    side = seen_side(corner_height_value)
+    if side is None:
+        return "I saw: nothing I could measure"
+    if side == "level":
+        return "I saw: level"
+    return "I saw: your %s corner lower by %.2f" % (side.upper(), abs(corner_height_value))
+
+
+def matches_asked(label: str, corner_height_value: Optional[float]) -> Optional[bool]:
+    """For an acted trial: did what was seen match the side asked? None for other labels."""
+    if label not in ("acted_left", "acted_right"):
+        return None
+    side = seen_side(corner_height_value)
+    if side is None:
+        return None
+    return side == ("left" if label == "acted_left" else "right")
+
+
+def mismatch_warning(label: str, corner_height_value: Optional[float]) -> Optional[str]:
+    """The yellow second line for an acted trial that did not look like the asked droop."""
+    if matches_asked(label, corner_height_value) is False:
+        word = "LEFT" if label == "acted_left" else "RIGHT"
+        return "That did not look like a %s droop. Saved as you did it, not as asked." % word
+    return None
 
 
 # ---- One frame -------------------------------------------------------------------
@@ -198,6 +302,7 @@ def frame_reading(obs: Optional[FrameObservation]) -> Optional[FrameReading]:
         below_left=below_left,
         below_right=below_right,
         corner_height=corner_height,
+        corner_height_3d=corner_height_3d(obs.points3d),
         smile_strength=smile_strength,
         smile_score=smile_score,
         **base,
@@ -256,12 +361,20 @@ def clip_reading(frame_readings: Sequence[Optional[FrameReading]]) -> ClipReadin
     scores = [f.smile_score for f in peak if f.smile_score is not None]
     smile_score = _median(scores) if scores else None
 
+    heights3d = [f.corner_height_3d for f in peak if f.corner_height_3d is not None]
+    height3d = _median(heights3d) if heights3d else None
+    yaws = [f.yaw_deg for f in usable if f.yaw_deg is not None]
+    pitches = [f.pitch_deg for f in usable if f.pitch_deg is not None]
+
     return ClipReading(
         quality="usable",
         reasons=[],
         corner_height=corner_height,
         corner_lift=corner_lift,
         smile_score=smile_score,
+        corner_height_3d=height3d,
+        yaw_deg=_median(yaws) if yaws else None,
+        pitch_deg=_median(pitches) if pitches else None,
         frames_total=total,
         frames_usable=n,
         peak_strength=peak_strength,

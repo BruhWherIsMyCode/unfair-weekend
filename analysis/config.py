@@ -29,6 +29,8 @@ MODEL_URL = (
 # geometry (in the un-mirrored image her left is on the image's right).
 EYE_OUTER_CORNER_IDS = (33, 263)  # outer eye corners, from memory, confirm with the wink check
 MOUTH_CORNER_IDS = (61, 291)  # mouth corners, from memory, confirm with the wink check
+FOREHEAD_ID = 10  # forehead point, from memory, unverified (used for the face's own 3D frame)
+NOSE_BRIDGE_ID = 168  # nose-bridge point, from memory, unverified
 
 # ---- Frame usability --------------------------------------------------------
 MIN_EYE_DISTANCE_PX = 40.0  # smaller face than this (pixels between eyes) is unusable; first guess
@@ -49,6 +51,7 @@ BASELINE_NEEDED = 5  # values needed before the baseline is ready (else "learnin
 MIN_HALF_WIDTH = {  # minimum half-width of the usual range per metric, so a steady person does not trigger on noise; first guess
     "corner_height": 0.02,
     "corner_lift": 0.02,
+    "corner_height_3d": 0.02,  # first guess
     "smile_score": 0.08,
     "hand_sink": 0.05,  # first guess
     "hand_height": 0.10,  # first guess
@@ -99,5 +102,13 @@ GUIDE_LOWER_NO_HAND_S = 0.5  # "Lower your hand" ends after no hand was seen thi
 GUIDE_LOWER_MAX_S = 3.0  # or after this many seconds; first guess
 GUIDE_DONE_CLOSE_S = 60.0  # the finished screen closes by itself after this; first guess
 
+# ---- "I saw" texts and the angle test; every number is a first guess -------------------
+SEEN_LEVEL = 0.02  # |corner_height| below this is shown as "level"; first guess
+SEEN_SINK = 0.05  # hand sink below this is shown as "hand steady"; first guess
+SEEN_PALM_TURN = 0.10  # palm turn above this is added to the hand "I saw" text; first guess
+GUIDE_ANGLE_PER_POSE = 3  # trials per pose in the angle test; first guess
+ANGLE_RATIO_OK = 0.5  # angle shift / droop size below this is "angle OK"; first guess
+ANGLE_RATIO_RISKY = 1.0  # above this is "angle BREAKS IT", in between "angle RISKY"; first guess
+
 # ---- Output -----------------------------------------------------------------
-METRICS = ("corner_height", "corner_lift", "smile_score")  # the three candidate readings
+METRICS = ("corner_height", "corner_lift", "smile_score", "corner_height_3d")  # the candidate readings

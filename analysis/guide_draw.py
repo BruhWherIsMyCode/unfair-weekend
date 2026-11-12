@@ -46,9 +46,11 @@ def _banner(pic, view: GuideView) -> int:
         big -= 0.1
         lines = wrap(view.instruction, big, thick, width)
     detail = wrap(view.detail, small, sthick, width)[:2] if view.detail else []
+    warn = wrap(view.warning, small, sthick, width)[:2] if view.warning else []
     line_h = int(big * 38)
     top = 14
-    h = top + len(lines) * line_h + (len(detail) * 28 + 6 if detail else 0) + 10
+    h = (top + len(lines) * line_h + (len(detail) * 28 + 6 if detail else 0)
+         + (len(warn) * 28 + (0 if detail else 6) if warn else 0) + 10)
     cv2.rectangle(pic, (0, 0), (pw, h), DARK, -1)
     cv2.line(pic, (0, h), (pw, h), COLORS.get(view.color, WHITE), 3)
     y = top + int(big * 28)
@@ -58,6 +60,9 @@ def _banner(pic, view: GuideView) -> int:
     y -= line_h - 30
     for ln in detail:
         cv2.putText(pic, ln, (margin, y), FONT, small, GREY, sthick, cv2.LINE_AA)
+        y += 28
+    for ln in warn:
+        cv2.putText(pic, ln, (margin, y), FONT, small, YELLOW, sthick, cv2.LINE_AA)
         y += 28
     if view.progress:
         (tw, _), _ = cv2.getTextSize(view.progress, FONT, 0.6, 1)

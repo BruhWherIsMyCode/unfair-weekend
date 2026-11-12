@@ -73,10 +73,29 @@ class FacePointsExtractor:
             lm = lms[idx]
             return (lm.x * w, lm.y * h)
 
+        def px3(idx: int):
+            # MediaPipe's z uses roughly the same scale as x, so z * w.
+            lm = lms[idx]
+            return (lm.x * w, lm.y * h, lm.z * w)
+
         eye_a, eye_b = (px(i) for i in config.EYE_OUTER_CORNER_IDS)
         mouth_a, mouth_b = (px(i) for i in config.MOUTH_CORNER_IDS)
         eye_l, eye_r = assign_sides(eye_a, eye_b)
         mouth_l, mouth_r = assign_sides(mouth_a, mouth_b)
+
+        # The same pairs in 3D, sides assigned the same way (by the picture x).
+        eye3_a, eye3_b = (px3(i) for i in config.EYE_OUTER_CORNER_IDS)
+        mouth3_a, mouth3_b = (px3(i) for i in config.MOUTH_CORNER_IDS)
+        eye3_l, eye3_r = (eye3_a, eye3_b) if eye_a[0] >= eye_b[0] else (eye3_b, eye3_a)
+        mouth3_l, mouth3_r = (mouth3_a, mouth3_b) if mouth_a[0] >= mouth_b[0] else (mouth3_b, mouth3_a)
+        points3d = {
+            "her_left_eye": eye3_l,
+            "her_right_eye": eye3_r,
+            "her_left_mouth": mouth3_l,
+            "her_right_mouth": mouth3_r,
+            "forehead": px3(config.FOREHEAD_ID),
+            "nose_bridge": px3(config.NOSE_BRIDGE_ID),
+        }
 
         blendshapes: Dict[str, float] = {}
         if result.face_blendshapes:
@@ -103,4 +122,5 @@ class FacePointsExtractor:
             roll_deg=roll,
             timestamp_ms=ts,
             mesh=[(lm.x * w, lm.y * h) for lm in lms],
+            points3d=points3d,
         )

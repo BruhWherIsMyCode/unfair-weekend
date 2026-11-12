@@ -22,7 +22,7 @@ def test_shape_and_keys_when_ready():
     assert r["reading"]["side"] == "left"
     assert set(r["baseline"]) == {"sessions", "needed", "ready"}
     assert r["baseline"]["ready"] is True
-    assert set(r["all_readings"]) == {"corner_height", "corner_lift", "smile_score"}
+    assert set(r["all_readings"]) == {"corner_height", "corner_lift", "smile_score", "corner_height_3d"}
 
 
 def test_learning_baseline_never_outside():

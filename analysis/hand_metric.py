@@ -261,3 +261,19 @@ def hand_clip_reading(
         frames_total=total,
         frames_usable=n,
     )
+
+
+def seen_text_hand(hand_sink: Optional[float], palm_turn: Optional[float],
+                   dropped: bool = False) -> str:
+    """What was seen in a hand trial, in plain words. No mismatch logic for hands."""
+    if dropped:
+        text = "I saw: hand dropped out of view"
+    elif hand_sink is None:
+        return "I saw: nothing I could measure"
+    elif hand_sink < config.SEEN_SINK:
+        text = "I saw: hand steady"
+    else:
+        text = "I saw: hand sank %.2f" % hand_sink
+    if palm_turn is not None and palm_turn > config.SEEN_PALM_TURN:
+        text += ", palm turned in %.2f" % palm_turn
+    return text

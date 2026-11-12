@@ -39,6 +39,7 @@ class Trial:
     detail: str
     block: str = ""  # block title, e.g. "Part 2 of 3: droop on your LEFT side"
     side: Optional[str] = None  # hand test: "left" or "right"
+    pose: str = ""  # angle test: straight / low / left / right
 
 
 @dataclass
@@ -63,25 +64,54 @@ class GuideView:
     done: bool = False
     block: str = ""
     summary_lines: Tuple[str, ...] = ()
+    warning: str = ""  # a yellow second line on the RESULT card (e.g. wrong side)
 
 
 # ---- plans ----------------------------------------------------------------------------
+
+ACTED_LEFT_TEXT = ("Now ACT A DROOP on your LEFT side: smile with your RIGHT side only, "
+                   "keep your LEFT mouth corner down.")
+ACTED_LEFT_DETAIL = "Do it when the text says SMILE. Your right side smiles as usual."
+ACTED_RIGHT_TEXT = ("Now ACT A DROOP on your RIGHT side: smile with your LEFT side only, "
+                    "keep your RIGHT mouth corner down.")
+ACTED_RIGHT_DETAIL = "Do it when the text says SMILE. Your left side smiles as usual."
+SMILE_DETAIL = "Relax your face first, then smile when the text says SMILE."
+
 
 def face_plan(per_label: Optional[int] = None) -> List[Trial]:
     n = config.GUIDE_FACE_PER_LABEL if per_label is None else per_label
     blocks = [
         ("normal", "Part 1 of 3: normal smiles",
          "Look at the camera. When it says SMILE, give a big normal smile.",
-         "Relax your face first, then smile when the text says SMILE."),
-        ("acted_left", "Part 2 of 3: droop on your LEFT side",
-         "Now ACT A DROOP on your LEFT side: smile with your RIGHT side only, keep your LEFT mouth corner down.",
-         "Do it when the text says SMILE. Your right side smiles as usual."),
-        ("acted_right", "Part 3 of 3: droop on your RIGHT side",
-         "Now ACT A DROOP on your RIGHT side: smile with your LEFT side only, keep your RIGHT mouth corner down.",
-         "Do it when the text says SMILE. Your left side smiles as usual."),
+         SMILE_DETAIL),
+        ("acted_left", "Part 2 of 3: droop on your LEFT side", ACTED_LEFT_TEXT, ACTED_LEFT_DETAIL),
+        ("acted_right", "Part 3 of 3: droop on your RIGHT side", ACTED_RIGHT_TEXT, ACTED_RIGHT_DETAIL),
     ]
     return [Trial("face", label, text, detail, block) for label, block, text, detail in blocks
             for _ in range(n)]
+
+
+def angle_plan(per_pose: Optional[int] = None) -> List[Trial]:
+    """The angle test: does a crooked phone move the readings as much as a droop does?"""
+    n = config.GUIDE_ANGLE_PER_POSE if per_pose is None else per_pose
+    blocks = [
+        ("normal", "straight", "Part 1 of 6: normal smiles, looking straight",
+         "Look straight at the camera. Give a normal smile when it says SMILE.", SMILE_DETAIL),
+        ("normal", "low", "Part 2 of 6: normal smiles, chin up (phone held low)",
+         "Lift your chin a little, as if the phone were held low. Normal smile.", SMILE_DETAIL),
+        ("normal", "left", "Part 3 of 6: normal smiles, head turned to your LEFT",
+         "Turn your head a little to your LEFT, keep your eyes on the screen. Normal smile.",
+         SMILE_DETAIL),
+        ("normal", "right", "Part 4 of 6: normal smiles, head turned to your RIGHT",
+         "Turn your head a little to your RIGHT, keep your eyes on the screen. Normal smile.",
+         SMILE_DETAIL),
+        ("acted_left", "straight", "Part 5 of 6: droop on your LEFT side, looking straight",
+         ACTED_LEFT_TEXT, ACTED_LEFT_DETAIL),
+        ("acted_right", "straight", "Part 6 of 6: droop on your RIGHT side, looking straight",
+         ACTED_RIGHT_TEXT, ACTED_RIGHT_DETAIL),
+    ]
+    return [Trial("face", label, text, detail, block, None, pose)
+            for label, pose, block, text, detail in blocks for _ in range(n)]
 
 
 def hand_plan(per_mode: Optional[int] = None) -> List[Trial]:
@@ -142,7 +172,7 @@ def verdict_lines(text: str, test: str) -> List[str]:
                 metric = m.group(1)
             elif line.startswith("acted_left") or line.startswith("acted_right"):
                 out.append("%s: %s" % (metric, line))
-            elif line.startswith("best metric"):
+            elif line.startswith("best metric") or line.endswith("(excluded)"):
                 out.append(line)
         else:
             if line.startswith("her ") and " hand:" in line:
@@ -181,6 +211,8 @@ class Guide:
         self._wrong_time = 0.0
         self._next_idx = 0
         self._message = ""
+        self._seen_text = ""
+        self._warning = ""
         self._good = False
         self._no_hand_since: Optional[float] = None
         self._intro_shown: set = set()
@@ -220,12 +252,20 @@ class Guide:
         self._ready_since = None
         self._wrong_time = 0.0
 
-    def trial_finished(self, usable: bool, reason: str = "") -> None:
-        """The caller's verdict on the clip. Ignored unless a trial was being measured."""
+    def trial_finished(self, usable: bool, reason: str = "", *, seen_text: str = "",
+                       warning: str = "") -> None:
+        """The caller's verdict on the clip. Ignored unless a trial was being measured.
+
+        seen_text: what the tool saw, in plain words, shown under the message.
+        warning: an optional yellow second line (e.g. the wrong side was shown).
+        Neither repeats the trial: only `usable` decides that.
+        """
         if self.state != MEASURE:
             return
         now = self._now
         self.outcomes.append((self.idx, bool(usable), reason or ""))
+        self._seen_text = seen_text or ""
+        self._warning = warning or ""
         why = plain_reason(reason)
         if usable:
             self._message, self._good = "Got it.", True
@@ -343,7 +383,8 @@ class Guide:
             return GuideView(t.instruction, t.detail, "%s %.1f" % (name, left), progress, name,
                              "green", collect=True, block=block)
         if s == RESULT:
-            return GuideView(self._message, "", None, progress, RESULT, "white", block=block)
+            return GuideView(self._message, self._seen_text, None, progress, RESULT, "white",
+                             block=block, warning=self._warning)
         if s == LOWER:
             return GuideView("Lower your hand", "", None, progress, LOWER, "yellow", block=block)
         return GuideView("Finished. Results below.", "", None, "Done", DONE, "white", done=True,

@@ -26,7 +26,7 @@ from datetime import datetime
 
 from analysis import config
 from analysis.guide import Guide, Signal, hand_plan, verdict_lines
-from analysis.hand_metric import hand_clip_reading, hand_frame_reading
+from analysis.hand_metric import hand_clip_reading, hand_frame_reading, seen_text_hand
 from analysis.hand_summary import format_summary, summarise
 
 CSV_FIELDS = ["trial", "hand", "mode", "quality", "hand_sink", "hand_height", "palm_turn",
@@ -173,7 +173,12 @@ def main(argv=None) -> int:
                     if trial is not None:
                         row = finish_trial(trial)
                         trial = None
-                        guide.trial_finished(row["quality"] == "usable", row["reason"])
+                        seen = ""
+                        if row["quality"] == "usable":
+                            seen = seen_text_hand(row["hand_sink"], row["palm_turn"],
+                                                  bool(row["dropped"]))
+                        guide.trial_finished(row["quality"] == "usable", row["reason"],
+                                             seen_text=seen)
                     else:  # no frame was collected (camera stalled): count it as unusable
                         guide.trial_finished(False, "too few usable frames")
                 if view.done:
