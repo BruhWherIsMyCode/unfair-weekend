@@ -29,7 +29,7 @@ Plus a demo overlay that puts the live numbers on screen. The organisers' guide 
 
 1. **The Claude Design artifact** (link or export). Download it, read it, and implement it faithfully in SwiftUI: colours, type sizes, spacing, copy. If it has not arrived, build every screen as plain unstyled SwiftUI wired to `MockCheckInSession`, and restyle when it comes. Do not invent a visual identity in the meantime.
 2. **A physical iPhone** and an Apple ID for signing. The iOS Simulator has no camera, so the real call can only be tried on a device. Use the Simulator with the mock for layout work.
-3. The decision on how the phone stands during the call (context §11, point 4). It sets the orientation you support.
+3. A cheap phone stand for the demo phone (see "Decisions" below: the phone stands, portrait).
 
 ## Screens
 
@@ -45,15 +45,31 @@ Parent role:
 
 Family role:
 
-6. **Message.** One card: "As usual" with her answers; or the alert text, the clip, a "Call her" button (`tel:` link) and the line "If she seems unwell, call 112."; or "No answer". The text comes from the backend. Display it as given, do not rewrite it.
+6. **Message.** One card per `Message`, newest first. The text comes from the backend. Display it exactly as given: do not rewrite it, do not add your own 112 line (the backend text already ends with it). Five kinds, all must be designed:
+   - `as_usual`: the text, which carries her answers.
+   - `change_noticed`: the text, the clip (plays inline), and one large button "Call {name}" (`tel:` link to her number from Setup).
+   - `learning`: the text ("Still learning {name}'s usual, n of 5 calls"), with a small progress mark.
+   - `incomplete`: the text and the same "Call {name}" button.
+   - `no_answer`: the text and the same "Call {name}" button.
 
 Both:
 
-7. **Setup.** Choose role, her name, caller name. Minimal.
+7. **Setup.** Choose role. Parent phone: her name, caller name. Family phone: her name and **her phone number** (stored on this phone only, used by the `tel:` button; it is not sent to the backend). Minimal.
 8. **Demo overlay**, toggled by a hidden gesture. For each sign: the live value, her usual range, and a mark when it is outside. Attempt 1 and attempt 2. The count from `stats`, as "N false alarms in M normal sessions".
 9. **Lab switch** inside setup: pick the person and label the session `normal` or `acted`. When the label is `acted`, show "ACTED" on screen for the whole call and burn it into the clip.
 
 No dashboard, no history charts, no settings beyond these. A button that does nothing is worse than no button.
+
+## Decisions (12 Nov, Alex and Valdo)
+
+These close the open points in this brief. Where they differ from the text above or from the context file, they win.
+
+- **How the phone stands.** During the call the phone stands upright in portrait on the table, on a stand or leaning on something, about an arm and a half away; she sits back. She answers holding it, then the avatar says `setup_phone` and the app shows a picture of exactly that before the first task. No landscape.
+- **Minimum iOS 17, portrait only, iPhone only.**
+- **Audio session:** owned by Core, see Technical notes.
+- **Family message:** the app shows the backend text verbatim. The 112 line and the pronoun in it are the backend's job. The button says "Call {name}" with her name, not "Call her", so it is right for any person, including a male teammate in the demo.
+- **Her phone number** is entered on the Family phone in Setup and stays on that phone. Without it the call button is hidden, never dead.
+- **"ACTED" on the clip:** after the attempt is recorded, export a copy with the word drawn on top (`AVMutableVideoComposition` + `AVVideoCompositionCoreAnimationTool`) and hand that copy to Core. Part of M3. If it is not working by the Saturday 12:00 freeze, drop it and say in the video that acted clips are not marked; the on-screen "ACTED" during the call stays.
 
 ## Design constraints for an older user
 
@@ -64,11 +80,11 @@ No dashboard, no history charts, no settings beyond these. A button that does no
 
 ## Technical notes [proposal]
 
-- SwiftUI. Choose the minimum iOS version together with Agent 3; it must match the package.
+- SwiftUI, **minimum iOS 17**, iPhone only, **portrait only**. Agent 3's package uses the same minimum.
 - One `AVCaptureSession` with the front camera and the microphone, video and audio data outputs. Pass every buffer to Core with `ingest(video:)` and `ingest(audio:)`. Do no image analysis yourself.
 - `ClipRecorder`: write each task attempt to a short mp4 (10 s or less, modest resolution). Hand the file URL to Core through `clipProvider`. Delete clips that were not used.
 - Front camera preview is mirrored. That is fine for display. Do not flip or relabel anything that goes to Core.
-- The avatar's voice plays on the speaker while the microphone is open. Agree with Agent 3 who configures `AVAudioSession`, so playback and recording do not fight.
+- **`AVAudioSession` is configured by Core (Agent 3), not by the app.** Core knows when the avatar speaks and when to listen. The app never calls `AVAudioSession` itself and sets `captureSession.automaticallyConfiguresApplicationAudioSession = false`, so the capture session does not overwrite Core's setup.
 - Permission prompts (camera, microphone, speech recognition) need plain usage strings that follow the claim rules.
 - The ring works only while the app is open. That is accepted for the demo and we say so.
 
