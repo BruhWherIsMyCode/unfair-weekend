@@ -21,6 +21,45 @@ Its six steps and what each one is in the app:
 | 5 Calling | The real system call screen after `tel:` (see below). Build the design's version only as the fallback |
 | 6 Declined | **Home, after the call**: "Declined at 13:02 / Call Fedya again", Fedya's row says "you called at 13:02" |
 
+## Tap map (from the design's click handlers, `unpacked/template.html`)
+
+Every tappable element in the design and where it leads. Build exactly these, nothing else is tappable.
+
+| Screen | Element | Leads to |
+|---|---|---|
+| Lock screen (iOS) | the "Ona's calls" notification ("Call Fedya now. He seems different from his usual.") | app opens on **Home (alert)** |
+| Home (alert) | amber card "NOT HIS USUAL / Call Fedya now / Same on both tries / 10 second clip" | **Alert** |
+| Home (alert) | white row under it: Fedya, "Dad, last call 13:01" | **Alert** |
+| Home | Ona and Aldona rows ("As usual") | not tappable |
+| Alert | "‹ Family" back button, top left | **Home (alert)** |
+| Alert | clip area | play / pause (the design auto-plays, 0:00 → 0:10, loops) |
+| Alert | green "Call Fedya" | real call: `tel:<number from the panel>` (design step 5 is the system call screen) |
+| Alert | red "Call 112" | **fake** 112 calling screen with "DEMO – not dialled", 4 s, back to Alert. Never dials. Not wired in the design; this is our addition |
+| Alert | grey "He's fine" | **Home (as usual)**: Fedya's card gone, Fedya listed "As usual". Not wired in the design; this is our addition |
+| Calling (fallback only) | whole screen / red end button | **Home (declined)** |
+| Home (declined) | green "Call Fedya" under "Declined at 13:02 / Call Fedya again" | same as Alert → Call Fedya |
+| Home (declined) | Fedya row "Dad, you called at 13:02" | **Alert** |
+
+Texts to copy exactly (status bar times in the design are 12:58 / 13:01 / 13:02 / 13:03; in the app use the real clock):
+- Home alert card: "NOT HIS USUAL" · time · "Call Fedya now" · "Same on both tries" · "10 second clip".
+- Alert: "Fedya", "Check-in at 13:01, 1 min 40 s", clip label "clip, 2nd try", "NOT HIS USUAL", "Call Fedya now", section "Report": "Fedya seemed different from his usual during today's check-in." / "He says he took his medicine and feels a bit tired." Buttons "Call Fedya", "Call 112", "He's fine", footer "If he seems unwell, call 112."
+- Home declined: "Declined at HH:MM", "Call Fedya again", row "Dad, you called at HH:MM".
+- "Everyone else": Ona — Mum. "Going to the market." — As usual 09:02; Aldona — Aunt. "Watching the news." — As usual 09:15.
+- Colours from the markup: amber card `#FCE8C4`, amber text `#8A5406` / `#5A3804`, amber outline `#E7B866`, green button `#237A3A`, red button `#C4362F`, grey button `#EAE3D9`, ink `#1F1B16`, secondary `#6B6359`, back link `#8A5A33`.
+
+## Stage runbook (what the operator does, second by second)
+
+1. **Backstage, 5 min before:** open the app → long-press "Family" 2 s → demo panel → check Fedya's number → **Reset** → delay 60 s → **Arm** → lock the phone. Volume max, Focus off.
+2. **Fedya on stage** talks; his own iPhone 17 gets the check-in video call (not our app); he acts unwell; the call ends.
+3. **iPhone 18 lock screen:** notification with loud sound. Start mirroring to the Mac now if not already on.
+4. Tap the notification → Face ID → **Home (alert)**, amber card above Fedya.
+5. Tap the amber card → **Alert**, clip plays. Pause 3–4 s so the room reads the report.
+6. Tap **Call Fedya** → system call screen → Fedya's phone rings on stage → Fedya declines.
+7. The app comes back on **Home (declined)**. Fedya continues the talk.
+8. Rehearsal again: long-press "Family" → **Reset** → **Arm**.
+
+If there is no signal: in the panel turn on **Fake call screen** before step 1; step 6 then shows our calling screen for 4 s and goes to Declined.
+
 ## The scene
 
 1. Before going on stage: operator opens the hidden demo panel, taps **Arm**, locks the phone.
