@@ -50,6 +50,10 @@ MIN_HALF_WIDTH = {  # minimum half-width of the usual range per metric, so a ste
     "corner_height": 0.02,
     "corner_lift": 0.02,
     "smile_score": 0.08,
+    "hand_sink": 0.05,  # first guess
+    "hand_height": 0.10,  # first guess
+    "palm_turn": 0.10,  # first guess
+    "hand_shake": 0.02,  # first guess
 }
 DEFAULT_MIN_HALF_WIDTH = 0.02  # used for a metric not listed above; first guess
 BASELINE_LABELS = ("normal", "live")  # session labels that may enter the baseline ("acted" never does)
@@ -65,6 +69,21 @@ DEFAULT_FPS = 30.0  # used by measure_clip when a file does not report its fps
 
 # ---- Droop summary ------------------------------------------------------------
 MIN_NORMAL_SPREAD = 1e-6  # floor for normal spread so the gap ratio never divides by zero
+
+# ---- Hand task (one hand held up beside the face; every number is a first guess) ----
+HAND_MODEL_PATH = ANALYSIS_DIR / "models" / "hand_landmarker.task"  # downloaded by get_models; first guess
+HAND_MODEL_URL = (
+    "https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
+    "hand_landmarker/float16/latest/hand_landmarker.task"
+)  # from memory, unverified; get_models reports a failed download plainly
+HAND_SETTLE_S = 1.0  # seconds to get the hand up before the hold counts; first guess, not measured
+HAND_HOLD_S = 5.0  # length of the hold in a live trial; first guess (short by the owner's choice)
+HAND_WINDOW_S = 1.0  # start window and end window length inside the hold; first guess
+HAND_MIN_USABLE_FRAMES = 15  # fewer usable hold frames than this makes the clip unusable; first guess
+DROP_COUNTS_AS_SINK = True  # a hand that drops out of view counts as a big sink; first guess
+DROP_SINK_VALUE = 1.0  # sink value (eye widths) given to a dropped hand; first guess
+HAND_READINGS = ("hand_sink", "hand_height", "palm_turn", "hand_shake")  # candidate readings; the hand test picks the winner
+HAND_PRIMARY = "hand_sink"  # primary reading for now; first guess
 
 # ---- Output -----------------------------------------------------------------
 METRICS = ("corner_height", "corner_lift", "smile_score")  # the three candidate readings

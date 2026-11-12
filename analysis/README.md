@@ -55,6 +55,45 @@ python -m analysis.measure_clip CLIP.mp4 [--mirrored] [--primary corner_height] 
 
 It prints the tool result as JSON. With `--save` and a person file it adds the session to that person's record. Sessions labelled `acted` are stored but never enter the baseline. Unusable clips are never saved.
 
+## Hand test
+
+**Why one hand.** The older person holds the phone in one hand during the call, so "raise both arms" is impossible. The avatar says: "Hold your free hand up next to your face, palm towards me, and keep it still." About 5 seconds. Then: "Now swap the phone to the other hand and do the same." A weak arm sinks, the palm turns inward, or she cannot lift it as high as usual. Each hand is compared with HER OWN usual for that hand, never with the other hand.
+
+**What is measured, in plain words.** Everything is measured against her face (the eye line and the distance between the eyes), never against the picture, so moving the phone does not count. Four candidate readings, all oriented so that a larger value is more of a problem:
+
+- `hand_sink`: how far the palm centre sank between the first and the last second of the hold, in eye distances.
+- `hand_height`: how far below the eye line the palm was held at the start (a weak arm may not lift as high as usual).
+- `palm_turn`: how much narrower the palm looked at the end than at the start (the palm turning inward).
+- `hand_shake`: how much the height wobbles around a straight line.
+
+If the hand is seen at the start and then drops out of view while the face is still there, it counts as a big sink (`config.DROP_SINK_VALUE`) with the note `hand dropped out of view`. That is how an acted weak arm will probably look on a handheld phone.
+
+**Run it.**
+
+```
+python -m analysis.get_models
+python -m analysis.live_hand --person NAME
+```
+
+`get_models` now downloads two files (face and hand); one failing does not stop the other. The hand model URL was written from memory and is unverified. If the download fails, it says so.
+
+**Trial plan, per hand:** 10 normal trials, then 10 acted weak trials (let the hand sink slowly, drop it, or turn the palm in). Keys: `1` her left hand, `2` her right hand, `n` normal, `w` acted weak, `SPACE` start (1 s to get ready, then a 5 s hold), `m` hand points, `q` quit and print the summary. Add `--hold SECONDS` to change the hold.
+
+**The panel** (plain words, top to bottom): face OK or why not; which hand is seen (the library's own label in grey, for reference only); hand height against the eye line; sink so far during a trial; palm turn; the note that it is measured against her face; the test block (which hand, normal or weak, counts per hand and mode, the last trial, the keys); and SO FAR, the live tally per hand and per reading: the range of normal trials and how many acted weak trials lie above it (`OK` = all above, `X` = some overlap). On the picture: the eye line (cyan), the hand points, a grey tick at the palm's start height and a green tick at its current height, so a sink shows as the gap between the two. On quit, the trials go to a CSV and the summary to a text file in `analysis/runs/`, with one verdict line per hand.
+
+**`--mirrored`.** If the panel says `wrong hand` when you raise the hand you were asked to, the left/right is swapped: restart with `--mirrored` (or without it, if you had it on).
+
+**Clips.**
+
+```
+python -m analysis.run_task --task hand_left CLIP.mp4 [--person NAME] [--attempt 1] [--mirrored] \
+    [--save --label normal|acted|live] [--hold START_S END_S]
+```
+
+Tasks: `smile`, `hand_left`, `hand_right`. The result has the usual shape plus `status`: `as_usual`, `different_from_usual`, `unusable` or `learning`. For hands, `reading.sign` is `arm`, comparisons are one-sided (only above the usual range counts), and `reading.side` is the hand's side (her left or right). Each hand has its own baseline (`hand_left.hand_sink`, ...). `acted` never enters a baseline.
+
+**Known limits.** The 5 s hold is short by the owner's choice; real drift tests use 10 s, so a slow drift may not show (`HAND_HOLD_S` in `config.py`). Every number is a first guess. Written, not run: no camera was available.
+
 ## The three readings
 
 - `corner_height`: her left mouth corner's distance below the eye line minus her right's, at the smile peak, in units of eye distance.
