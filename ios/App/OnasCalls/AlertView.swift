@@ -4,13 +4,24 @@ import SwiftUI
 struct AlertView: View {
     @Environment(DemoStore.self) private var store
 
+    /// The design frame is 956pt tall. On shorter phones the clip gives up the difference,
+    /// so the report and all three buttons stay on screen without scrolling.
+    private static let designHeight: CGFloat = 956
+
     var body: some View {
+        GeometryReader { geo in
+            let screen = geo.size.height + geo.safeAreaInsets.top + geo.safeAreaInsets.bottom
+            content(clipHeight: min(250, max(160, 250 - (Self.designHeight - screen))))
+        }
+    }
+
+    private func content(clipHeight: CGFloat) -> some View {
         VStack(spacing: 0) {
             backBar
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     who
-                    ClipPlayerView().padding(.horizontal, 20)
+                    ClipPlayerView(height: clipHeight).padding(.horizontal, 20)
                     VStack(alignment: .leading, spacing: 8) {
                         NotUsualLabel()
                         Text("Call Fedya now")

@@ -19,6 +19,7 @@ enum LocalAssets {
 
 /// Step 4 clip area: plays on appear, loops, muted by default. Tap toggles play / pause.
 struct ClipPlayerView: View {
+    var height: CGFloat = 250
     @State private var model = ClipModel()
 
     var body: some View {
@@ -50,7 +51,7 @@ struct ClipPlayerView: View {
                 .accessibilityLabel(model.muted ? Text("Sound on") : Text("Sound off"))
             }
         }
-        .frame(height: 250)
+        .frame(height: height)
         .clipShape(RoundedRectangle(cornerRadius: 22))
         .contentShape(Rectangle())
         .onTapGesture { model.togglePlay() }
