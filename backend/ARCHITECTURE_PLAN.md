@@ -1,307 +1,255 @@
-# Proposed architecture: Claude conversation with parallel analysis
+# MVP call architecture: one task at a time
 
-Written 2026-11-12. This is a design proposal for discussion, not an implemented API or an amendment to the shared contract. The existing Simli/ElevenLabs greeting demo is the only live-tested integration.
+Updated 13 Nov 2026. This is a proposal for the next implementation, not a description of working endpoints. The existing browser greeting with Simli and ElevenLabs is live-tested. The conversation, capture, measurement and family delivery below are not built.
 
-Updated after the late-evening change on `main`: analysis now runs on the server, and Agent 3 owns analysis and Claude orchestration. Agent 2 owns the calling/media/notification backend that connects to it. This replaces the earlier on-device-analysis assumption in this proposal. The exact process boundary and canonical schemas still need agreement. See [the shared-contract change](../docs/SHARED_CONTRACT.md) and [Agent 3's revised brief](../docs/AGENT_3_CONNECTOR.md).
+**MVP decision:** measure only the task Claude has requested. During an arms task we measure arms; we do not also look for facial or speech changes. There are no background health analyzers. We can add them later without changing what a task returns.
 
-### Read these names as responsibilities
+Ownership follows the late-evening override in [SHARED_CONTRACT.md](../docs/SHARED_CONTRACT.md) and [Agent 3's brief](../docs/AGENT_3_CONNECTOR.md): Agent 2 owns calls/media/delivery; Agent 3 owns analysis and the conversation. This replaces the earlier continuous-analysis proposal.
 
-- **CallSession and session coordinator are the same logical component.** `CallSession` is the name to use going forward. It contains the state of one conversation and the code that reacts to incoming events. There should be one owner of the conversation flow.
-- **ClaudeAgent** calls Claude with the current context and handles its reply/tool requests. Its tool loop can directly invoke registered handler functions.
-- **Tool handlers** are the executable functions Claude requests. The earlier name `ActionExecutor` does not require a separate class or service. A handler can call the Agent 2 backend to play a line, request capture, or deliver a message.
-- **Task code** defines how to collect and assess a particular task. It owns measurement timing and produces structured results. Claude chooses permitted next steps using those results.
-
-Under the revised team split, Agent 3 implements the conversation loop and task/analysis logic. Agent 2 supplies the call lifecycle, media transport, avatar/voice functions, and notification delivery. The Node backend can hold connection and delivery state without becoming a second controller of which check-in task happens next.
-
-These names do not require one class each. The first orchestrator can keep conversation state, event handling, and the model/tool loop in one CallSession module, with small helpers for model requests and the backend actions.
-
-## 1. Recommendation
-
-Run audio and video analyzers alongside the conversation. Start and stop their call-related work with the call lifecycle. They publish observations to CallSession in the server-side orchestrator. Claude receives relevant observations, chooses conversational responses and requests bounded actions through tools.
-
-Use two complementary interfaces:
-
-- **Events push observations:** transcripts, analyzer findings, task completion, and connection changes reach the coordinator without Claude polling.
-- **Tools request actions or detail:** Claude can inspect current state, request a task, ask for a bounded review of an observation, and request a notification.
-
-The coordinator owns the current session state, event ordering, action validation, timers, and output playback. Claude runs inference when the coordinator invokes it; a model API request is not a background listener that independently wakes up when an analyzer changes.
-
-## 2. Components and data flow
+## 1. The complete picture
 
 ```mermaid
-flowchart TD
-    Trigger[Backend call trigger] --> Calls[Call service: Agent 2]
-    Calls -->|Incoming call| App[Parent app]
-    Calls -->|Answered and lifecycle events| Coordinator[CallSession: Agent 3 orchestrator]
-    App -->|Microphone audio| Media[Backend media relay: Agent 2]
-    App -->|Task clips or live frames| Media
-    Media --> Audio[Audio processing and transcription]
-    Media --> Video[Server video analysis: Agent 3]
-    Audio -->|Transcript and observations| Coordinator
-    Video -->|Observations| Coordinator
-    Coordinator -->|Context and relevant events| Claude[Claude conversation agent]
-    Claude -->|Tool requests and reply text| Coordinator
-    Coordinator -->|Action requests| Handlers[Backend tool handlers: Agent 2]
-    Handlers -->|Validated task and UI commands| App
-    Handlers -->|Reply text| Voice[ElevenLabs speech generation]
-    Voice -->|Speech audio| AvatarClient[Simli client in parent app]
-    AvatarClient -->|Speech audio| Simli[Simli avatar service]
-    Simli -->|Synchronized video and audio| AvatarClient
-    Handlers -->|Approved message| Family[Registered family]
+flowchart LR
+    Operator[Demo operator] -->|Start call| Calls
+    Parent[Parent client] <-->|Ring, answer, play lines, capture clips| Calls
+
+    subgraph Backend[Calling backend - Agent 2 - Node]
+        Calls[Call service]
+        Speech[Speech gateway]
+        Media[Temporary media store]
+        Messages[Family message delivery]
+        Records[(Call and delivery records)]
+        Calls <--> Speech
+        Calls <--> Media
+        Calls --> Records
+        Messages --> Records
+    end
+
+    subgraph Analysis[Analysis and orchestrator - Agent 3 - Python]
+        Session[CallSession + Claude tool loop]
+        Tasks[Smile / arms / sentence modules]
+        Baseline[(Baselines and measurement history)]
+        Session -->|Run one task| Tasks
+        Tasks <--> Baseline
+        Tasks -->|Final result| Session
+    end
+
+    Calls -->|Start session; command completion events| Session
+    Session -->|Say, capture, publish result, end| Calls
+    Tasks -->|Fetch this attempt's clip| Media
+    Session <-->|Text context, tools, results| Claude[Claude API]
+    Speech <-->|Answer audio to text; script text to speech| Eleven[ElevenLabs]
+    Speech -->|Prepared speech audio| Parent
+    Parent <-->|Speech in; avatar video and audio out| Simli[Simli]
+    Calls --> Messages
+    Messages -->|Stored message + event| Family[Family client]
 ```
 
-The diagram describes logical components. Agent 2's existing backend is Node; Agent 3 proposes Python for analysis and orchestration. A small HTTP connection between those processes is a candidate, not an agreed API. Event dispatch and the per-call mailbox can live in memory; no message-broker infrastructure is needed. Keep computationally expensive analysis away from the media/control loop. Define storage ownership at the same seam: the backend needs call/delivery records, while analysis owns measurements and baselines.
+There are **two application server processes**, Node and Python. Boxes inside them are modules, not separately deployed services. SQLite and an in-memory pending-command map are enough. No broker or worker platform is needed for the first call.
 
-### Component responsibilities
+The parent client owns camera/microphone permissions, capture and playback. The transport can work with iOS or a browser. The backend browser page is an integration harness but currently only plays a greeting. The later [Agent 1 stage brief](../docs/tasks/agent1.md) describes a mocked family app and a separately staged parent call. Neither client is connected to this proposed flow yet; that mock is not a working backend integration.
 
-| Component | Responsibility |
-|---|---|
-| Call service | Create the call, ring the registered device, track answer/decline/timeout, and end the session |
-| Media adapters | Capture or forward audio, maintain short-lived buffers, and connect voice/avatar transports |
-| Analyzers | Continuously process relevant media and publish observations, quality, availability, and task progress |
-| CallSession (also called the coordinator) | Maintain authoritative conversation state, dispatch events, invoke Claude, validate requested steps, and handle interruptions |
-| Claude | Interpret answers and observations, phrase replies, ask clarification, and select the next allowed action |
-| Tool-handler functions | Execute task/UI/notification requests; no separate ActionExecutor service is required |
-| SQLite | Store permitted answers, observations, decisions, and delivery status; support replay of the control flow |
+## 2. Component responsibilities
 
-## 3. What runs continuously and what runs on demand
+| Component | Owner | Does | Returns / emits |
+|---|---|---|---|
+| Parent client | Agent 1 for iOS; Agent 2 for browser harness | Answers, plays avatar/audio, records requested answers/tasks, shows timer, uploads media | Playback completion, capture upload, hang-up |
+| Call service | Agent 2 | Creates call IDs, rings, handles answer/no answer, routes commands, owns command deadlines | Lifecycle and command completion events |
+| Speech gateway | Agent 2 | Transcribes answer recordings with ElevenLabs; prepares/caches approved script audio; connects avatar or audio fallback | Final transcript or failure; playback assets |
+| Temporary media store | Agent 2 | Holds bounded task clips with authenticated internal access and expiry | Opaque media ID and bytes for analysis |
+| CallSession / coordinator | Agent 3 | Holds answers, attempts, pending tool and decisions; invokes Claude and resumes it after a tool finishes | Backend requests; session log and summary |
+| ClaudeAgent | Agent 3 | Helper within CallSession: assembles context, calls Claude, dispatches permitted tools | Next tool request; no independent background activity |
+| Task modules | Agent 3 | Define capture requirements, analyze an attempt, assess quality, compare to frozen baseline | One final `TaskResult` |
+| Baseline and rules | Agent 3 | Own metrics, earlier measurements, arithmetic, confirmation rule and session status | Facts and deterministic decisions |
+| Family delivery | Agent 2 | Renders fixed templates, stores message, emits family event, records delivery attempts | Message ID and delivery state; no assumption it was read |
 
-While a call is answered and connected:
+**CallSession is the coordinator.** Node does not become a second controller choosing tasks. **Tool handlers are ordinary functions**, not another ActionExecutor service. Node owns connection/command state; Python owns conversation/measurement state.
 
-- Speech transcription receives microphone audio. Partial transcripts can update captions; completed turns can invoke Claude.
-- Audio analysis receives the original audio through a separate path. A transcript alone is insufficient for acoustic measurements.
-- Server camera analysis processes received frames independently of Claude. With live transport, framing checks can run continuously and task measurements use a defined window. With Agent 3's proposed clip-per-task first version, measurements arrive after each uploaded task clip; that version must not be described as continuous video monitoring.
-- The coordinator tracks session deadlines and analyzer health even while Claude or speech generation is busy.
+ElevenLabs handles speech input/output. Simli renders the avatar from our speech. Neither is our task analyzer. Claude receives transcripts and structured readings, not raw clips.
 
-Claude is invoked for a completed user turn, a relevant task result, a significant observation change, or a decision timeout. It does not receive every frame or every partial transcript.
+## 3. One call, step by step
 
-Publishing only unusual findings is insufficient: the coordinator also needs normal task completion, unusable captures, missing baselines, and analyzer failures. Missing observations must remain `unknown`, not become `as_usual`.
+1. **Start and ring.** The operator calls `POST /v1/calls`. Node creates `call_id`, stores `ringing`, and emits `call.incoming`. Decline or ring timeout produces the existing `no_answer` message; Python never starts a conversation in that case.
+2. **Answer and prepare.** The client calls `/answer`. Node changes the call to `active`, starts Python's CallSession with person/call IDs, session label and script version, and returns avatar configuration. Python loads history/baselines. Commands wait for `client.ready` after media setup, with a deadline; `/answer` alone does not mean playback is ready.
+3. **Greet.** Claude requests `say("greet")`. Python sends a command to Node. Node prepares audio, tells the client what to play, and reports completion after the client's playback acknowledgment.
+4. **Ask and hear.** `ask("medicine")` plays `q_medicine`, then requests an answer recording. The client records automatically after playback, stops on speech followed by a silence window or at 15 seconds, and uploads. Node transcribes, deletes the temporary answer audio, and returns `heard`, `no_speech` or `unavailable` with final text. Claude records the answer, then asks the next question.
+5. **Prepare the camera.** `say("setup_phone")` finishes before the first task starts.
+6. **Run a task.** `run_task("smile")` creates `attempt_id`, plays `task_smile`, requests the defined capture, waits for upload, fetches the private clip, analyzes it, releases it, stores the result and returns it to Claude. Arms and sentence have the same lifecycle with their own settings.
+7. **Choose the next permitted step.** A usable within-usual reading leads to the next task. An outside reading leads to a neutral repeat. An unusable clip leads to one retry. Claude cannot change a task's facts.
+8. **Publish a confirmed change immediately.** Two usable outside readings for the same sign trigger the fixed rule. Python requests family delivery now, without waiting for the rest of the call or Claude's approval. Node renders its fixed template and stores the message before acknowledging.
+9. **Finish.** The same `bye` is played for every outcome. Python publishes the final summary; Node closes the call and delivers the family summary. If a change message was already stored, the summary updates that call's record rather than generating a second alert. Agent 3 updates eligible baselines, excluding acted sessions and sessions with a confirmed change.
 
-Claude can request deeper analysis through a tool. That is a bounded job against an existing evidence window; it does not replace continuous monitoring or require the model to repeatedly request the next frame.
+For the initial build, ordinary answers are short recordings, too. This is a **turn-based call**: listen after a question, measure after an instruction. Continuous transcription, overlapping speech and barge-in are later additions. The avatar is silent during answer/task capture. There is no clinical analysis between tasks.
 
-## 4. Stable interface A: observation events
+## 4. What happens while `run_task` waits
 
-The following names and fields are proposed examples. Agent 3 owns publication of the eventual contract.
+```mermaid
+sequenceDiagram
+    participant C as Claude API
+    participant S as Python CallSession
+    participant N as Node backend
+    participant P as Parent client
+    participant T as Arms module
 
-### One task protocol, different task results
-
-Do not create a different transport protocol for every task. All tasks share call/attempt identity, lifecycle, input quality, and a result envelope. Each task defines its own readiness conditions, measurements, and end conditions.
-
-| Task | Task-specific definition |
-|---|---|
-| Smile | Required face framing, observation window, and facial measurements |
-| Arms | Required body framing, timed observation window, and arm-position measurements |
-| Sentence | Expected sentence, recording boundaries, and speech measurements |
-
-Distinguish three questions in every result:
-
-1. **Execution:** did the observation attempt finish, stop early, or fail?
-2. **Capture quality:** is there enough usable input to interpret it?
-3. **Finding:** what did the measurements show, and is a baseline available?
-
-Task completion does not mean the movement matched her usual. If an arm lowers during a usable recording, that is an observation to retain. Requiring both arms to remain level for a task to count as completed would discard the very change being measured.
-
-Intermediate progress such as elapsed recording time updates CallSession and the UI. Claude ordinarily receives the final result or an actionable exception, not every timer tick. If the person cannot perform the task, record that outcome separately from a technical recording failure.
-
-Every analyzer observation should identify:
-
-- Schema version, unique event ID, call ID, producer, and producer sequence number.
-- Analyzer implementation and version.
-- Task and attempt, when applicable.
-- Media time window relative to the call's capture clock, plus receipt time recorded by the backend.
-- Input quality and explicit reasons for limited or unusable input.
-- Measurements, baseline availability, and the meaning of any assessment.
-- An optional evidence reference with a defined lifetime and access policy.
-
-Illustrative event, not a real measurement:
-
-```json
-{
-  "schema_version": "0.1",
-  "type": "observation.updated",
-  "event_id": "evt_example_17",
-  "call_id": "call_example",
-  "producer": "analysis_service",
-  "sequence": 17,
-  "analyzer": { "name": "face", "version": "prototype-1" },
-  "task_id": "smile",
-  "attempt_id": "attempt_1",
-  "window": { "start_ms": 32000, "end_ms": 35000 },
-  "quality": { "status": "usable", "reasons": [] },
-  "assessment": {
-    "state": "candidate_change",
-    "baseline_state": "ready",
-    "finding_code": "mouth_asymmetry_changed",
-    "validation_state": "prototype_unvalidated"
-  },
-  "evidence_ref": "window_example_17"
-}
+    C-->>S: tool_use run_task(arms)
+    Note over C,S: Claude response ended. Python runs our handler.
+    S->>S: Create attempt A2; await say(task_arms)
+    S->>N: Say command S2
+    N-->>S: 202 accepted
+    N-->>P: command.execute say S2
+    P->>N: S2 playback completed
+    N->>S: command.completed S2
+    S->>N: Capture command A2
+    N-->>S: 202 accepted, not a result
+    N-->>P: command.execute capture A2
+    Note over P: Record; update local timer; stop at limit
+    P->>N: Upload clip A2
+    N->>S: command.completed A2 with media_id
+    S->>N: Fetch that media_id
+    N-->>S: Clip bytes
+    S->>T: analyze(clip, attempt, frozen baseline)
+    T-->>S: Final TaskResult
+    S->>N: Release clip
+    S->>S: Store result; apply confirmation rule
+    S->>C: New request with tool_result
 ```
 
-`evidence_ref` is an opaque identifier, not a public media URL. It can identify a permitted server-held task clip or an expiring media window for bounded reanalysis. Its retention policy must be explicit.
+The handler can `await` without blocking either server's event loop. Run synchronous clip decoding/measurement in a bounded executor so Python can still receive hang-up events; discard a late result after cancellation. This executor handles only the requested task. Claude has no open generation running during the hold. The app timer/upload progress need no model calls. In this clip-based MVP there are **no intermediate analyzer observations**: a module returns one result after its clip arrives. Timeout, unusable input and cancellation resolve pending work explicitly.
 
-Numeric measurements must define their units and direction. If a model produces a score, its schema must state what it scores. Detection confidence, capture quality, change from baseline, and a calibrated probability are different quantities. An unvalidated score must not be presented as an illness probability. Do not combine unrelated analyzer scores into one health percentage.
+Do not return the initial `202 accepted` to Claude as a successful measurement. It only acknowledges a command. The tool finishes with the result or a bounded failure.
 
-Related event families:
+## 5. Task contracts
 
-| Event | Meaning |
-|---|---|
-| `transcript.final` | A completed user turn with its audio time window |
-| `observation.updated` | A fresh measurement or quality/assessment change |
-| `analyzer.unavailable` | An expected analyzer has stopped or cannot produce usable results |
-| `task.started` | The app actually began capture/timing for the task |
-| `task.completed` / `task.failed` | The attempt finished with a result or an explicit failure |
-| `speech.started` / `speech.finished` / `speech.interrupted` | State of the assistant's actual output playback |
-| Call lifecycle events | Answer, decline, no answer, disconnect, and end |
+Every task shares this local interface. These are simple Python functions, not HTTP endpoints: Agent 3 owns both caller and implementation.
 
-## 5. Stable interface B: Claude tools and action results
+```text
+definition(task) -> instruction/repeat line IDs, media kind, timing, metric version
+analyze(clip, attempt_id, baseline_snapshot) -> TaskResult
+```
 
-Begin with a small, explicit tool set. Bind identity, family recipients, and call permissions in server-side session context rather than letting Claude supply arbitrary people or phone numbers.
+The registry and result schema are in [mvp.openapi.yaml](proposals/mvp.openapi.yaml). Agent 3 must also specify each metric's formula, unit, valid input and baseline method before implementing numeric results. This document does not invent those formulas or thresholds.
 
-| Proposed tool | Purpose | Runtime check |
+| Task | Initial capture | Module checks and returns |
 |---|---|---|
-| `get_session_context()` | Return current phase, allowed next actions, selected answers, latest observations, and their freshness | Only the active call's permitted data |
-| `run_task(task_id)` | Collect and measure smile, arms, or sentence; a repeat is another attempt | Allowed phase, framing, attempt limits, and user willingness |
-| `record_answer(question_id, value, transcript_turn_id)` | Store an answer grounded in an actual user turn | Allowed fields, value schema, and evidence turn |
-| `review_observation(event_id)` | Request a bounded additional analysis of the referenced window | Evidence is available, permitted, and within the analysis budget |
-| `notify_parent(template_id)` | Show an approved instruction or reminder on the parent's device | Registered device, approved template, and relevance to the active call |
-| `notify_family(reason_code, evidence_ids)` | Request a family message through the configured channel | Session policy, evidence, registered recipients, and deduplication |
-| `end_call(reason_code)` | Finish or stop the session | Cleanup and final-state rules |
+| `smile` | 5 seconds of video | Face visibility/pose, observable smile, versioned face reading and comparison |
+| `arms` | 12 seconds of video: 2 to raise, then 10 to hold | Both arms visible, observable movement/hold, versioned arms reading and comparison |
+| `sentence` | Up to 12 seconds of original audio | Audio quality, assessable utterance, versioned speech reading and comparison |
 
-Ordinary reply text is a separate output routed to speech generation. Tool arguments are not spoken. The first version can validate complete short replies before generating speech; sentence-sized streaming can follow when interruption behavior is verified.
+These are engineering starting windows, not evaluated measurement protocols. Arms capture starts before the raise phase; the client shows two seconds to raise followed by a ten-second hold, then stops locally. Only one task runs at a time.
 
-Tool results should consistently contain `status` (`success`, `warning`, or `error`), a short `summary`, `next_actions`, and `artifacts` containing relevant event/job/command identifiers. Error results also provide a reason code, retry guidance, and a stop condition.
+The analyzer does not guess what Claude wants. `run_task("arms")` selects the arms definition, attempt and baseline. Only that module receives the clip. Its reporting moment is fixed: after this capture is analyzed.
 
-For the initial tool loop, `run_task` can resolve when its final structured result is available. While its handler awaits the recording/analysis, CallSession continues receiving progress, user speech, hangup, and other observations. Waiting asynchronously for a tool result does not stop the rest of the application.
+The result separates **execution** (`completed`, `could_not_perform`, `failed`, `cancelled`), **quality** (`usable`, `unusable` with reasons), **performance** (`observed`, `not_observed`, `uncertain`) and the **reading** (metric ID, value/unit, person's side, nullable baseline comparison).
 
-An accepted internal device command is not a completed action. This acknowledgment is for CallSession; it need not create another Claude turn:
+An arm lowering in a clear recording can be a completed usable attempt with an outside reading. Arms out of frame are an unusable capture. No observable movement is not silently converted into an ordinary reading. Claude sees those distinctions as facts.
 
-```json
-{
-  "status": "success",
-  "summary": "The smile task was requested; capture has not started yet.",
-  "command_id": "cmd_example_4",
-  "execution_state": "pending",
-  "next_actions": ["await task.started"],
-  "artifacts": [{ "type": "command", "id": "cmd_example_4" }]
-}
-```
+Every capture gets a new attempt ID. Confirmation requires two independent usable outside captures for the same sign, metric version and baseline snapshot. Unusable captures do not count. Allow at most two usable attempts plus one unusable retry per task, three captures total. Framing hints are static instructions plus the camera preview; quality is assessed after upload, not by a background framing analyzer.
 
-Every command needs an idempotency key, an acknowledgment deadline, and a completion/failure event. The model cannot mark a measurement task complete by saying it succeeded. Notification intents and delivery status should be persisted before retries; use provider idempotency where supported and do not blindly retry an unknown delivery outcome.
+Status priority: confirmed change first; otherwise unfinished tasks mean `incomplete`; otherwise missing baseline means `learning`; otherwise `as_usual` requires a within-usual result for every task. A first outside reading followed by a within-usual repeat stays in the log but is not confirmed. Claude cannot dismiss a confirmation, invent readings or interpret missing baseline as normal. Baselines remain frozen during a call.
 
-### Example: the arms tool
+## 6. Connections for parallel work
 
-1. CallSession invokes Claude with the current conversation and observations.
-2. Claude requests `run_task("arms")`.
-3. ClaudeAgent dispatches the registered handler. The handler requests the approved instruction and a capture attempt through Agent 2's backend.
-4. Wait for actual instruction playback and sufficient framing, then start the observation timer. The app reports capture state; server analysis reports measurement state.
-5. Progress events update CallSession and the app. Claude is waiting for the tool result during this period.
-6. The observation window ends, or an explicit early outcome occurs. Task code returns execution status, capture quality, measurements, and baseline comparison.
-7. ClaudeAgent supplies that result back to Claude. Claude can select the next permitted question, repeat, or other action.
+The authoritative **draft for these new seams** is [mvp.openapi.yaml](proposals/mvp.openapi.yaml), version `0.1.0-draft`. Exact script text is in [script.en.json](proposals/script.en.json); contract-valid examples are in [fixtures.json](proposals/fixtures.json). These are review artifacts under Agent 2's folder. Agent 3 owns promotion into `contract/`; consumers should use that published copy once available.
 
-For example, a completed attempt with usable input may report an arm lowering during the hold. An unusable attempt instead reports why the measurement is unknown. The measurement code makes that distinction; Claude then uses the reported facts.
+Existing registration/ring/answer, `SessionResult`, `Message` and family-feed contracts remain the starting point. The draft adds command/capture/orchestrator boundaries. Its `SessionResult` explicitly allows null comparisons while learning and restricts `clip_id` to null for this first version; these are proposed compatibility changes for Agent 3 to review. Family consumers also need to upsert an updated `message.new` by message ID rather than append a duplicate. `/v1/calls/{id}/clip` remains alert evidence, not task upload.
 
-Skills can hold the check procedure, terminology, permitted branches, and interpretation limits. Tools provide executable capabilities. Neither a skill nor an MCP adapter establishes the validity of an analysis method.
+| Connection | Producer → consumer | Interface and completion meaning |
+|---|---|---|
+| Start session | Node → Python | `POST /internal/v1/sessions`; 202 = accepted |
+| Request action | Python → Node | `POST /internal/v1/calls/{call_id}/commands`; typed `say`, `capture`, `publish_result`, `end_call`; 202 = accepted |
+| Execute in client | Node → parent | New SSE `command.execute` on existing device stream; only `say` / `capture` |
+| Readiness, playback, capture failure, hang-up | Parent → Node | `POST /v1/calls/{call_id}/client-events`; typed events |
+| Successful capture | Parent → Node | `POST /v1/calls/{call_id}/captures/{command_id}`; bounded binary upload; 204 = bytes accepted |
+| Complete / terminate | Node → Python | `POST /internal/v1/sessions/{call_id}/events`; `command.completed`, `client.ready`, `call.ended`; wakes matching handler |
+| Read / release clip | Python → Node | `GET` / `DELETE /internal/v1/media/{media_id}`; private bytes, then release |
+| Family delivery | Node → family | Existing `message.new` and feed; support mid-call publication and final summary |
 
-## 6. Coordinator scheduling and interruption rules
+Answer capture completes with a transcript. Task capture completes with a media reference; Python produces `TaskResult` locally afterward. Playback returns `played`. Publication returns a message ID and `stored` / `provider_accepted`, not `read`. Every accepted command has one logical terminal completion; retries can deliver it more than once.
 
-Use one active Claude run and one assistant playback sequence per call. Each run and its audio chunks carry a generation ID so canceled work cannot later resume playback.
+### Claude's tools
 
-When an event arrives:
+| Tool | Handler does | Final result to Claude |
+|---|---|---|
+| `say(line_id)` | Plays an allowed fixed line with `{name}` from the person record | Played / failed |
+| `ask(question_id)` | Plays question, captures answer, transcribes; one retry on no usable answer | Text plus `heard` / `no_speech` / `unavailable` |
+| `record_answer(question_id, value)` | Stores allowed values and transcript provenance | Stored |
+| `run_task(task)` | Creates attempt, plays first/repeat instruction, captures, analyzes, stores, applies rule | Final `TaskResult` |
+| `finish_call()` | Same goodbye, final summary, close | Closed / delivery state |
 
-1. Validate its schema, producer, call, and task/attempt association.
-2. Deduplicate and update the current observation snapshot. Retain temporal order within each producer; do not interpret delayed results as new symptoms.
-3. Check age, quality, and whether the observation applies during the current task. Unavailable or stale evidence remains explicit.
-4. Apply predefined session policy and determine event priority.
-5. Coalesce routine updates into the next Claude turn; make significant changes available promptly.
-6. Invoke Claude with a bounded context snapshot when an actual decision is needed.
-7. Validate requested actions, execute them, and return their acknowledgments/results.
+History is loaded initially. `run_task` automatically publishes a confirmed change before returning to Claude. An explicit request to stop or contact family during an answer ends the remaining tasks and invokes `finish_call()` with an incomplete check and a family handoff. No arbitrary message text, recipient or general action tool is exposed. Free-form chat and additional inferred alert categories are outside this fixed-script MVP.
 
-### If something happens while the avatar is speaking
+### Operational rules shared by both servers
 
-| Situation | Response |
+- IDs are opaque strings. `call_id` scopes events; `command_id` deduplicates actions; a task capture's command ID equals its attempt ID. Same ID with a different payload returns 409. An old completion cannot finish a new attempt.
+- Node serializes client commands. Python has one active conversation/tool loop; disable parallel task/speech tools.
+- CallSession checks the permitted next step and retry budget before executing a model request; a valid line ID alone does not authorize playing it at any point in the call.
+- `say` completes after actual client playback, not TTS generation or Simli's first speaking event. The greeting demo's duration-based stop has not verified this acknowledgment. Implement/test it; use local audio playback as fallback.
+- Node deadlines: say 30 seconds; capture its window plus 20 seconds for upload/transcription; publish 10 seconds. Python deadlines: analysis initially 20 seconds, whole call 180 seconds. These are tunable limits, not measured performance.
+- Retry callbacks with the same event ID; store/deduplicate before acknowledging. Three bounded retries, then close as `incomplete` if services cannot reconnect. A restart ends an active call; no resumable-session mechanism yet.
+- Hang-up/loss/deadline cancels pending playback, capture and analysis. Acknowledge and ignore late events. Python still publishes a final summary; publication remains allowed after media closure. If a change was confirmed, final status stays `change_noticed` and logs retain the interruption. The client stops camera/microphone and Simli. An `end_call` completion is stored/sent before `call.ended`, and closing logic must not discard that completion.
+- If Claude fails, Python follows the fixed script and rule. Missing analyzer means incomplete, not fabricated readings. Avatar failure uses prepared voice and a still image.
+- External routes retain demo authentication. Internal routes use a separate server-only `X-Service-Key` and service-network access. Check media IDs against their call. No public media links or caller-selected callback URLs.
+- Delete temporary clips after analysis/cancellation, with a five-minute maximum expiry; delete Python's decoded copies, too. Delete answer audio after STT. No recordings in git. Optional consented family clips need their own policy; this draft uses `clip_id: null`.
+- Node stores call/command/delivery records, summaries and messages. Python stores answers, attempts, metric versions, baseline snapshot IDs and decisions. Preserve `live` / `normal` / `acted` labels for baseline/statistics eligibility.
+- Python is the only summary author in this flow. The new publication command and any legacy `/result` compatibility route must share the same persistence/deduplication operation; the parent client does not independently decide or submit a second result.
+
+## 7. Fixed example call script
+
+English, person Ona, version `mvp-en-1`. This table comes from `proposals/script.en.json`; the contract check verifies it matches. Claude chooses permitted branches and retries, not new instructions or a different goodbye.
+
+<!-- script-table:start -->
+| Line ID | Exact spoken text (`{name}` is substituted) |
 |---|---|
-| Routine measurement update | Update the snapshot and include it at the next turn |
-| User starts speaking | Stop the current reply, cancel obsolete generation, clear queued avatar audio, and listen |
-| Relevant candidate change | Apply the agreed priority rule; request a clarification/repeat at an appropriate pause, or interrupt if the policy calls for it |
-| A predefined urgent concern condition is met | Execute the approved human-handoff action immediately; do not depend on Claude returning successfully |
-| Claude times out or is unavailable | Use a brief approved fallback and produce an explicit incomplete/assistance-needed outcome |
+| `greet` | Hello, {name}. It's time for our short check-in. |
+| `q_medicine` | Have you taken your medicine today? |
+| `q_feeling` | How are you feeling today? |
+| `q_unusual` | Has anything felt unusual since our last call? |
+| `setup_phone` | Please put your phone on a table. Sit back so your face and both arms are in view. |
+| `task_smile` | When the timer starts, please look at the camera and smile until it finishes. |
+| `task_arms` | When the timer starts, please raise both arms. Keep them up until it finishes. |
+| `task_sentence` | Please repeat this sentence after me: Today I am sitting by the window. |
+| `repeat_smile` | Let's try once more. Keep your face in view and smile until the timer finishes. |
+| `repeat_arms` | Let's try once more. When the timer starts, raise both arms and keep them up until it finishes. |
+| `repeat_sentence` | Let's try once more. Please say: Today I am sitting by the window. |
+| `bye` | Thank you, {name}. Our check-in is finished. Goodbye. |
+| `sentence` | Today I am sitting by the window. |
+<!-- script-table:end -->
 
-Analyzers continue during reasoning and playback. Candidate-change events should be debounced using defined persistence and quality criteria so fluctuating frame scores do not create repeated model calls. Those criteria are engineering settings to test, not established clinical thresholds.
+`sentence` is the expected utterance, not an extra avatar line. Repeat a question with the same `q_*` once. Task handlers use `repeat_*` after the first attempt; the client shows framing guidance and timer. A repeat does not mention a suspected change.
 
-The coordinator should not let stale or routine completion overwrite a prior escalation. Aim for one family message per call; an early escalation can be enriched in the same feed entry rather than followed by a contradictory `as_usual` message. External notification updates need a separately defined delivery policy.
+### One complete example with a repeat branch
 
-## 7. A complete call
+All responses/readings are illustrative, not test evidence. Assume a ready baseline and no media errors.
 
-1. An operator calls the backend trigger. Scheduling can be added later.
-2. The backend creates the call and sends an incoming-call event to the registered parent device. Track no answer without opening media sessions unnecessarily.
-3. After answer and device permission, establish media sessions, start analyzers, and load the person's context.
-4. Invoke Claude to greet her and ask the first check-in question. Generate speech and pass that audio through the existing Simli adapter.
-5. Audio transcription produces a user turn. Audio/video analysis continues in parallel. The coordinator supplies the answer and latest relevant observations to Claude.
-6. Claude requests a task. The runtime dispatches it; the device confirms when measurement actually starts. The task timer starts from that acknowledgment, after the instruction has been played and framing is adequate.
-7. The device reports capture progress and the server task code returns analysis results. CallSession accepts the result, invokes Claude when appropriate, and enforces the agreed repeat or handoff policy.
-8. At completion or hangup, deliver the appropriate family message, stop all analysis/media jobs, discard temporary buffers, and persist permitted session data.
+| Step | Claude / handler | Parent response or result | Next |
+|---|---|---|---|
+| 1 | `say("greet")` | Playback completes | Ask medicine |
+| 2 | `ask("medicine")` | "Yes, I took it after breakfast." | `record_answer("medicine", "yes")` |
+| 3 | `ask("feeling")` | "I slept well. I feel fine." | Record her words |
+| 4 | `ask("unusual")` | "No, nothing unusual." | Record her words |
+| 5 | `say("setup_phone")` | Playback completes | Smile |
+| 6 | `run_task("smile")` | S1 usable, performed, outside her usual | Repeat smile |
+| 7 | `run_task("smile")` | Plays `repeat_smile`; S2 also usable and outside | Fixed rule publishes family message immediately |
+| 8 | `run_task("arms")` | A1 usable, performed, within her usual | Sentence |
+| 9 | `run_task("sentence")` | V1 usable, assessable, within her usual | Finish |
+| 10 | `finish_call()` | Same `bye`, summary stored, closed | Family already has one change message |
 
-Call state and conversational state are separate: transport can be connected while the avatar is speaking, the user is speaking, a task is being measured, or an analysis result is pending.
+Example family message: **"Ona's smile looks different from her usual. Call her now. If she seems unwell, call 112."** A more specific direction needs the task's defined metric and side semantics. The avatar gives Ona the same goodbye and no result.
 
-## 8. Where analysis runs and what data leaves the phone
+The ordinary path skips step 7 when S1 is within her usual. Unusable input follows the retry budget; missing baseline gives `learning`; an unfinished check gives `incomplete`. These alter structured results and the family template, not the goodbye.
 
-Follow the late-evening shared-contract change: task clips or frames reach server-side analysis. Agent 3 owns measurements, baselines, and the conversation orchestrator. Claude receives transcripts and structured observations; the proposed analysis does not send the camera feed to Claude.
+## 8. Parallel work and first integration
 
-Microphone audio needs an explicitly agreed route to transcription and any remote audio analyzer. Forward the original capture to acoustic analysis rather than reconstructing it from text. Keep the conversation transcription path separate from the acoustic measurement path.
+| Piece | Build against | Done when |
+|---|---|---|
+| Agent 2 Node backend | Fake Python callbacks + shared fixtures | One call rings, plays, captures, transcribes, publishes and closes |
+| Agent 3 CallSession/Claude | Fake backend using those same fixtures | Fixed call resumes after results, repeats correctly, applies rule without Claude |
+| Agent 3 task modules | Local consented input outside git + `TaskResult` | Honest usable/unusable/performance/baseline results |
+| Parent client | `command.execute` fixtures | Playback acknowledgment, bounded capture/upload, hang-up cleanup |
+| Family client | Existing `Message` fixture/feed | One real stored message appears; stage mock identified as mocked |
 
-Use short-lived evidence windows with explicit expiry. The revised brief proposes deleting task clips after measurement and retaining the consented alert clip. Implement and verify deletion before claiming it. Store permitted numbers, answers, and decision/delivery metadata; do not retain complete recordings merely to debug the conversation.
+Join one smile end to end before arms/speech. Verify playback-to-capture timing, one repeat, a forced timeout/hang-up and a stored mid-call message. Validate real provider output and consumer fixtures against the same published contract before declaring integration complete.
 
-Clip upload versus live streaming is still an implementation choice. Both can use the same observation and task-result protocol, but clip upload returns results later and cannot promise the behavior of a continuous live feed.
+Agent 3 must review/promote these schemas, script and completion semantics into `contract/` before the teams independently implement them. Humans also need to settle the real parent client and give Agent 3 an allowed analysis folder in `AGENTS.md`. This proposal changes neither another agent's files nor human-owned docs. No pull request is opened for this planning work.
 
-## 9. Proposed changes to coordinate with Agent 3
-
-The current shared API carries final `SessionResult`, incoming-call events, and avatar line IDs. Its late-evening change acknowledges that the server-analysis and mid-call actions still need new interfaces. Before integration, agree:
-
-- Mid-call observation uploads and server-to-app task/UI commands.
-- Command acknowledgments, task/attempt IDs, media time windows, cancellation, and deadlines.
-- Free-form short conversational replies alongside the existing approved task instructions and fallback lines.
-- Ownership of sequencing: Agent 3 owns the single conversation/task loop; Agent 2 executes call/media/notification requests and reports outcomes. Avoid independent next-task controllers in both services.
-- A distinct path for urgent reported concerns, separate from the existing measured-change confirmation rule. Do not silently overload an existing message kind.
-- Speech playback acknowledgments from the avatar adapter. The greeting demo's duration-based completion estimate is not sufficient to start a precisely timed measurement task.
-
-No canonical contract files or other agent folders are changed by this document.
-
-## 10. Technology choices and alternatives
-
-Recommended first implementation:
-
-- Keep the current Node backend and Simli browser adapter.
-- Connect to Agent 3's Claude conversation loop through an agreed small interface; provide the backend action handlers it needs.
-- Use ElevenLabs transcription and speech generation behind replaceable adapters.
-- Start with typed events and SQLite-backed records; keep transport-specific code outside the decision logic and agree record ownership across the two tracks.
-- Preserve HTTPS POST plus SSE for call/control events where practical; introduce an audio WebSocket as needed. Message payloads should not depend on that transport choice.
-
-ElevenLabs Speech Engine is another candidate for speech recognition, turn-taking, and voice while our backend supplies Claude. Its official docs describe a server-controlled LLM integration and interruption cancellation. Before adopting it, verify that we can inject analyzer-triggered turns, cancel output, and route generated audio through Simli. That combined path has not been tested here. [Official Speech Engine documentation](https://elevenlabs.io/docs/overview/capabilities/speech-engine/).
-
-| Alternative | Tradeoff |
-|---|---|
-| Claude repeatedly polls analysis tools | Simple initial mental model, but repeated calls add cost/latency and do not provide monitoring while a model request is waiting |
-| Each analyzer independently invokes Claude | Fast to sketch, but creates competing histories, overlapping replies, and duplicate actions |
-| Coordinator receives events and invokes one Claude loop | Recommended: continuous analysis, bounded context, explicit interruption/action control |
-| A managed voice-agent platform | Can reduce speech plumbing; we still need to prove its control over external observations, tool state, and avatar interruption |
-
-## 11. Build in small verifiable steps
-
-1. **Control-loop prototype:** agree the proposed observation/command types with Agent 3, feed clearly labeled simulated analyzer events to its conversation loop, and connect bounded backend action handlers. This does not yet claim real measurement.
-2. **Voice loop:** add microphone input, transcription, Claude replies, ElevenLabs output, and Simli playback; test that an interruption clears all pending audio.
-3. **One real analyzer:** replace one simulated source, retain quality/unknown states, and show its observations influencing the next allowed conversation action.
-4. **Phone seam:** publish the agreed contract with Agent 3 and connect native capture/task execution. Test actual iPhone media behavior.
-5. **Complete delivery:** call trigger, answer/no answer, one check-in, result, family notification, and cleanup. Only then add broader analysis or background ringing.
-
-Acceptance cases should include: an observation during speech; user interruption; duplicate/out-of-order/stale events; unusable input; missing baseline; an analyzer stopping; Claude timeout; a task never acknowledged; repeated notification requests; late audio after cancellation; and hangup during an outstanding tool call.
-
-Measure time to first reply audio, end-to-end interruption delay, observation-to-action delay, model calls per call, and successful task completion. Keep acted/normal session labels from the existing project plan. A technically working conversation loop is separate from validation of the analysis methods.
-
-## 12. Evidence and remaining decisions
-
-Confirmed in official docs: Claude supports typed tool requests executed by our application and streamed response events. The proposed scheduling/observation policy is our design. [Anthropic tool use](https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview), [Claude streaming](https://platform.claude.com/docs/en/build-with-claude/streaming).
-
-Confirmed in the local greeting demo: ElevenLabs speech can drive Simli and produce rendered avatar frames. Simli's SDK documents audio input, audio/video playback, and buffer clearing. Full conversational interruption remains untested. [Simli SDK](https://docs.simli.com/api-reference/javascript).
-
-Still to decide together: first real analyzer; which observations may interrupt; the urgent concern path; the speech adapter; final command/event schemas with Agent 3; and whether any analysis should move off-device. No research-based illness probabilities or clinical performance claims are established by this plan.
+See [the draft's validation instructions](proposals/README.md) to check the schemas, synthetic fixtures and script table without using provider credits. Schema validation does not verify an analyzer, provider response or real client integration.

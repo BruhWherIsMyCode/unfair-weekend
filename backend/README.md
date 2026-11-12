@@ -1,5 +1,7 @@
 # Simli + ElevenLabs avatar test
 
+The next-step design is in [ARCHITECTURE_PLAN.md](ARCHITECTURE_PLAN.md): task-based call flow, component owners, draft interfaces and a fixed example script. [Contract draft and checks](proposals/README.md). Those additions are design artifacts; the runnable application below is still the greeting experiment.
+
 A local browser prototype: type a short line, generate its voice with ElevenLabs, and send that audio to a live Simli avatar. The browser plays the synchronized video and audio returned by Simli. It does not request camera or microphone access.
 
 Requires Node.js 22.9 or newer.

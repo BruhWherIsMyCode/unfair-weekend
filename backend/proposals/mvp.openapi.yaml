@@ -1,0 +1,567 @@
+openapi: 3.1.0
+info:
+  title: Task-based check-in MVP seams (review draft)
+  version: 0.1.0-draft
+  description: >-
+    Proposed additions to shared contract v0, not implemented routes.
+    Agent 3 owns canonical publication into contract/. Agent 2 owns Node
+    providers; Agent 3 owns Python providers; parent client consumes SSE.
+    Internal routes resolve against the named provider's configured origin,
+    never a caller-supplied callback URL. Existing v1 routes remain separate.
+    JSON uses required fields and explicit nulls; IDs are opaque strings.
+    Changing a required field, enum or meaning needs both affected owners'
+    review and a new contract version before implementation.
+security:
+  - ServiceKey: []
+x-script: {file: script.en.json, version: mvp-en-1, language: en}
+x-task-definitions:
+  smile:
+    sign: face
+    instruction: task_smile
+    repeat: repeat_smile
+    capture: {media_kind: video, duration_ms: 5000, prepare_ms: 0, stop_on_silence_ms: null}
+  arms:
+    sign: arm
+    instruction: task_arms
+    repeat: repeat_arms
+    capture: {media_kind: video, duration_ms: 12000, prepare_ms: 2000, stop_on_silence_ms: null}
+  sentence:
+    sign: speech
+    instruction: task_sentence
+    repeat: repeat_sentence
+    expected_text_key: sentence
+    capture: {media_kind: audio, duration_ms: 12000, prepare_ms: 0, stop_on_silence_ms: 1500}
+x-answer-capture: {media_kind: audio, duration_ms: 15000, prepare_ms: 0, stop_on_silence_ms: 1500}
+x-media-policy:
+  max_upload_bytes: 10485760
+  max_retention_s: 300
+  accepted_types: [video/mp4, video/webm, audio/mp4, audio/webm, audio/wav]
+  description: >-
+    Proposed common container allowlist. Pick one video and one audio
+    container for the first joined client; verify Node/Python decodability
+    before enabling the others. Automatic format negotiation is deferred.
+    Check size, duration and required streams, not just the MIME header.
+    No silent truncation of task windows. No people recordings in git.
+x-sse:
+  channel: GET /v1/devices/{device_id}/events
+  event: command.execute
+  data_schema: '#/components/schemas/ClientCommandEvent'
+  description: >-
+    Additive event on the existing authenticated device stream. Use event_id
+    as the SSE id and deduplicate. Replay pending commands on reconnect only
+    while the call and command are active. A duplicate must not play/record
+    twice. Parent posts completion/failure or uploads a capture.
+paths:
+  /internal/v1/sessions:
+    post:
+      operationId: startSession
+      x-provider: Agent 3 Python
+      description: >-
+        Node starts one CallSession per call_id. Same payload is idempotent;
+        conflicting identity or script is 409. Session waits for client.ready.
+        Client preparation deadline is 30 seconds from answer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SessionStart'}
+      responses:
+        '202': {description: Session accepted; not a completed conversation}
+        default: {$ref: '#/components/responses/Failure'}
+  /internal/v1/calls/{call_id}/commands:
+    parameters:
+      - {$ref: '#/components/parameters/CallId'}
+    post:
+      operationId: executeCommand
+      x-provider: Agent 2 Node
+      description: >-
+        Python requests an action. 202 only accepts it; completion is posted
+        to Python's session events endpoint, including if already complete
+        when the same command_id is retried. Same ID/different body is 409.
+        Node serializes say/capture and rejects them after media closure.
+        A final publish_result remains allowed after hang-up or media closure.
+        end_call is idempotent, stores/sends its completion before call.ended,
+        and cancels other pending media commands.
+        publish_result is stored once per call; a final result after a
+        mid-call change updates the same message without another alert.
+        Family consumers upsert message.new by message_id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BackendCommand'}
+      responses:
+        '202': {description: 'Command accepted, callback will carry terminal result'}
+        default: {$ref: '#/components/responses/Failure'}
+  /internal/v1/sessions/{call_id}/events:
+    parameters:
+      - {$ref: '#/components/parameters/CallId'}
+    post:
+      operationId: receiveSessionEvent
+      x-provider: Agent 3 Python
+      description: >-
+        Node posts durable command completions and lifecycle changes. Dedupe
+        event_id before returning 204. Same event ID/different payload is 409.
+        Matching command may complete before executeCommand's HTTP reply;
+        register pending state before sending. Late events after cancellation
+        get 204 and cannot resume Claude. Three bounded callback retries;
+        unresolved service loss ends the call incomplete, not as_usual.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SessionEvent'}
+      responses:
+        '204': {description: Event persisted or identical duplicate acknowledged}
+        default: {$ref: '#/components/responses/Failure'}
+  /v1/calls/{call_id}/client-events:
+    parameters:
+      - {$ref: '#/components/parameters/CallId'}
+    post:
+      operationId: receiveClientEvent
+      x-provider: Agent 2 Node
+      security: [{DemoKey: []}]
+      description: >-
+        Parent readiness, completed playback, capture failure or hang-up.
+        A capture success uses the binary upload endpoint instead. Duplicate
+        event IDs are acknowledged; conflicting payloads are 409. Node
+        forwards relevant outcomes to Python, not raw client state.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ClientEvent'}
+      responses:
+        '204': {description: Accepted or identical duplicate acknowledged}
+        default: {$ref: '#/components/responses/Failure'}
+  /v1/calls/{call_id}/captures/{command_id}:
+    parameters:
+      - {$ref: '#/components/parameters/CallId'}
+      - {$ref: '#/components/parameters/CommandId'}
+    post:
+      operationId: uploadCapture
+      x-provider: Agent 2 Node
+      security: [{DemoKey: []}]
+      description: >-
+        Raw recording bytes for an active capture command, maximum 10 MiB.
+        Task command_id is its attempt_id. Server measures duration and stream
+        metadata; do not trust client-supplied duration. Exactly one upload per
+        command: identical retry is 204, differing bytes are 409. Expired or
+        cancelled command is 410. Answer audio goes to STT then is deleted;
+        task media is held privately for Python and expires within 300s.
+      requestBody:
+        required: true
+        content:
+          video/mp4: {schema: {type: string, format: binary}}
+          video/webm: {schema: {type: string, format: binary}}
+          audio/mp4: {schema: {type: string, format: binary}}
+          audio/webm: {schema: {type: string, format: binary}}
+          audio/wav: {schema: {type: string, format: binary}}
+      responses:
+        '204': {description: 'Bytes accepted; completion follows processing, not measurement'}
+        default: {$ref: '#/components/responses/Failure'}
+  /v1/calls/{call_id}/speech/{command_id}:
+    parameters:
+      - {$ref: '#/components/parameters/CallId'}
+      - {$ref: '#/components/parameters/CommandId'}
+    get:
+      operationId: getPreparedSpeech
+      x-provider: Agent 2 Node
+      security: [{DemoKey: []}]
+      description: >-
+        Only the call's active say command can fetch this prepared audio.
+        Raw signed 16-bit little-endian mono PCM at 16000 Hz. Client feeds
+        Simli, or wraps/decodes for local fallback playback. Secret provider
+        keys never reach the client. Duration excludes optional silence padding.
+      responses:
+        '200':
+          description: Prepared script audio
+          content:
+            application/octet-stream: {schema: {type: string, format: binary}}
+        default: {$ref: '#/components/responses/Failure'}
+  /internal/v1/media/{media_id}:
+    parameters:
+      - name: media_id
+        in: path
+        required: true
+        schema: {$ref: '#/components/schemas/Id'}
+      - name: call_id
+        in: query
+        required: true
+        schema: {$ref: '#/components/schemas/Id'}
+    get:
+      operationId: readTaskMedia
+      x-provider: Agent 2 Node
+      description: Task media only, bound to call_id; 410 after deletion or expiry.
+      responses:
+        '200':
+          description: Bytes in the MIME container reported by MediaResult
+          content:
+            video/mp4: {schema: {type: string, format: binary}}
+            video/webm: {schema: {type: string, format: binary}}
+            audio/mp4: {schema: {type: string, format: binary}}
+            audio/webm: {schema: {type: string, format: binary}}
+            audio/wav: {schema: {type: string, format: binary}}
+        default: {$ref: '#/components/responses/Failure'}
+    delete:
+      operationId: releaseTaskMedia
+      x-provider: Agent 2 Node
+      description: Python releases media after analysis; repeated release is idempotent.
+      responses:
+        '204': {description: Deleted or already absent for this call}
+        default: {$ref: '#/components/responses/Failure'}
+components:
+  securitySchemes:
+    DemoKey: {type: apiKey, in: header, name: X-Demo-Key}
+    ServiceKey: {type: apiKey, in: header, name: X-Service-Key}
+  parameters:
+    CallId:
+      name: call_id
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/Id'}
+    CommandId:
+      name: command_id
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/Id'}
+  responses:
+    Failure:
+      description: >-
+        JSON Error. 400 invalid_request; 401 unauthorized; 404 not_found;
+        409 conflict (ID reuse, overlapping command, ended call); 410 expired;
+        413 too_large; 415 unsupported_media; 503 unavailable.
+        On a rejected command no completion callback is promised.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+  schemas:
+    Id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$'}
+    Task: {type: string, enum: [smile, arms, sentence]}
+    Question: {type: string, enum: [medicine, feeling, unusual]}
+    SpokenLine:
+      type: string
+      enum: [greet, q_medicine, q_feeling, q_unusual, setup_phone, task_smile, task_arms, task_sentence, repeat_smile, repeat_arms, repeat_sentence, bye]
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [invalid_request, unauthorized, not_found, conflict, expired, too_large, unsupported_media, unavailable, timeout, call_ended, client_unavailable, capture_failed, transcription_failed, playback_failed, internal_error]
+        message: {type: string, maxLength: 300, description: No secrets, provider response bodies or recordings}
+    SessionStart:
+      type: object
+      additionalProperties: false
+      required: [call_id, person_id, label, script_version]
+      properties:
+        call_id: {$ref: '#/components/schemas/Id'}
+        person_id: {$ref: '#/components/schemas/Id'}
+        label: {type: string, enum: [live, normal, acted]}
+        script_version: {const: mvp-en-1}
+    SayCommand:
+      type: object
+      additionalProperties: false
+      required: [command_id, kind, line_id]
+      properties:
+        command_id: {$ref: '#/components/schemas/Id'}
+        kind: {const: say}
+        line_id: {$ref: '#/components/schemas/SpokenLine'}
+    CaptureSettings:
+      type: object
+      additionalProperties: false
+      required: [media_kind, duration_ms, prepare_ms, stop_on_silence_ms]
+      properties:
+        media_kind: {type: string, enum: [audio, video]}
+        duration_ms: {type: integer, minimum: 1000, maximum: 15000}
+        prepare_ms: {type: integer, minimum: 0, maximum: 2000, description: Included at start of duration, not added to it}
+        stop_on_silence_ms:
+          type: [integer, 'null']
+          minimum: 1000
+          maximum: 2000
+          description: Stop only after speech then silence; no speech waits until max duration
+    CapturePurpose:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [kind, question_id]
+          properties:
+            kind: {const: answer}
+            question_id: {$ref: '#/components/schemas/Question'}
+        - type: object
+          additionalProperties: false
+          required: [kind, task]
+          properties:
+            kind: {const: task}
+            task: {$ref: '#/components/schemas/Task'}
+    CaptureCommand:
+      type: object
+      additionalProperties: false
+      required: [command_id, kind, purpose, settings]
+      properties:
+        command_id: {$ref: '#/components/schemas/Id'}
+        kind: {const: capture}
+        purpose: {$ref: '#/components/schemas/CapturePurpose'}
+        settings: {$ref: '#/components/schemas/CaptureSettings'}
+      description: Settings must equal the registry entry for this purpose; command_id is attempt_id for tasks
+    PublishCommand:
+      type: object
+      additionalProperties: false
+      required: [command_id, kind, phase, summary]
+      properties:
+        command_id: {$ref: '#/components/schemas/Id'}
+        kind: {const: publish_result}
+        phase: {type: string, enum: [mid_call, final]}
+        summary: {$ref: '#/components/schemas/SessionResult'}
+      allOf:
+        - if: {properties: {phase: {const: mid_call}}}
+          then: {properties: {summary: {properties: {status: {const: change_noticed}}}}}
+    EndCommand:
+      type: object
+      additionalProperties: false
+      required: [command_id, kind, reason]
+      properties:
+        command_id: {$ref: '#/components/schemas/Id'}
+        kind: {const: end_call}
+        reason: {type: string, enum: [finished, incomplete, error]}
+    BackendCommand:
+      oneOf:
+        - {$ref: '#/components/schemas/SayCommand'}
+        - {$ref: '#/components/schemas/CaptureCommand'}
+        - {$ref: '#/components/schemas/PublishCommand'}
+        - {$ref: '#/components/schemas/EndCommand'}
+    ClientSayCommand:
+      type: object
+      additionalProperties: false
+      required: [command_id, kind, line_id, text, audio_path, duration_ms]
+      properties:
+        command_id: {$ref: '#/components/schemas/Id'}
+        kind: {const: say}
+        line_id: {$ref: '#/components/schemas/SpokenLine'}
+        text: {type: string, maxLength: 400, description: Rendered fixed script caption}
+        audio_path: {type: string, pattern: '^/v1/calls/[A-Za-z0-9_-]+/speech/[A-Za-z0-9_-]+$'}
+        duration_ms: {type: integer, minimum: 1, maximum: 30000}
+    ClientCommandEvent:
+      type: object
+      additionalProperties: false
+      required: [event_id, call_id, type, command]
+      properties:
+        event_id: {$ref: '#/components/schemas/Id'}
+        call_id: {$ref: '#/components/schemas/Id'}
+        type: {const: command.execute}
+        command:
+          oneOf:
+            - {$ref: '#/components/schemas/ClientSayCommand'}
+            - {$ref: '#/components/schemas/CaptureCommand'}
+    ClientEvent:
+      type: object
+      additionalProperties: false
+      required: [event_id, type, command_id, error]
+      properties:
+        event_id: {$ref: '#/components/schemas/Id'}
+        type: {type: string, enum: [client.ready, playback.completed, command.failed, hangup]}
+        command_id: {type: [string, 'null'], minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$'}
+        error: {oneOf: [{$ref: '#/components/schemas/Error'}, {type: 'null'}]}
+      allOf:
+        - if: {properties: {type: {enum: [client.ready, hangup]}}}
+          then: {properties: {command_id: {type: 'null'}, error: {type: 'null'}}}
+        - if: {properties: {type: {const: playback.completed}}}
+          then: {properties: {command_id: {$ref: '#/components/schemas/Id'}, error: {type: 'null'}}}
+        - if: {properties: {type: {const: command.failed}}}
+          then: {properties: {command_id: {$ref: '#/components/schemas/Id'}, error: {$ref: '#/components/schemas/Error'}}}
+    TranscriptResult:
+      type: object
+      additionalProperties: false
+      required: [kind, status, text]
+      properties:
+        kind: {const: transcript}
+        status: {type: string, enum: [heard, no_speech]}
+        text: {type: [string, 'null'], maxLength: 2000}
+      allOf:
+        - if: {properties: {status: {const: heard}}}
+          then: {properties: {text: {type: string, minLength: 1}}}
+          else: {properties: {text: {type: 'null'}}}
+      description: Transcription failures use failed command completion; ask maps that to unavailable
+    MediaResult:
+      type: object
+      additionalProperties: false
+      required: [kind, media_id, content_type, duration_ms, expires_at]
+      properties:
+        kind: {const: media}
+        media_id: {$ref: '#/components/schemas/Id'}
+        content_type: {type: string, enum: [video/mp4, video/webm, audio/mp4, audio/webm, audio/wav]}
+        duration_ms: {type: integer, minimum: 1, maximum: 15000}
+        expires_at: {type: string, format: date-time}
+    CommandResult:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [kind]
+          properties: {kind: {const: played}}
+        - {$ref: '#/components/schemas/TranscriptResult'}
+        - {$ref: '#/components/schemas/MediaResult'}
+        - type: object
+          additionalProperties: false
+          required: [kind, message_id, delivery]
+          properties:
+            kind: {const: published}
+            message_id: {$ref: '#/components/schemas/Id'}
+            delivery: {type: string, enum: [stored, provider_accepted]}
+        - type: object
+          additionalProperties: false
+          required: [kind]
+          properties: {kind: {const: ended}}
+    CommandCompleted:
+      type: object
+      additionalProperties: false
+      required: [event_id, type, command_id, status, result, error]
+      properties:
+        event_id: {$ref: '#/components/schemas/Id'}
+        type: {const: command.completed}
+        command_id: {$ref: '#/components/schemas/Id'}
+        status: {type: string, enum: [succeeded, failed, cancelled]}
+        result: {oneOf: [{$ref: '#/components/schemas/CommandResult'}, {type: 'null'}]}
+        error: {oneOf: [{$ref: '#/components/schemas/Error'}, {type: 'null'}]}
+      allOf:
+        - if: {properties: {status: {const: succeeded}}}
+          then: {properties: {result: {$ref: '#/components/schemas/CommandResult'}, error: {type: 'null'}}}
+          else: {properties: {result: {type: 'null'}, error: {$ref: '#/components/schemas/Error'}}}
+      description: Result kind must match the original command; capture answer returns transcript, task returns media
+    LifecycleEvent:
+      type: object
+      additionalProperties: false
+      required: [event_id, type, reason]
+      properties:
+        event_id: {$ref: '#/components/schemas/Id'}
+        type: {type: string, enum: [client.ready, call.ended]}
+        reason: {type: [string, 'null'], enum: [null, finished, hangup, disconnected, timeout, error]}
+      allOf:
+        - if: {properties: {type: {const: client.ready}}}
+          then: {properties: {reason: {type: 'null'}}}
+          else: {properties: {reason: {type: string}}}
+    SessionEvent:
+      oneOf:
+        - {$ref: '#/components/schemas/CommandCompleted'}
+        - {$ref: '#/components/schemas/LifecycleEvent'}
+    Baseline:
+      type: object
+      additionalProperties: false
+      required: [snapshot_id, sessions, needed, ready]
+      properties:
+        snapshot_id: {$ref: '#/components/schemas/Id'}
+        sessions: {type: integer, minimum: 0}
+        needed: {type: integer, minimum: 1}
+        ready: {type: boolean}
+    Quality:
+      type: object
+      additionalProperties: false
+      required: [status, reasons]
+      properties:
+        status: {type: string, enum: [usable, unusable]}
+        reasons: {type: array, items: {type: string, pattern: '^[a-z][a-z0-9_]*$'}, uniqueItems: true}
+      allOf:
+        - if: {properties: {status: {const: unusable}}}
+          then: {properties: {reasons: {minItems: 1}}}
+    Reading:
+      type: object
+      additionalProperties: false
+      required: [metric_id, unit, value, usual_low, usual_high, outside, side]
+      properties:
+        metric_id: {type: string, minLength: 1, description: Versioned name; Agent 3 publishes formula before numeric implementation}
+        unit: {type: string, minLength: 1, description: Unit from that metric definition, never an illness probability}
+        value: {type: number}
+        usual_low: {type: [number, 'null']}
+        usual_high: {type: [number, 'null']}
+        outside: {type: [boolean, 'null']}
+        side: {type: [string, 'null'], enum: [left, right, null], description: Parent's own left/right; null if not defined}
+    TaskResult:
+      type: object
+      additionalProperties: false
+      required: [task, attempt_id, outcome, quality, performance, baseline, reading]
+      properties:
+        task: {$ref: '#/components/schemas/Task'}
+        attempt_id: {$ref: '#/components/schemas/Id'}
+        outcome: {type: string, enum: [completed, could_not_perform, failed, cancelled]}
+        quality: {$ref: '#/components/schemas/Quality'}
+        performance: {type: string, enum: [observed, not_observed, uncertain]}
+        baseline: {$ref: '#/components/schemas/Baseline'}
+        reading: {oneOf: [{$ref: '#/components/schemas/Reading'}, {type: 'null'}]}
+      allOf:
+        - if:
+            properties:
+              outcome: {const: completed}
+              quality: {properties: {status: {const: usable}}}
+              performance: {const: observed}
+          then: {properties: {reading: {$ref: '#/components/schemas/Reading'}}}
+          else: {properties: {reading: {type: 'null'}}}
+        - if: {properties: {baseline: {properties: {ready: {const: false}}}}}
+          then:
+            properties:
+              reading:
+                anyOf:
+                  - {type: 'null'}
+                  - {type: object, properties: {usual_low: {type: 'null'}, usual_high: {type: 'null'}, outside: {type: 'null'}}}
+          else:
+            properties:
+              reading:
+                anyOf:
+                  - {type: 'null'}
+                  - {type: object, properties: {usual_low: {type: number}, usual_high: {type: number}, outside: {type: boolean}}}
+      description: >-
+        Local task module output, not a background observation event. Value
+        and unit need a specified metric. A missing baseline gives null
+        bounds/comparison, even when input and movement were usable.
+        Failure or unobserved performance has no numeric reading.
+    SummaryAttempt:
+      type: object
+      additionalProperties: false
+      required: [value, usual_low, usual_high, outside]
+      properties:
+        value: {type: number}
+        usual_low: {type: [number, 'null']}
+        usual_high: {type: [number, 'null']}
+        outside: {type: [boolean, 'null']}
+      description: Only usable readings; nullable comparison extends v0 for learning sessions
+    SummarySign:
+      type: object
+      additionalProperties: false
+      required: [sign, side, attempts, confirmed]
+      properties:
+        sign: {type: string, enum: [face, arm, speech]}
+        side: {type: [string, 'null'], enum: [left, right, null]}
+        attempts: {type: array, maxItems: 2, items: {$ref: '#/components/schemas/SummaryAttempt'}}
+        confirmed: {type: boolean}
+      allOf:
+        - if: {properties: {confirmed: {const: true}}}
+          then: {properties: {attempts: {minItems: 2, items: {properties: {outside: {const: true}, usual_low: {type: number}, usual_high: {type: number}}}}}}
+    SessionResult:
+      type: object
+      additionalProperties: false
+      required: [person_id, label, duration_s, answers, signs, status, baseline_sessions, baseline_needed, clip_id]
+      properties:
+        person_id: {$ref: '#/components/schemas/Id'}
+        label: {type: string, enum: [live, normal, acted]}
+        duration_s: {type: integer, minimum: 0}
+        answers:
+          type: object
+          additionalProperties: false
+          required: [medicine, feeling, unusual]
+          properties:
+            medicine: {type: string, enum: ['yes', 'no', unclear]}
+            feeling: {type: string, maxLength: 2000}
+            unusual: {type: string, maxLength: 2000}
+        signs: {type: array, maxItems: 3, items: {$ref: '#/components/schemas/SummarySign'}}
+        status: {type: string, enum: [as_usual, change_noticed, learning, incomplete]}
+        baseline_sessions: {type: integer, minimum: 0}
+        baseline_needed: {type: integer, minimum: 1}
+        clip_id: {type: 'null', description: No retained alert clip in this first draft}
+      description: >-
+        Based on shared v0. This draft explicitly adds nullable comparison
+        fields for learning and restricts clip_id to null until evidence
+        retention is agreed. Agent 3 reviews these compatibility changes.
+        Mid-call signs may be partial, but status change_noticed requires a
+        confirmed sign. Final status follows the documented rule priority.
+      allOf:
+        - if: {properties: {status: {const: change_noticed}}}
+          then: {properties: {signs: {contains: {properties: {confirmed: {const: true}}}, minContains: 1}}}

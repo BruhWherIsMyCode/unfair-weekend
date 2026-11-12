@@ -1,0 +1,1287 @@
+[
+  {
+    "name": "start_demo_call",
+    "schema": "SessionStart",
+    "valid": true,
+    "data": {
+      "call_id": "call_demo",
+      "person_id": "p_demo",
+      "label": "acted",
+      "script_version": "mvp-en-1"
+    }
+  },
+  {
+    "name": "say_greeting",
+    "schema": "BackendCommand",
+    "valid": true,
+    "data": {
+      "command_id": "say_greet",
+      "kind": "say",
+      "line_id": "greet"
+    }
+  },
+  {
+    "name": "capture_smile",
+    "schema": "BackendCommand",
+    "valid": true,
+    "data": {
+      "command_id": "attempt_smile",
+      "kind": "capture",
+      "purpose": {
+        "kind": "task",
+        "task": "smile"
+      },
+      "settings": {
+        "media_kind": "video",
+        "duration_ms": 5000,
+        "prepare_ms": 0,
+        "stop_on_silence_ms": null
+      }
+    }
+  },
+  {
+    "name": "capture_arms",
+    "schema": "BackendCommand",
+    "valid": true,
+    "data": {
+      "command_id": "attempt_arms",
+      "kind": "capture",
+      "purpose": {
+        "kind": "task",
+        "task": "arms"
+      },
+      "settings": {
+        "media_kind": "video",
+        "duration_ms": 12000,
+        "prepare_ms": 2000,
+        "stop_on_silence_ms": null
+      }
+    }
+  },
+  {
+    "name": "capture_sentence",
+    "schema": "BackendCommand",
+    "valid": true,
+    "data": {
+      "command_id": "attempt_sentence",
+      "kind": "capture",
+      "purpose": {
+        "kind": "task",
+        "task": "sentence"
+      },
+      "settings": {
+        "media_kind": "audio",
+        "duration_ms": 12000,
+        "prepare_ms": 0,
+        "stop_on_silence_ms": 1500
+      }
+    }
+  },
+  {
+    "name": "capture_answer",
+    "schema": "BackendCommand",
+    "valid": true,
+    "data": {
+      "command_id": "answer_medicine",
+      "kind": "capture",
+      "purpose": {
+        "kind": "answer",
+        "question_id": "medicine"
+      },
+      "settings": {
+        "media_kind": "audio",
+        "duration_ms": 15000,
+        "prepare_ms": 0,
+        "stop_on_silence_ms": 1500
+      }
+    }
+  },
+  {
+    "name": "client_say",
+    "schema": "ClientCommandEvent",
+    "valid": true,
+    "data": {
+      "event_id": "evt_play_greet",
+      "call_id": "call_demo",
+      "type": "command.execute",
+      "command": {
+        "command_id": "say_greet",
+        "kind": "say",
+        "line_id": "greet",
+        "text": "Hello, Ona. It's time for our short check-in.",
+        "audio_path": "/v1/calls/call_demo/speech/say_greet",
+        "duration_ms": 3500
+      }
+    }
+  },
+  {
+    "name": "client_capture",
+    "schema": "ClientCommandEvent",
+    "valid": true,
+    "data": {
+      "event_id": "evt_capture_arms",
+      "call_id": "call_demo",
+      "type": "command.execute",
+      "command": {
+        "command_id": "attempt_arms",
+        "kind": "capture",
+        "purpose": {
+          "kind": "task",
+          "task": "arms"
+        },
+        "settings": {
+          "media_kind": "video",
+          "duration_ms": 12000,
+          "prepare_ms": 2000,
+          "stop_on_silence_ms": null
+        }
+      }
+    }
+  },
+  {
+    "name": "client_client.ready",
+    "schema": "ClientEvent",
+    "valid": true,
+    "data": {
+      "event_id": "evt_client_client_ready",
+      "type": "client.ready",
+      "command_id": null,
+      "error": null
+    }
+  },
+  {
+    "name": "client_playback.completed",
+    "schema": "ClientEvent",
+    "valid": true,
+    "data": {
+      "event_id": "evt_client_playback_completed",
+      "type": "playback.completed",
+      "command_id": "say_greet",
+      "error": null
+    }
+  },
+  {
+    "name": "client_hangup",
+    "schema": "ClientEvent",
+    "valid": true,
+    "data": {
+      "event_id": "evt_client_hangup",
+      "type": "hangup",
+      "command_id": null,
+      "error": null
+    }
+  },
+  {
+    "name": "client_command.failed",
+    "schema": "ClientEvent",
+    "valid": true,
+    "data": {
+      "event_id": "evt_client_command_failed",
+      "type": "command.failed",
+      "command_id": "attempt_arms",
+      "error": {
+        "code": "capture_failed",
+        "message": "Camera permission was not granted."
+      }
+    }
+  },
+  {
+    "name": "played_callback",
+    "schema": "SessionEvent",
+    "valid": true,
+    "data": {
+      "event_id": "evt_say_greet",
+      "type": "command.completed",
+      "command_id": "say_greet",
+      "status": "succeeded",
+      "result": {
+        "kind": "played"
+      },
+      "error": null
+    }
+  },
+  {
+    "name": "heard_callback",
+    "schema": "SessionEvent",
+    "valid": true,
+    "data": {
+      "event_id": "evt_answer_medicine",
+      "type": "command.completed",
+      "command_id": "answer_medicine",
+      "status": "succeeded",
+      "result": {
+        "kind": "transcript",
+        "status": "heard",
+        "text": "Yes, I took it after breakfast."
+      },
+      "error": null
+    }
+  },
+  {
+    "name": "no_speech_callback",
+    "schema": "SessionEvent",
+    "valid": true,
+    "data": {
+      "event_id": "evt_answer_feeling",
+      "type": "command.completed",
+      "command_id": "answer_feeling",
+      "status": "succeeded",
+      "result": {
+        "kind": "transcript",
+        "status": "no_speech",
+        "text": null
+      },
+      "error": null
+    }
+  },
+  {
+    "name": "media_callback",
+    "schema": "SessionEvent",
+    "valid": true,
+    "data": {
+      "event_id": "evt_attempt_arms",
+      "type": "command.completed",
+      "command_id": "attempt_arms",
+      "status": "succeeded",
+      "result": {
+        "kind": "media",
+        "media_id": "media_arms",
+        "content_type": "video/mp4",
+        "duration_ms": 12000,
+        "expires_at": "2026-11-13T10:05:00Z"
+      },
+      "error": null
+    }
+  },
+  {
+    "name": "published_callback",
+    "schema": "SessionEvent",
+    "valid": true,
+    "data": {
+      "event_id": "evt_publish_change",
+      "type": "command.completed",
+      "command_id": "publish_change",
+      "status": "succeeded",
+      "result": {
+        "kind": "published",
+        "message_id": "msg_demo",
+        "delivery": "stored"
+      },
+      "error": null
+    }
+  },
+  {
+    "name": "ended_callback",
+    "schema": "SessionEvent",
+    "valid": true,
+    "data": {
+      "event_id": "evt_end_demo",
+      "type": "command.completed",
+      "command_id": "end_demo",
+      "status": "succeeded",
+      "result": {
+        "kind": "ended"
+      },
+      "error": null
+    }
+  },
+  {
+    "name": "timeout_callback",
+    "schema": "SessionEvent",
+    "valid": true,
+    "data": {
+      "event_id": "evt_attempt_sentence",
+      "type": "command.completed",
+      "command_id": "attempt_sentence",
+      "status": "failed",
+      "result": null,
+      "error": {
+        "code": "timeout",
+        "message": "Capture deadline reached."
+      }
+    }
+  },
+  {
+    "name": "cancelled_callback",
+    "schema": "SessionEvent",
+    "valid": true,
+    "data": {
+      "event_id": "evt_attempt_smile",
+      "type": "command.completed",
+      "command_id": "attempt_smile",
+      "status": "cancelled",
+      "result": null,
+      "error": {
+        "code": "call_ended",
+        "message": "The call ended."
+      }
+    }
+  },
+  {
+    "name": "ready_lifecycle",
+    "schema": "SessionEvent",
+    "valid": true,
+    "data": {
+      "event_id": "evt_ready",
+      "type": "client.ready",
+      "reason": null
+    }
+  },
+  {
+    "name": "ended_lifecycle",
+    "schema": "SessionEvent",
+    "valid": true,
+    "data": {
+      "event_id": "evt_end",
+      "type": "call.ended",
+      "reason": "hangup"
+    }
+  },
+  {
+    "name": "illustrative_within_usual",
+    "schema": "TaskResult",
+    "valid": true,
+    "data": {
+      "task": "smile",
+      "attempt_id": "attempt_smile",
+      "outcome": "completed",
+      "quality": {
+        "status": "usable",
+        "reasons": []
+      },
+      "performance": "observed",
+      "baseline": {
+        "snapshot_id": "baseline_demo",
+        "sessions": 12,
+        "needed": 5,
+        "ready": true
+      },
+      "reading": {
+        "metric_id": "illustrative_ratio_v1",
+        "unit": "ratio",
+        "value": 0.01,
+        "usual_low": -0.02,
+        "usual_high": 0.03,
+        "outside": false,
+        "side": null
+      }
+    }
+  },
+  {
+    "name": "illustrative_outside",
+    "schema": "TaskResult",
+    "valid": true,
+    "data": {
+      "task": "smile",
+      "attempt_id": "attempt_smile_repeat",
+      "outcome": "completed",
+      "quality": {
+        "status": "usable",
+        "reasons": []
+      },
+      "performance": "observed",
+      "baseline": {
+        "snapshot_id": "baseline_demo",
+        "sessions": 12,
+        "needed": 5,
+        "ready": true
+      },
+      "reading": {
+        "metric_id": "illustrative_ratio_v1",
+        "unit": "ratio",
+        "value": 0.11,
+        "usual_low": -0.02,
+        "usual_high": 0.03,
+        "outside": true,
+        "side": null
+      }
+    }
+  },
+  {
+    "name": "learning_no_comparison",
+    "schema": "TaskResult",
+    "valid": true,
+    "data": {
+      "task": "smile",
+      "attempt_id": "attempt_smile",
+      "outcome": "completed",
+      "quality": {
+        "status": "usable",
+        "reasons": []
+      },
+      "performance": "observed",
+      "baseline": {
+        "snapshot_id": "baseline_learning",
+        "sessions": 2,
+        "needed": 5,
+        "ready": false
+      },
+      "reading": {
+        "metric_id": "illustrative_ratio_v1",
+        "unit": "ratio",
+        "value": 0.01,
+        "usual_low": null,
+        "usual_high": null,
+        "outside": null,
+        "side": null
+      }
+    }
+  },
+  {
+    "name": "unusable_capture",
+    "schema": "TaskResult",
+    "valid": true,
+    "data": {
+      "task": "smile",
+      "attempt_id": "attempt_smile",
+      "outcome": "completed",
+      "quality": {
+        "status": "unusable",
+        "reasons": [
+          "face_not_visible"
+        ]
+      },
+      "performance": "uncertain",
+      "baseline": {
+        "snapshot_id": "baseline_demo",
+        "sessions": 12,
+        "needed": 5,
+        "ready": true
+      },
+      "reading": null
+    }
+  },
+  {
+    "name": "could_not_perform",
+    "schema": "TaskResult",
+    "valid": true,
+    "data": {
+      "task": "smile",
+      "attempt_id": "attempt_smile",
+      "outcome": "could_not_perform",
+      "quality": {
+        "status": "usable",
+        "reasons": []
+      },
+      "performance": "not_observed",
+      "baseline": {
+        "snapshot_id": "baseline_demo",
+        "sessions": 12,
+        "needed": 5,
+        "ready": true
+      },
+      "reading": null
+    }
+  },
+  {
+    "name": "analysis_failed",
+    "schema": "TaskResult",
+    "valid": true,
+    "data": {
+      "task": "smile",
+      "attempt_id": "attempt_smile",
+      "outcome": "failed",
+      "quality": {
+        "status": "unusable",
+        "reasons": [
+          "analysis_timeout"
+        ]
+      },
+      "performance": "uncertain",
+      "baseline": {
+        "snapshot_id": "baseline_demo",
+        "sessions": 12,
+        "needed": 5,
+        "ready": true
+      },
+      "reading": null
+    }
+  },
+  {
+    "name": "analysis_cancelled",
+    "schema": "TaskResult",
+    "valid": true,
+    "data": {
+      "task": "smile",
+      "attempt_id": "attempt_smile",
+      "outcome": "cancelled",
+      "quality": {
+        "status": "unusable",
+        "reasons": [
+          "call_ended"
+        ]
+      },
+      "performance": "uncertain",
+      "baseline": {
+        "snapshot_id": "baseline_demo",
+        "sessions": 12,
+        "needed": 5,
+        "ready": true
+      },
+      "reading": null
+    }
+  },
+  {
+    "name": "ordinary_summary",
+    "schema": "SessionResult",
+    "valid": true,
+    "data": {
+      "person_id": "p_demo",
+      "label": "acted",
+      "duration_s": 95,
+      "answers": {
+        "medicine": "yes",
+        "feeling": "I slept well. I feel fine.",
+        "unusual": "No, nothing unusual."
+      },
+      "signs": [
+        {
+          "sign": "face",
+          "side": null,
+          "attempts": [
+            {
+              "value": 0.01,
+              "usual_low": -0.02,
+              "usual_high": 0.03,
+              "outside": false
+            }
+          ],
+          "confirmed": false
+        },
+        {
+          "sign": "arm",
+          "side": null,
+          "attempts": [
+            {
+              "value": 0.01,
+              "usual_low": -0.02,
+              "usual_high": 0.03,
+              "outside": false
+            }
+          ],
+          "confirmed": false
+        },
+        {
+          "sign": "speech",
+          "side": null,
+          "attempts": [
+            {
+              "value": 0.01,
+              "usual_low": -0.02,
+              "usual_high": 0.03,
+              "outside": false
+            }
+          ],
+          "confirmed": false
+        }
+      ],
+      "status": "as_usual",
+      "baseline_sessions": 12,
+      "baseline_needed": 5,
+      "clip_id": null
+    }
+  },
+  {
+    "name": "changed_summary",
+    "schema": "SessionResult",
+    "valid": true,
+    "data": {
+      "person_id": "p_demo",
+      "label": "acted",
+      "duration_s": 95,
+      "answers": {
+        "medicine": "yes",
+        "feeling": "I slept well. I feel fine.",
+        "unusual": "No, nothing unusual."
+      },
+      "signs": [
+        {
+          "sign": "face",
+          "side": null,
+          "attempts": [
+            {
+              "value": 0.11,
+              "usual_low": -0.02,
+              "usual_high": 0.03,
+              "outside": true
+            },
+            {
+              "value": 0.09,
+              "usual_low": -0.02,
+              "usual_high": 0.03,
+              "outside": true
+            }
+          ],
+          "confirmed": true
+        },
+        {
+          "sign": "arm",
+          "side": null,
+          "attempts": [
+            {
+              "value": 0.01,
+              "usual_low": -0.02,
+              "usual_high": 0.03,
+              "outside": false
+            }
+          ],
+          "confirmed": false
+        },
+        {
+          "sign": "speech",
+          "side": null,
+          "attempts": [
+            {
+              "value": 0.01,
+              "usual_low": -0.02,
+              "usual_high": 0.03,
+              "outside": false
+            }
+          ],
+          "confirmed": false
+        }
+      ],
+      "status": "change_noticed",
+      "baseline_sessions": 12,
+      "baseline_needed": 5,
+      "clip_id": null
+    }
+  },
+  {
+    "name": "publish_mid_call",
+    "schema": "BackendCommand",
+    "valid": true,
+    "data": {
+      "command_id": "publish_change",
+      "kind": "publish_result",
+      "phase": "mid_call",
+      "summary": {
+        "person_id": "p_demo",
+        "label": "acted",
+        "duration_s": 60,
+        "answers": {
+          "medicine": "yes",
+          "feeling": "I slept well. I feel fine.",
+          "unusual": "No, nothing unusual."
+        },
+        "signs": [
+          {
+            "sign": "face",
+            "side": null,
+            "attempts": [
+              {
+                "value": 0.11,
+                "usual_low": -0.02,
+                "usual_high": 0.03,
+                "outside": true
+              },
+              {
+                "value": 0.09,
+                "usual_low": -0.02,
+                "usual_high": 0.03,
+                "outside": true
+              }
+            ],
+            "confirmed": true
+          }
+        ],
+        "status": "change_noticed",
+        "baseline_sessions": 12,
+        "baseline_needed": 5,
+        "clip_id": null
+      }
+    }
+  },
+  {
+    "name": "publish_final",
+    "schema": "BackendCommand",
+    "valid": true,
+    "data": {
+      "command_id": "publish_final",
+      "kind": "publish_result",
+      "phase": "final",
+      "summary": {
+        "person_id": "p_demo",
+        "label": "acted",
+        "duration_s": 95,
+        "answers": {
+          "medicine": "yes",
+          "feeling": "I slept well. I feel fine.",
+          "unusual": "No, nothing unusual."
+        },
+        "signs": [
+          {
+            "sign": "face",
+            "side": null,
+            "attempts": [
+              {
+                "value": 0.11,
+                "usual_low": -0.02,
+                "usual_high": 0.03,
+                "outside": true
+              },
+              {
+                "value": 0.09,
+                "usual_low": -0.02,
+                "usual_high": 0.03,
+                "outside": true
+              }
+            ],
+            "confirmed": true
+          },
+          {
+            "sign": "arm",
+            "side": null,
+            "attempts": [
+              {
+                "value": 0.01,
+                "usual_low": -0.02,
+                "usual_high": 0.03,
+                "outside": false
+              }
+            ],
+            "confirmed": false
+          },
+          {
+            "sign": "speech",
+            "side": null,
+            "attempts": [
+              {
+                "value": 0.01,
+                "usual_low": -0.02,
+                "usual_high": 0.03,
+                "outside": false
+              }
+            ],
+            "confirmed": false
+          }
+        ],
+        "status": "change_noticed",
+        "baseline_sessions": 12,
+        "baseline_needed": 5,
+        "clip_id": null
+      }
+    }
+  },
+  {
+    "name": "learning_summary",
+    "schema": "SessionResult",
+    "valid": true,
+    "data": {
+      "person_id": "p_demo",
+      "label": "acted",
+      "duration_s": 95,
+      "answers": {
+        "medicine": "yes",
+        "feeling": "I slept well. I feel fine.",
+        "unusual": "No, nothing unusual."
+      },
+      "signs": [
+        {
+          "sign": "face",
+          "side": null,
+          "attempts": [
+            {
+              "value": 0.01,
+              "usual_low": null,
+              "usual_high": null,
+              "outside": null
+            }
+          ],
+          "confirmed": false
+        },
+        {
+          "sign": "arm",
+          "side": null,
+          "attempts": [
+            {
+              "value": 0.01,
+              "usual_low": null,
+              "usual_high": null,
+              "outside": null
+            }
+          ],
+          "confirmed": false
+        },
+        {
+          "sign": "speech",
+          "side": null,
+          "attempts": [
+            {
+              "value": 0.01,
+              "usual_low": null,
+              "usual_high": null,
+              "outside": null
+            }
+          ],
+          "confirmed": false
+        }
+      ],
+      "status": "learning",
+      "baseline_sessions": 2,
+      "baseline_needed": 5,
+      "clip_id": null
+    }
+  },
+  {
+    "name": "incomplete_summary",
+    "schema": "SessionResult",
+    "valid": true,
+    "data": {
+      "person_id": "p_demo",
+      "label": "acted",
+      "duration_s": 95,
+      "answers": {
+        "medicine": "yes",
+        "feeling": "I slept well. I feel fine.",
+        "unusual": "No, nothing unusual."
+      },
+      "signs": [],
+      "status": "incomplete",
+      "baseline_sessions": 12,
+      "baseline_needed": 5,
+      "clip_id": null
+    }
+  },
+  {
+    "name": "end_command",
+    "schema": "BackendCommand",
+    "valid": true,
+    "data": {
+      "command_id": "end_demo",
+      "kind": "end_call",
+      "reason": "finished"
+    }
+  },
+  {
+    "name": "request_error",
+    "schema": "Error",
+    "valid": true,
+    "data": {
+      "code": "unsupported_media",
+      "message": "Unsupported capture container."
+    }
+  },
+  {
+    "name": "reject_unknown_line",
+    "schema": "BackendCommand",
+    "valid": false,
+    "data": {
+      "command_id": "say_bad",
+      "kind": "say",
+      "line_id": "invented_line"
+    }
+  },
+  {
+    "name": "reject_free_text_command",
+    "schema": "BackendCommand",
+    "valid": false,
+    "data": {
+      "command_id": "say_bad",
+      "kind": "say",
+      "line_id": "greet",
+      "text": "Free-form text"
+    }
+  },
+  {
+    "name": "reject_failure_without_error",
+    "schema": "ClientEvent",
+    "valid": false,
+    "data": {
+      "event_id": "evt_bad",
+      "type": "command.failed",
+      "command_id": "attempt_smile",
+      "error": null
+    }
+  },
+  {
+    "name": "reject_success_without_result",
+    "schema": "SessionEvent",
+    "valid": false,
+    "data": {
+      "event_id": "evt_say_bad",
+      "type": "command.completed",
+      "command_id": "say_bad",
+      "status": "succeeded",
+      "result": null,
+      "error": null
+    }
+  },
+  {
+    "name": "reject_failed_with_result",
+    "schema": "SessionEvent",
+    "valid": false,
+    "data": {
+      "event_id": "evt_say_bad",
+      "type": "command.completed",
+      "command_id": "say_bad",
+      "status": "failed",
+      "result": {
+        "kind": "played"
+      },
+      "error": {
+        "code": "timeout",
+        "message": "Timeout."
+      }
+    }
+  },
+  {
+    "name": "reject_empty_heard_transcript",
+    "schema": "TranscriptResult",
+    "valid": false,
+    "data": {
+      "kind": "transcript",
+      "status": "heard",
+      "text": ""
+    }
+  },
+  {
+    "name": "reject_text_for_no_speech",
+    "schema": "TranscriptResult",
+    "valid": false,
+    "data": {
+      "kind": "transcript",
+      "status": "no_speech",
+      "text": "invented"
+    }
+  },
+  {
+    "name": "reject_bad_expiry",
+    "schema": "MediaResult",
+    "valid": false,
+    "data": {
+      "kind": "media",
+      "media_id": "media_arms",
+      "content_type": "video/mp4",
+      "duration_ms": 12000,
+      "expires_at": "tomorrow"
+    }
+  },
+  {
+    "name": "reject_reading_from_unusable_capture",
+    "schema": "TaskResult",
+    "valid": false,
+    "data": {
+      "task": "smile",
+      "attempt_id": "attempt_smile",
+      "outcome": "completed",
+      "quality": {
+        "status": "unusable",
+        "reasons": [
+          "face_not_visible"
+        ]
+      },
+      "performance": "uncertain",
+      "baseline": {
+        "snapshot_id": "baseline_demo",
+        "sessions": 12,
+        "needed": 5,
+        "ready": true
+      },
+      "reading": {
+        "metric_id": "illustrative_ratio_v1",
+        "unit": "ratio",
+        "value": 0.01,
+        "usual_low": -0.02,
+        "usual_high": 0.03,
+        "outside": false,
+        "side": null
+      }
+    }
+  },
+  {
+    "name": "reject_normal_comparison_without_baseline",
+    "schema": "TaskResult",
+    "valid": false,
+    "data": {
+      "task": "smile",
+      "attempt_id": "attempt_smile",
+      "outcome": "completed",
+      "quality": {
+        "status": "usable",
+        "reasons": []
+      },
+      "performance": "observed",
+      "baseline": {
+        "snapshot_id": "baseline_learning",
+        "sessions": 2,
+        "needed": 5,
+        "ready": false
+      },
+      "reading": {
+        "metric_id": "illustrative_ratio_v1",
+        "unit": "ratio",
+        "value": 0.01,
+        "usual_low": null,
+        "usual_high": null,
+        "outside": false,
+        "side": null
+      }
+    }
+  },
+  {
+    "name": "reject_missing_usable_reading",
+    "schema": "TaskResult",
+    "valid": false,
+    "data": {
+      "task": "smile",
+      "attempt_id": "attempt_smile",
+      "outcome": "completed",
+      "quality": {
+        "status": "usable",
+        "reasons": []
+      },
+      "performance": "observed",
+      "baseline": {
+        "snapshot_id": "baseline_demo",
+        "sessions": 12,
+        "needed": 5,
+        "ready": true
+      },
+      "reading": null
+    }
+  },
+  {
+    "name": "reject_reading_when_not_performed",
+    "schema": "TaskResult",
+    "valid": false,
+    "data": {
+      "task": "smile",
+      "attempt_id": "attempt_smile",
+      "outcome": "could_not_perform",
+      "quality": {
+        "status": "usable",
+        "reasons": []
+      },
+      "performance": "not_observed",
+      "baseline": {
+        "snapshot_id": "baseline_demo",
+        "sessions": 12,
+        "needed": 5,
+        "ready": true
+      },
+      "reading": {
+        "metric_id": "illustrative_ratio_v1",
+        "unit": "ratio",
+        "value": 0.01,
+        "usual_low": -0.02,
+        "usual_high": 0.03,
+        "outside": false,
+        "side": null
+      }
+    }
+  },
+  {
+    "name": "reject_unusable_without_reason",
+    "schema": "TaskResult",
+    "valid": false,
+    "data": {
+      "task": "smile",
+      "attempt_id": "attempt_smile",
+      "outcome": "completed",
+      "quality": {
+        "status": "unusable",
+        "reasons": []
+      },
+      "performance": "uncertain",
+      "baseline": {
+        "snapshot_id": "baseline_demo",
+        "sessions": 12,
+        "needed": 5,
+        "ready": true
+      },
+      "reading": null
+    }
+  },
+  {
+    "name": "reject_confirmation_from_one_attempt",
+    "schema": "SessionResult",
+    "valid": false,
+    "data": {
+      "person_id": "p_demo",
+      "label": "acted",
+      "duration_s": 95,
+      "answers": {
+        "medicine": "yes",
+        "feeling": "I slept well. I feel fine.",
+        "unusual": "No, nothing unusual."
+      },
+      "signs": [
+        {
+          "sign": "face",
+          "side": null,
+          "attempts": [
+            {
+              "value": 0.11,
+              "usual_low": -0.02,
+              "usual_high": 0.03,
+              "outside": true
+            }
+          ],
+          "confirmed": true
+        },
+        {
+          "sign": "arm",
+          "side": null,
+          "attempts": [
+            {
+              "value": 0.01,
+              "usual_low": -0.02,
+              "usual_high": 0.03,
+              "outside": false
+            }
+          ],
+          "confirmed": false
+        },
+        {
+          "sign": "speech",
+          "side": null,
+          "attempts": [
+            {
+              "value": 0.01,
+              "usual_low": -0.02,
+              "usual_high": 0.03,
+              "outside": false
+            }
+          ],
+          "confirmed": false
+        }
+      ],
+      "status": "change_noticed",
+      "baseline_sessions": 12,
+      "baseline_needed": 5,
+      "clip_id": null
+    }
+  },
+  {
+    "name": "reject_mid_call_normal_alert",
+    "schema": "BackendCommand",
+    "valid": false,
+    "data": {
+      "command_id": "publish_bad",
+      "kind": "publish_result",
+      "phase": "mid_call",
+      "summary": {
+        "person_id": "p_demo",
+        "label": "acted",
+        "duration_s": 95,
+        "answers": {
+          "medicine": "yes",
+          "feeling": "I slept well. I feel fine.",
+          "unusual": "No, nothing unusual."
+        },
+        "signs": [
+          {
+            "sign": "face",
+            "side": null,
+            "attempts": [
+              {
+                "value": 0.01,
+                "usual_low": -0.02,
+                "usual_high": 0.03,
+                "outside": false
+              }
+            ],
+            "confirmed": false
+          },
+          {
+            "sign": "arm",
+            "side": null,
+            "attempts": [
+              {
+                "value": 0.01,
+                "usual_low": -0.02,
+                "usual_high": 0.03,
+                "outside": false
+              }
+            ],
+            "confirmed": false
+          },
+          {
+            "sign": "speech",
+            "side": null,
+            "attempts": [
+              {
+                "value": 0.01,
+                "usual_low": -0.02,
+                "usual_high": 0.03,
+                "outside": false
+              }
+            ],
+            "confirmed": false
+          }
+        ],
+        "status": "as_usual",
+        "baseline_sessions": 12,
+        "baseline_needed": 5,
+        "clip_id": null
+      }
+    }
+  },
+  {
+    "name": "reject_change_without_confirmation",
+    "schema": "SessionResult",
+    "valid": false,
+    "data": {
+      "person_id": "p_demo",
+      "label": "acted",
+      "duration_s": 95,
+      "answers": {
+        "medicine": "yes",
+        "feeling": "I slept well. I feel fine.",
+        "unusual": "No, nothing unusual."
+      },
+      "signs": [
+        {
+          "sign": "face",
+          "side": null,
+          "attempts": [
+            {
+              "value": 0.11,
+              "usual_low": -0.02,
+              "usual_high": 0.03,
+              "outside": true
+            },
+            {
+              "value": 0.09,
+              "usual_low": -0.02,
+              "usual_high": 0.03,
+              "outside": true
+            }
+          ],
+          "confirmed": false
+        },
+        {
+          "sign": "arm",
+          "side": null,
+          "attempts": [
+            {
+              "value": 0.01,
+              "usual_low": -0.02,
+              "usual_high": 0.03,
+              "outside": false
+            }
+          ],
+          "confirmed": false
+        },
+        {
+          "sign": "speech",
+          "side": null,
+          "attempts": [
+            {
+              "value": 0.01,
+              "usual_low": -0.02,
+              "usual_high": 0.03,
+              "outside": false
+            }
+          ],
+          "confirmed": false
+        }
+      ],
+      "status": "change_noticed",
+      "baseline_sessions": 12,
+      "baseline_needed": 5,
+      "clip_id": null
+    }
+  }
+]

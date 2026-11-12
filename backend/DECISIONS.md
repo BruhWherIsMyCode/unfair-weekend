@@ -23,3 +23,9 @@ The user requested a reviewable plan in which Claude leads the conversation whil
 Status: design proposal only. The existing greeting demo is unchanged. The Claude conversation loop, analyzers, mid-call commands, notification handlers, and Speech Engine integration have not been implemented or tested. The user requested no pull requests for these experiments; the prototype PR was closed and further work stays on the backend branch unless instructed otherwise.
 
 Clarification after the user's review: CallSession and session coordinator are one logical component. ActionExecutor is a name for ordinary tool-handler functions, not a required separate service. Tasks share one protocol with task-specific rules and readings. The initial `run_task` tool can await a final structured result while progress updates remain internal to CallSession and the app. Execution completion, usable capture, and the measured finding are independent facts.
+
+## 2026-11-13: task-only MVP and contract proposal
+
+The user chose task-based measurement for the MVP and deferred all background health analyzers. [ARCHITECTURE_PLAN.md](ARCHITECTURE_PLAN.md) now replaces the continuous-analysis proposal with a full diagram, the Node/Python ownership split, one final result per task, and a fixed English example call including the repeat/confirmation branch. For the first integration it proposes short answer recordings as well, making the call turn-based.
+
+[proposals/](proposals/README.md) contains a reviewable OpenAPI draft, exact script and synthetic fixtures. It specifies acknowledgment versus completion, raw-media transport, quality/performance/baseline distinctions, deadlines, cancellation and mid-call message publication. Agent 3 must review and publish the canonical files in `contract/`; nothing outside `backend/` was changed. These contracts and the conversational flow remain unimplemented. The existing greeting experiment is unchanged; no pull request is requested.
