@@ -27,7 +27,7 @@ xcodebuild -project OnasCalls.xcodeproj -scheme OnasCalls \
 cp Local.xcconfig.example Local.xcconfig   # untracked, never commit it
 ```
 
-Set `DEVELOPMENT_TEAM`. With a free Apple ID team you may also need your own `ONAS_BUNDLE_ID`, and if signing refuses the Time Sensitive capability, switch `ONAS_ENTITLEMENTS` to the basic file as the example shows. On the phone, trust the developer once: Settings > General > VPN & Device Management.
+Set `DEVELOPMENT_TEAM`. A free Personal Team cannot use the Time Sensitive Notifications capability, so with one, switch `ONAS_ENTITLEMENTS` to the basic file as the example shows. The notification then arrives as a normal one: no "TIME SENSITIVE" label, and a Focus mode can hold it back. A paid team keeps the label. You may also need your own `ONAS_BUNDLE_ID` if someone else has registered this one. On the phone, trust the developer once: Settings > General > VPN & Device Management.
 
 ## Private assets
 

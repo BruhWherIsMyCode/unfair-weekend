@@ -6,6 +6,7 @@ DEVELOPMENT_TEAM = ABCDE12345
 // A free Apple ID team needs a bundle id nobody else has used. Change it if signing complains.
 // ONAS_BUNDLE_ID = com.yourname.onascalls
 
-// If the team cannot use Time Sensitive Notifications, uncomment this line.
+// A free Personal Team cannot use Time Sensitive Notifications (Xcode refuses the profile).
+// With such a team, uncomment this line.
 // The notification then arrives as a normal one (no "TIME SENSITIVE" label, Focus can hold it back).
 // ONAS_ENTITLEMENTS = Config/OnasCalls-basic.entitlements
