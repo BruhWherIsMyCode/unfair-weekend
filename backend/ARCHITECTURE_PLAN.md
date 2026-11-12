@@ -2,7 +2,7 @@
 
 Updated 13 Nov 2026. **Agreed direction:** one Python backend, one active measurement task per call, periodic observations during that task, and interruptions that can change the conversation. This supersedes the earlier Node/Python split and whole-task-clip-only proposal.
 
-**Status:** design and contract draft. Only the separate Node Simli/ElevenLabs greeting experiment has been live-tested. It is a reference to port, not a second service in the target architecture. The Python backend, streaming measurements and interrupt handling below are not implemented.
+**Status:** design and contract draft, with the first [Python foundation](README.md#python-foundation) implemented: protected health, configuration and local connection lifecycle. Only the separate Node Simli/ElevenLabs greeting experiment has been live-tested with providers. It is a reference to port, not a second service in the target architecture. Client call routes, the joined Python flow, streaming measurements and interrupt handling below remain unimplemented.
 
 ## 1. Full flow and ownership
 
