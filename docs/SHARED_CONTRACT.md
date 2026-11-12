@@ -6,6 +6,29 @@ Written 12 Nov 2026, kickoff evening. **Nothing here is built or tested.** It ex
 
 Labels are the same as in `PROJECT_CONTEXT.md`: **[proposal]** = accept, change or drop; **[unverified]** = from memory or reasoning, not checked.
 
+## Change, 12 Nov late evening (Feodor): overrides the sections below where they disagree
+
+Reported by Feodor for the team. The other two teammates have not reviewed this text. Details and reasons are in `AGENT_3_CONNECTOR.md`, which was rewritten.
+
+Decided:
+
+- **The analysis runs on a server**, not on the parent's phone.
+- **Agent 3 is now "analysis and orchestrator"**: the measuring, her baseline, and a Claude orchestrator that runs the call. Agent 2 builds the backend that connects the apps, the avatar and the orchestrator.
+- **Claude is the orchestrator.** Measuring tools report readings to it. It leads the conversation, drives the avatar, and can send the alert during the call.
+- **Our own apps on both sides**, parent and family.
+
+What no longer holds below:
+
+- §2, the diagram and rule 2. `CheckInCore` no longer measures, and "video frames never leave the phone" is not true any more: short task clips go to our server to be measured. [proposal] Under the plan in Agent 3's brief her voice also goes to ElevenLabs for speech-to-text, and her answers and readings go to Claude as text.
+- §3. `ios/CheckInCore/` has no owner. Agent 3 owns `analysis/` [proposal for the name] and keeps `contract/` until the team says otherwise.
+- §4. The API has no way to send a task clip for measuring (`POST /calls/{call_id}/clip` is the alert clip only), and no way to send an alert before the call ends (`POST /calls/{call_id}/result` comes at the end).
+- §7. The Swift seam assumed the measuring was on the phone.
+- §9, M2. "On a real iPhone" now means measured on the server from a real iPhone's clips.
+
+Still holds: the `SessionResult` and `Message` shapes as a starting point, the events in §5, the avatar modes in §6, the script line ids in §8, the milestone times in §9, and every rule in §10.
+
+Not agreed yet, and blocking code on both sides of the seam: `AGENT_3_CONNECTOR.md` §13. The first three are the seam between the backend and the orchestrator, the difference from Agent 2's plan on branch `agent-2/backend`, and how task clips reach the server.
+
 ## 1. What changed against PROJECT_CONTEXT.md
 
 The team decided this after the context file was written. Where the two disagree, this file and the agent briefs win.
