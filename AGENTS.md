@@ -6,6 +6,8 @@ Rules for every AI agent working in this repo. Read all of it before your first 
 
 A hackathon project for Unfair Weekend 2026 (Vilnius, 12–15 Nov). An AI avatar video-calls an older person who lives alone, asks a few check-in questions, and checks face, arms and speech against her own usual. Her family gets one plain message.
 
+The target is one Python backend with separate call/media/delivery and analysis/orchestration modules. Only the requested task is measured; its periodic observations and immediate resource events can interrupt that attempt. See `backend/ARCHITECTURE_PLAN.md`. The current runnable backend code is a Node greeting prototype to port, not the completed Python application.
+
 Submission deadline: **Sat 14 Nov, 20:00**. The event rule is "build it here": all code in this repo is written during the event.
 
 Three agents build it in parallel. Each has a brief, a branch and its own folders.
@@ -18,7 +20,9 @@ Your human tells you your number. If nobody told you, ask. Do not guess.
 |---|---|---|---|
 | 1, iOS app | `docs/AGENT_1_IOS_APP.md` | `agent-1/ios-app` | `ios/App/` |
 | 2, backend and calls | `docs/AGENT_2_BACKEND.md` | `agent-2/backend` | `backend/` |
-| 3, connector | `docs/AGENT_3_CONNECTOR.md` | `agent-3/connector` | `contract/`, `ios/CheckInCore/` |
+| 3, analysis and orchestration | `docs/AGENT_3_CONNECTOR.md` | `agent-3/connector` | `analysis/`, `contract/` |
+
+`analysis/` contains Python modules imported by the backend application, not a second HTTP service. `ios/CheckInCore/` is no longer a required dependency or an assigned implementation folder. Agent 1's current stage-demo scope is in `docs/tasks/agent1.md`; it does not implement the real parent capture client.
 
 Humans own `main`, `docs/`, this file, the README and every other file at the repo root.
 
@@ -66,7 +70,7 @@ Before you write code, read in this order:
 
 8. **Conflicts.** If you edit only your own folders there should be none. If a conflict appears in a file that is not yours, stop and tell your human. Do not resolve it by overwriting the other side.
 
-Agent 3: the contract files and the mock session must be on `main` within the first hour. The other two agents are blocked until then.
+Agent 3 owns publication of the canonical shared contract. Until `contract/` is published, the checked-in draft is under `backend/proposals/`, linked from `docs/SHARED_CONTRACT.md`. Agree on boundary changes before implementing independent consumers; use the draft fixtures for mocks instead of inventing different payload shapes.
 
 If two agents run on the same machine, give each its own working copy so they do not switch branches under each other:
 

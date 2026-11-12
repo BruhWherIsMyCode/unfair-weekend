@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Check-in · Avatar test</title>
+    <link rel="stylesheet" href="/style.css">
+    <script type="module" src="/avatar.js"></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <a class="wordmark" href="/">Check-in<span> / avatar test</span></a>
+        <span class="tag">Prototype</span>
+      </header>
+      <div class="intro">
+        <p class="eyebrow">A face for a familiar voice</p>
+        <h1>One line. One live avatar.</h1>
+        <p>Hear an ElevenLabs voice, spoken by a Simli avatar.</p>
+      </div>
+      <div class="demo-grid">
+        <section class="stage" aria-label="Avatar playback">
+          <div class="video-frame">
+            <video id="avatar-video" autoplay playsinline muted aria-label="Live avatar"></video>
+            <div id="placeholder"><span class="avatar-mark" aria-hidden="true">◌</span><p>Your avatar will appear here.</p></div>
+            <span id="stage-label" class="stage-label">Ready when you are</span>
+          </div>
+          <div class="audio-row"><label for="avatar-audio">Avatar audio</label><audio id="avatar-audio" autoplay controls></audio></div>
+        </section>
+        <section class="controls" aria-label="Speech controls">
+          <p class="eyebrow">Try a short greeting</p>
+          <label for="line">What should the avatar say?</label>
+          <textarea id="line" rows="5" maxlength="300" aria-describedby="line-hint"></textarea>
+          <p id="line-hint" class="hint">Up to 300 characters. Repeated lines reuse the generated voice.</p>
+          <div class="buttons">
+            <button id="play" disabled>Play greeting <span aria-hidden="true">↗</span></button>
+            <button id="stop" class="secondary" disabled>End</button>
+          </div>
+          <p id="status" class="status" role="status" aria-live="polite">Checking setup…</p>
+          <div class="providers">
+            <div><span>Avatar · Simli</span><span id="simli-status">Checking…</span></div>
+            <div><span>Voice · ElevenLabs</span><span id="voice-status">Checking…</span></div>
+          </div>
+          <p id="setup" class="setup" hidden>Add the missing API keys to <code>backend/.env</code> using <code>.env.example</code>, then restart the server and refresh this page.</p>
+          <dl class="metrics">
+            <div><dt>Voice prepared</dt><dd id="voice-time">—</dd></div>
+            <div><dt>First video frame</dt><dd id="video-time">—</dd></div>
+            <div><dt>First speech after send</dt><dd id="speech-time">—</dd></div>
+          </dl>
+        </section>
+      </div>
+      <footer>Sessions end automatically after the line or after 90 seconds. This test uses no camera or microphone.</footer>
+    </main>
+  </body>
+</html>
