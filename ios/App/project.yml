@@ -51,3 +51,27 @@ targets:
             if [ -f "$SRC/$f" ]; then cp -f "$SRC/$f" "$DST/$f"; echo "LocalAssets: copied $f"
             else rm -f "$DST/$f"; echo "LocalAssets: $f missing, placeholder will show"; fi
           done
+  OnasCallsUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: OnasCallsUITests
+    dependencies:
+      - target: OnasCalls
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: $(ONAS_BUNDLE_ID).uitests
+        CODE_SIGN_ENTITLEMENTS: ""
+        TARGETED_DEVICE_FAMILY: "1"
+    configFiles:
+      Debug: Config/App.xcconfig
+      Release: Config/App.xcconfig
+schemes:
+  OnasCalls:
+    build:
+      targets:
+        OnasCalls: all
+    test:
+      targets:
+        - OnasCallsUITests
