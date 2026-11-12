@@ -202,7 +202,7 @@ final class DemoStore {
         save()
     }
 
-    // MARK: Real call end detection (CXCallObserver + scenePhase)
+    // MARK: Real call end (CXCallObserver + scenePhase)
 
     private func callsChanged() {
         guard phase == .calling, overlay == .none else { return }
