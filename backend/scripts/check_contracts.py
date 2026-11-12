@@ -1,5 +1,6 @@
 """Check the review draft without contacting providers or reading credentials."""
 
+import base64
 import json
 from pathlib import Path
 
@@ -56,7 +57,7 @@ for fixture in fixtures:
             assert low <= high
             assert reading["outside"] == (value < low or value > high)
 
-    if fixture["valid"] and fixture["schema"] == "BackendCommand":
+    if fixture["valid"] and fixture["schema"] == "CaptureCommand":
         command = fixture["data"]
         if command["kind"] == "capture":
             purpose = command["purpose"]
@@ -66,6 +67,23 @@ for fixture in fixtures:
                 else contract["x-task-definitions"][purpose["task"]]["capture"]
             )
             assert command["settings"] == expected, fixture["name"]
+
+    if fixture["valid"] and fixture["schema"] == "TaskResult":
+        result = fixture["data"]
+        if result["interruption"]:
+            assert result["interruption"]["attempt_id"] == result["attempt_id"]
+
+    if fixture["valid"] and fixture["schema"] == "MediaSample":
+        sample = fixture["data"]
+        decoded = base64.b64decode(sample["data_base64"], validate=True)
+        assert 0 < len(decoded) <= contract["x-media-policy"]["max_sample_bytes"]
+        if sample["format"] == "pcm_s16le_16000_mono":
+            assert len(decoded) % 2 == 0 and len(decoded) <= 8000
+
+assert not any(path.startswith("/internal/") for path in contract["paths"])
+assert set(contract["components"]["securitySchemes"]) == {"DemoKey"}
+for schema_name in contract["x-sse"]["events"].values():
+    assert schema_name.removeprefix("#/components/schemas/") in validators
 
 spoken_ids = contract["components"]["schemas"]["SpokenLine"]["enum"]
 assert set(script) == set(spoken_ids) | {"sentence"}
@@ -80,6 +98,7 @@ for task, definition in contract["x-task-definitions"].items():
     assert definition["instruction"] in script
     assert definition["repeat"] in script
     validators["CaptureSettings"].validate(definition["capture"])
+    assert definition["observation_period_ms"] == contract["x-interrupt-policy"]["observation_period_ms"]
     if "expected_text_key" in definition:
         assert script[definition["expected_text_key"]] in script[definition["instruction"]]
 validators["CaptureSettings"].validate(contract["x-answer-capture"])

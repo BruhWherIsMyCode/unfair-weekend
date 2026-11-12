@@ -1,11 +1,13 @@
-# Task-based MVP contract draft
+# One Python backend: contract draft 0.2
 
-Status: **review draft, not implemented**. Owner of the eventual canonical files: Agent 3. These files stay under `backend/` because Agent 2 cannot edit `contract/` or the human-owned docs. The [architecture plan](../ARCHITECTURE_PLAN.md) explains the flow, module owners, timing, decision rules and fixed example call.
+Status: **review draft, not implemented**. Agent 3 owns eventual canonical publication in `contract/`. Drafts stay under `backend/` to respect Agent 2's folder permissions. The [architecture plan](../ARCHITECTURE_PLAN.md) explains the complete call, periodic observations, interruption rules and fixed example script.
 
-- `mvp.openapi.yaml`: the proposed HTTP additions, SSE payload, task definitions and result schemas. `x-provider` identifies which of the two services serves an operation; callers use that provider's configured base URL. It is not one combined deployed API.
-- `script.en.json`: exact script text, version `mvp-en-1` in the OpenAPI metadata. All IDs match the shared draft. The `sentence` entry is expected input, not an extra avatar line.
-- `fixtures.json`: synthetic valid and invalid examples. Numeric metrics are illustrative and have no evaluated interpretation. No people media, provider responses or patient data are included.
-- `requirements.txt`: pinned optional tooling for validating this proposal, separate from application dependencies.
+Version `0.2.0-draft` supersedes 0.1: **one Python backend**, incremental input during the active task, periodic observations and early interruption results. The previous internal Node/Python HTTP routes, service key and completed-task media-fetch callbacks are removed. The Node greeting experiment remains runnable and has not yet been ported.
+
+- `mvp.openapi.yaml`: actual client/backend HTTP additions and SSE events, plus shared schemas for local task observations, interrupts, final results and family summaries. Local module calls do not become RPC endpoints.
+- `script.en.json`: exact script `mvp-en-2`, retaining earlier lines and adding `camera_unavailable` / `microphone_unavailable`. The `sentence` entry is expected input, not an extra avatar line.
+- `fixtures.json`: synthetic valid/invalid examples, including camera loss/recovery, provisional observations, interrupted results, client cancellation and neutral UI progress. Tiny PCM data is generated silence for payload checks, not a person recording. Feature values have no evaluated interpretation.
+- `requirements.txt`: optional pinned validation tools, separate from application dependencies.
 
 Validate from the repo root:
 
@@ -15,14 +17,16 @@ backend/.cache/contract-venv/bin/pip install -r backend/proposals/requirements.t
 backend/.cache/contract-venv/bin/python backend/scripts/check_contracts.py
 ```
 
-After installation the check is local: it validates OpenAPI 3.1, schema examples, important null/error cases, task capture settings and the script table in the plan. Only in-document references are permitted. It does not read credentials, call providers or prove that an unimplemented provider satisfies the draft. Generate consumer types from the canonical artifact when Agent 3 publishes it; do not maintain a separate set of handwritten wire types now.
+After installation this check is local: OpenAPI 3.1, schema examples, null/error/interruption cases, capture registry, sample encoding and script-table consistency. Only in-document references are allowed. It does not read credentials or call providers. Passing it does not prove runtime interruption, cancellation, media decoding, client compatibility or analyzer performance.
 
-Changes requiring review against shared v0:
+Review changes with Agent 3 and the client owner before implementation:
 
-1. New task/answer capture routes, client commands and server callbacks; task upload is distinct from retained alert evidence.
-2. Mid-call result publication and final-summary updates to the same family message ID. Family clients upsert by ID; `stored` does not mean read or externally delivered.
-3. Null `usual_low`, `usual_high`, `outside` when learning; missing baseline never becomes an ordinary comparison.
-4. No retained family clip in this first draft (`clip_id: null`); temporary task media has authenticated access and a five-minute maximum lifetime.
-5. Task-only, turn-based capture. Background observations, continuous STT and barge-in are deferred. The question/recording/capture windows and replay limits are proposals, not evaluated timings.
+1. Module boundaries are local Python interfaces. Remove draft 0.1's internal-service API; client/network contracts still need one canonical shared artifact.
+2. Active video tasks post timestamped JPEG frames; sentence tasks post PCM chunks. Whole-task MP4 uploads cannot produce observations before the task ends. Input rates, codec limits and watchdog timings are engineering starting values to test on the real client.
+3. Task modules report `TaskObservation` periodically; CallSession applies interrupt policy. Camera/microphone availability is a separate immediate client event. Routine observations do not invoke Claude; an interruption resolves the pending tool before the next model request.
+4. `TaskResult` adds required nullable `interruption` and the `interrupted` outcome. Interrupted attempts have no final reading, do not count as confirmation and cannot enter the baseline. Recovery starts a new attempt.
+5. Client SSE adds cancellation and neutral progress. Progress excludes metrics/baseline verdicts. Replayed commands must not execute twice; obsolete samples/results cannot revive an old attempt.
+6. The two recovery script IDs and `recover_resource(resource)` local tool make the bounded recovery branch concrete.
+7. Carry forward the 0.1 proposals for review: null comparisons while learning, no retained family clip yet, mid-call publication/final update of one family message ID. Family consumers upsert by ID; stored does not mean read.
 
-Before integration, Agent 3 reviews these changes and moves the agreed schemas, script and fixtures into `contract/`; consumers then switch to that source. Canonical versions must not drift between folders. Metric formulas and thresholds, the real parent-client choice, and Agent 3's permitted analysis folder still need the named owners' decisions. Existing `/api/demo/*` greeting routes remain separate and do not implement this contract.
+Agent 3 should publish the agreed schemas/script/fixtures in `contract/`, then consumers use that source and derive their types. Do not maintain divergent canonical copies. Actual metric definitions and the real parent client still need their named owners; the human-owned analysis-folder permission update is also outstanding. Existing `/api/demo/*` greeting routes do not implement this draft.

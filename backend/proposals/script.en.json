@@ -10,6 +10,8 @@
   "repeat_smile": "Let's try once more. Keep your face in view and smile until the timer finishes.",
   "repeat_arms": "Let's try once more. When the timer starts, raise both arms and keep them up until it finishes.",
   "repeat_sentence": "Let's try once more. Please say: Today I am sitting by the window.",
+  "camera_unavailable": "I can't see you right now. Please check that your camera is on. We can try again, or finish our check-in.",
+  "microphone_unavailable": "I can't hear you right now. Please check that your microphone is on. We can try again, or finish our check-in.",
   "bye": "Thank you, {name}. Our check-in is finished. Goodbye.",
   "sentence": "Today I am sitting by the window."
 }
