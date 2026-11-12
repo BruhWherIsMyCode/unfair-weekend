@@ -49,7 +49,7 @@ flowchart TD
 
 All internal arrows are function calls or small in-process event queues. There are no backend-to-orchestrator HTTP callbacks, internal API key, message broker or separately deployed analysis service. Synchronous media decoding/measurement runs in a bounded executor so the event loop can still handle camera loss and hang-up. That executor works only on the requested task.
 
-Agent 2 and Agent 3 build different modules in the same application. The late-evening ownership split in [SHARED_CONTRACT.md](../docs/SHARED_CONTRACT.md) remains useful; its proposed separate Python service is superseded by the user's decision here. Agent 2 still owns `backend/`; Agent 3's eventual implementation folder needs the human-owned `AGENTS.md` update already identified in [its brief](../docs/AGENT_3_CONNECTOR.md). No files outside `backend/` are changed by this proposal.
+Agent 2 and Agent 3 build different modules in the same application. [SHARED_CONTRACT.md](../docs/SHARED_CONTRACT.md) is the current boundary guide. Under [AGENTS.md](../AGENTS.md), Agent 2 owns `backend/` and Agent 3 owns `analysis/` and `contract/`. The analysis package is imported into the same Python application; it is not a second HTTP service. [Agent 3's brief](../docs/AGENT_3_CONNECTOR.md) describes that module work.
 
 ## 2. What each module does
 
@@ -272,4 +272,4 @@ Agent 2 implements the Python call/speech/media/delivery adapters using the exis
 
 First join one smile task end to end. Check periodic observations before the capture ends, camera loss interrupting promptly, no stale result after cancellation, recovery creating a new attempt, missing-sample/analyzer watchdogs, a final-result race, and one stored family message. The existing schema checker checks payload compatibility and script consistency; it does not verify runtime cancellation or analyzer performance.
 
-Agent 3 must review/promote this revised draft into `contract/`; version 0.1's internal service callbacks and whole-task upload protocol should not be implemented. The two new recovery line IDs, incremental task input, interrupt schema and client cancel/progress events are explicit shared-contract changes. See [draft validation instructions](proposals/README.md). No PR is opened for this planning work.
+Agent 3 must review/promote this revised draft into `contract/`; version 0.1's internal service callbacks and whole-task upload protocol should not be implemented. The two new recovery line IDs, incremental task input, interrupt schema and client cancel/progress events are explicit shared-contract changes. See [draft validation instructions](proposals/README.md). Publication of this plan does not mark the Python runtime or client integration complete.

@@ -1,39 +1,37 @@
-# Backend decisions
+# Backend decisions and evidence
 
-## 2026-11-12: small Simli + ElevenLabs prototype
+Current as of 13 Nov 2026. [ARCHITECTURE_PLAN.md](ARCHITECTURE_PLAN.md) owns the full flow. Superseded on-device, two-service and whole-task-upload proposals are available in Git history; they are not current implementation instructions.
 
-The user selected a separate parent app during the architecture discussion and requested a small Simli experiment before implementing the backend golden path. This prototype is an independent browser page under `backend/`; it does not modify the shared contract or another agent's folders.
+## Current architecture
 
-- Candidate avatar: Simli. Its API accepts speech audio and returns lip-synced video and audio. We supply speech, rather than using a free conversation model.
-- Candidate voice: ElevenLabs text-to-speech. Use 16 kHz PCM and cache each generated line locally. The default test line is a standalone greeting, not a new contract script line.
-- Client: pinned `simli-client` 3.2.0, bundled locally. Temporary session tokens are minted server-side. No API keys reach the page.
-- Cost controls: prepare the audio first; request a 90-second session limit and 20-second idle limit; stop after the line or when leaving the page; cap token and speech request frequency.
-- What was actually tried: read the current official SDK/API documentation and installed SDK implementation; installed dependencies and bundled the browser client; ran the local server and inspected the page in Chromium; exercised real ElevenLabs and Simli requests using local environment credentials.
-- Verification: `npm run build` passed; all seven `npm test` cases passed with mocked providers; `npm audit --omit=dev` reported no vulnerabilities; `git diff --check` passed. Chromium displayed the missing-key setup state with Play disabled, no console warnings or errors, and no horizontal overflow at an emulated 390-pixel viewport. Mobile emulation does not verify iPhone media playback.
-- Live observations: the first greeting's ElevenLabs preparation took 1.14 seconds; the first rendered avatar frame arrived 2.31 seconds after the connection step began; Simli's first speaking event arrived 0.08 seconds after sending audio. The next greeting reused cached speech in 0.01 seconds and rendered its first frame in 2.91 seconds, with a speaking event after 0.13 seconds. Both reached the page's automatic completion state. These are individual Chromium observations, not a benchmark or an audio/listening assessment; a speaking event is not an end-to-end audio latency measurement.
-- Untested: subjective avatar and speech quality, target-language performance, simultaneous iPhone camera capture, and iOS web-view playback.
-- Not selected yet: final avatar mode, family notification provider, or deployment host. The still-image/audio fallback required by the brief remains part of the later golden path.
+- **One Python backend.** Agent 2 owns call/media/speech/delivery modules; Agent 3 owns imported analysis/orchestration modules and canonical contracts. There is no internal HTTP service boundary.
+- **One active measurement task per call.** Task modules emit periodic observations; client resource events are immediate. CallSession applies interrupt rules, stops affected work and resolves the pending tool before Claude's next decision.
+- **A fresh attempt after interruption.** Routine observations update state without a model turn. Partial/interrupted observations cannot confirm a change or enter the baseline. Late events cannot revive a stopped attempt.
+- **Fixed script with bounded recovery.** English draft `mvp-en-2` includes camera/microphone recovery lines; one-second observations and JPEG/PCM input rates are engineering proposals, not evaluated protocols.
+- **Explicit confirmation and delivery.** Two usable final outside readings under the agreed rule trigger a fixed family message. A final summary updates the same call/message ID. Technical failure is not a measured change.
+- **One draft interface source.** [proposals/](proposals/README.md) contains review draft 0.2, exact lines and synthetic fixtures. Agent 3 still needs to review/publish the complete canonical contract in `contract/`.
 
-Sources checked on 2026-11-12: [Simli SDK](https://docs.simli.com/api-reference/javascript), [Simli pricing](https://www.simli.com/pricing), [ElevenLabs speech](https://elevenlabs.io/docs/api-reference/text-to-speech/convert).
+The Python runtime, task analysis, baselines, interrupts, family delivery and real client integration are **not implemented** by this work. The current iOS stage task remains a separate mock. The user has requested a PR and merge for the prototype, plan and documentation cleanup.
 
-## 2026-11-12: proposed adaptive conversation architecture
+## Runnable provider experiment
 
-The user requested a reviewable plan in which Claude leads the conversation while audio/video analyzers run in parallel and publish relevant observations. [ARCHITECTURE_PLAN.md](ARCHITECTURE_PLAN.md) proposes a coordinator for each call, pushed observation events, bounded Claude tools, command acknowledgments, and explicit interruption/notification rules. Its initial on-device assumption was superseded by the late-evening shared-contract change: analysis runs on the server and Agent 3 owns analysis and the Claude orchestrator. Agent 2 supplies the call/media/notification backend.
+The existing browser experiment uses Node, `simli-client` 3.2.0 and ElevenLabs TTS. It is reference code to port, not another required production service. It plays a supplied short line; it does not request camera/microphone access or run a check-in.
 
-Status: design proposal only. The existing greeting demo is unchanged. The Claude conversation loop, analyzers, mid-call commands, notification handlers, and Speech Engine integration have not been implemented or tested. The user requested no pull requests for these experiments; the prototype PR was closed and further work stays on the backend branch unless instructed otherwise.
+- Raw speech input to Simli: signed PCM16, 16 kHz, mono. TTS lines are cached locally by text/voice/model/format.
+- API keys stay server-side; the browser receives a temporary Simli session token.
+- Session requests are capped at 90 seconds with a 20-second idle limit. The page ends after estimated speech duration plus an allowance, or when hidden. This does not prove the actual playback acknowledgment required for task timing.
+- The localhost server limits request size/rate and static file access. Local credentials, recordings and generated files are ignored.
 
-Clarification after the user's review: CallSession and session coordinator are one logical component. ActionExecutor is a name for ordinary tool-handler functions, not a required separate service. Tasks share one protocol with task-specific rules and readings. The initial `run_task` tool can await a final structured result while progress updates remain internal to CallSession and the app. Execution completion, usable capture, and the measured finding are independent facts.
+## Recorded verification
 
-## 2026-11-13: task-only MVP and contract proposal
+On 12 Nov the prototype build, seven mocked-provider tests and dependency audit passed. Chromium verified setup state, console output and layout at an emulated 390-pixel viewport. Mobile emulation is not iPhone media verification.
 
-The user chose task-based measurement for the MVP and deferred all background health analyzers. [ARCHITECTURE_PLAN.md](ARCHITECTURE_PLAN.md) now replaces the continuous-analysis proposal with a full diagram, the Node/Python ownership split, one final result per task, and a fixed English example call including the repeat/confirmation branch. For the first integration it proposes short answer recordings as well, making the call turn-based.
+Two real greeting trials used local provider credentials. The first prepared ElevenLabs audio in 1.14 seconds and rendered the first avatar frame 2.31 seconds after connection began. A replay reused cached audio in 0.01 seconds and rendered its first frame in 2.91 seconds. Simli's first speaking event followed audio submission by 0.08/0.13 seconds. Both reached automatic completion. These are individual observations, not benchmarks, subjective listening assessments or end-to-end voice-latency measurements.
 
-[proposals/](proposals/README.md) contains a reviewable OpenAPI draft, exact script and synthetic fixtures. It specifies acknowledgment versus completion, raw-media transport, quality/performance/baseline distinctions, deadlines, cancellation and mid-call message publication. Agent 3 must review and publish the canonical files in `contract/`; nothing outside `backend/` was changed. These contracts and the conversational flow remain unimplemented. The existing greeting experiment is unchanged; no pull request is requested.
+The current draft checker validates OpenAPI, 39 valid and 25 invalid synthetic fixtures, task settings, sample encoding and script-table consistency. It does not prove runtime streaming, interruption, cancellation or measurement performance.
 
-## 2026-11-13: one Python backend, periodic task observations and interrupts
+Provider references checked on 12 Nov: [Simli SDK](https://docs.simli.com/api-reference/javascript), [Simli pricing](https://www.simli.com/pricing), [ElevenLabs speech](https://elevenlabs.io/docs/api-reference/text-to-speech/convert). These links are dated evidence, not a fresh pricing/availability check.
 
-The user chose one Python backend and explicitly required periodic observations that can interrupt the task and influence Claude's next step. This supersedes the preceding two-process and whole-task-clip-only design. Internal call/media/speech/delivery and CallSession/task/baseline modules remain independently owned, with direct Python calls and in-process event handling.
+## Remaining verification and decisions
 
-The revised [plan](ARCHITECTURE_PLAN.md) separates routine observation updates, immediate client resource changes, watchdog failures and final results. CallSession stops an affected attempt before resolving `run_task` as interrupted; the next Claude request receives that tool result and can recover/retry/continue incomplete/finish. Routine observations do not trigger a model request. Recovery uses a new attempt ID and a bounded wait. Camera loss is a technical interruption, not a measured change.
-
-Draft `0.2.0` replaces internal HTTP callbacks with active-task samples and adds observation/interrupt/cancel/progress contracts plus two fixed recovery lines. JPEG/PCM sampling and one-second observations are proposed engineering settings, not tested measurement protocols. The existing Node greeting remains unchanged as reference code to port; no Python runtime, streaming task or interruption behavior is implemented by these documentation/contract changes.
+Actual iPhone/web-view playback, simultaneous camera capture, voice/language quality, real playback acknowledgments, sampling/measurement quality, interruption latency, deployment and family delivery remain untested. The real parent client, final avatar mode, target voice/language, optional external notification provider and consented family-clip retention policy remain open. Prepared voice/still fallback is planned but not built in this experiment.
