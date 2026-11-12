@@ -15,7 +15,7 @@ Decided:
 - **The analysis runs on a server**, not on the parent's phone.
 - **Agent 3 is now "analysis and orchestrator"**: the measuring, her baseline, and a Claude orchestrator that runs the call. Agent 2 builds the backend that connects the apps, the avatar and the orchestrator.
 - **Claude is the orchestrator.** Measuring tools report readings to it. It leads the conversation, drives the avatar, and can send the alert during the call.
-- **Our own apps on both sides**, parent and family.
+- **Our own apps on both sides**, parent and family (said about 22:00). `docs/tasks/agent1.md`, written later, has the family app as a mocked stage shell and the parent's call "not our app, staged separately". Which app carries the parent's call needs confirming.
 
 What no longer holds below:
 

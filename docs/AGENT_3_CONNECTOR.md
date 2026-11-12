@@ -15,7 +15,7 @@ Labels are the same as in the other files: **[proposal]** = accept, change or dr
    - Agent 1's human: the iPhone apps.
    - Agent 2's human: the calling mechanism, the statuses and the backend that connects everything.
    - Agent 3's human (Feodor): the analysis and the orchestrator. This is the core.
-3. **[decided] Our own apps on both sides**, one for the parent and one for the family, because it is easier to demo. This reverses the "parent uses WhatsApp" change at the top of `AGENT_1_IOS_APP.md`, which has not been updated yet.
+3. **[decided, about 22:00, needs confirming] Our own apps on both sides**, one for the parent and one for the family, because it is easier to demo. This reverses the "parent uses WhatsApp" change at the top of `AGENT_1_IOS_APP.md`. A later file, `docs/tasks/agent1.md` (12 Nov, 23:15), describes the family app as a stage shell with everything mocked, and the parent's video call as "not our app, staged separately". Which app carries the parent's call, and so where the camera and microphone come from, must be confirmed before this part can be joined to anything. See §13, point 10.
 4. **[decided] Claude is the orchestrator.** Measuring tools report their readings to Claude. Claude leads the conversation, drives the avatar, puts the readings together with what she says, and can send the alert during the call, before it ends.
 
 Everything below that is not marked [decided] is a proposal written to make these four points buildable.
@@ -201,6 +201,7 @@ Context §5 still proposes the old privacy story ("video does not leave the devi
 7. **Owner of `contract/` and of what `CheckInCore` was**: the call flow inside the app, and the mock session Agent 1 builds screens against.
 8. **Sending the alert during the call.** The contract sends the result only when the call ends.
 9. **Which Claude model.** [unverified] The delay of one Claude turn inside a spoken call has not been measured. Anthropic's model page describes its Haiku tier as the one for latency-sensitive work.
+10. **How the judges see this part.** `docs/tasks/agent1.md` has the family app fire its alert from a hidden tap, with a clip bundled in the app, and no backend. As written, the alert on the big screen is not produced by the analysis. Decide where the real measuring is shown: a real alert sent to the family app, live numbers on a second screen during the parent's call, or the recorded evidence in the video. Whatever is staged must be said to be staged (context §2).
 
 ## 14. Order of work [proposal]
 
@@ -233,6 +234,7 @@ Context §5 still proposes the old privacy story ("video does not leave the devi
 - Arms out of frame in real use. It needs the design and the script to solve it, not only code.
 - Pauses while Claude thinks. Mitigation: fixed lines, a fast model, and the script fallback.
 - Two plans for where the Claude loop lives (§13, point 2). Settle it before either side writes code against it.
+- The core is built but nobody sees it, because the stage scene runs on mocks (§13, point 10). The organisers' guide says hard work the judges never see loses.
 - If you fall behind, cut speech, then Claude's "more than the floor" concerns. Never cut the floor rule or its tests.
 
 ## Sources read on 12 Nov
