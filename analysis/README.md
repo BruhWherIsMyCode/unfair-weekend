@@ -1,5 +1,32 @@
 # Face tool (first version)
 
+## Quick start (no keys)
+
+```
+git pull
+python -m analysis.get_models
+python -m analysis.check --person NAME
+```
+
+(Run from the repo root, with the virtual environment from "Setup" below active.)
+
+The window tells the person what to do in big text at the top; nobody presses keys. The only key is `q` (stop; the summary still prints). The person is asked to:
+
+- **Face part, about 3 minutes.** Look at the camera and give a big normal smile when it says SMILE (5 times), then act a droop on their LEFT side (5 times), then on their RIGHT side (5 times).
+- **Hand part, 3-4 minutes.** Hold the LEFT hand up next to the face, palm to the camera, and keep it still (5 times); then do it again acting weak, letting the hand sink and the palm turn in (5 times); then the same for the RIGHT hand. Between trials the text says "Lower your hand".
+
+Just follow the big text. If a trial does not count (face or hand not clear), the text says why and asks again, up to twice, then moves on.
+
+**The end screen.** The banner says "Finished. Results below." and plain verdict lines are shown on the picture: for the face, per reading, whether the acted droop on each side separates from the normal smiles; for the hands, one line per hand. Press any key to close (it also closes by itself after 60 s). Both summaries are then printed together with the CSV and summary file paths in `analysis/runs/`.
+
+**`--mirrored` symptom.** If the text says "I see your other hand. If you ARE raising your LEFT hand, ..." while you are raising the hand you were asked to, left and right are swapped: close the window and start again with `--mirrored` (or without it, if you had it on).
+
+**Quick run:** `python -m analysis.check --person NAME --per-label 3 --per-mode 3`. Other switches: `--only face` or `--only hands`, `--hold SECONDS`, `--camera N`.
+
+**Old key-driven mode:** `python -m analysis.live_face --manual` and `python -m analysis.live_hand --manual` (the keys are described below). The guided windows can also be run on their own: `python -m analysis.live_face --person NAME`, `python -m analysis.live_hand --person NAME`.
+
+Written, not run yet: the guided mode has not been tried with a camera. All the timings (`GUIDE_*` in `config.py`) are first guesses.
+
 A video of a person smiling goes in. Numbers describing how level the two mouth corners are come out, and they are compared with that person's own usual range. Nothing is trained: Google MediaPipe Face Landmarker finds 478 points on the face, and our own arithmetic does the rest.
 
 Status: written, **not run yet**. No camera was available when it was written. Every threshold is a first guess (see `config.py`).

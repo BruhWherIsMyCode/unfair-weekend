@@ -4,7 +4,9 @@ Run from the repo root:
     python -m analysis.live_hand [--camera 0] [--mirrored] [--person NAME] [--hold SECONDS]
         [--no-angle-check]
 
-Keys: 1 / 2 = her left / her right hand.  n / w = normal / acted weak.
+Default (guided): the test runs by itself with big on-screen instructions.
+      Keys: q = stop (summary still printed), m = hand points. --per-mode N = fewer trials.
+--manual (old mode), keys: 1 / 2 = her left / her right hand.  n / w = normal / acted weak.
       SPACE = start a trial (settle, then hold).  m = hand points.  q = quit + summary.
 
 Conventions: "left"/"right" are HER left/right. The picture shown is NOT a
@@ -16,17 +18,22 @@ from __future__ import annotations
 
 import argparse
 import csv
+import dataclasses
 import statistics
 import sys
 import time
 from datetime import datetime
 
 from analysis import config
+from analysis.guide import Guide, Signal, hand_plan, verdict_lines
 from analysis.hand_metric import hand_clip_reading, hand_frame_reading
 from analysis.hand_summary import format_summary, summarise
 
 CSV_FIELDS = ["trial", "hand", "mode", "quality", "hand_sink", "hand_height", "palm_turn",
               "hand_shake", "dropped", "frames_usable", "frames_total", "reason", "notes"]
+
+
+LAST_RESULT: dict = {}  # filled by main(): "summary", "csv", "summary_path" (used by analysis.check)
 
 
 def _fmt(v) -> str:
@@ -42,11 +49,17 @@ def main(argv=None) -> int:
                         help="seconds of the hold (default: config.HAND_HOLD_S)")
     parser.add_argument("--no-angle-check", action="store_true",
                         help="do not drop frames on head angle (accepted for symmetry with live_face)")
+    parser.add_argument("--manual", action="store_true",
+                        help="old key-driven mode (1/2 hand, n/w mode, SPACE starts a trial)")
+    parser.add_argument("--per-mode", type=int, default=None,
+                        help="guided mode: trials per hand and mode (default: config.GUIDE_HAND_PER_MODE)")
     args = parser.parse_args(argv)
     if args.no_angle_check:
         config.CHECK_HEAD_ANGLES = False
     if args.hold is not None:
         config.HAND_HOLD_S = args.hold
+    guided = not args.manual
+    LAST_RESULT.clear()
 
     for path in (config.MODEL_PATH, config.HAND_MODEL_PATH):
         if not path.exists():
@@ -98,6 +111,10 @@ def main(argv=None) -> int:
             if new_file:
                 w.writeheader()
             w.writerow(row)
+        return row
+
+    guide = Guide(hand_plan(args.per_mode), "hand") if guided else None
+    done_since = None
 
     title = "Hand test"
     cv2.namedWindow(title, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
@@ -115,6 +132,9 @@ def main(argv=None) -> int:
             last_ts = ts
 
             obs, hands = reader.process(frame, ts, mirrored=args.mirrored)
+            if guided and guide.current is not None:
+                hand = guide.current.side
+                mode = guide.current.label
             expected = trial["hand"] if trial is not None else hand
             hr = hand_frame_reading(obs, hands, expected)
 
@@ -122,7 +142,47 @@ def main(argv=None) -> int:
             start_height = None
             sink = None
             turn = None
-            if trial is not None:
+            view = None
+            if guided:
+                now = time.monotonic()
+                view = guide.update(now, Signal(ready=hr.usable, hand_seen_any=bool(hands),
+                                                wrong_side=hr.wrong_side, face_ok=hr.face_ok))
+                if view.collect:
+                    if trial is None:
+                        # the guide measured from guide.measure_start_s; convert to the ts clock
+                        start_ms = (guide.hold_start_s - t0) * 1000.0
+                        trial = {"hand": guide.current.side, "mode": guide.current.label,
+                                 "start": guide.measure_start_s, "readings": [],
+                                 "hold_start_ms": start_ms,
+                                 "hold_end_ms": start_ms + config.HAND_HOLD_S * 1000.0}
+                    trial["readings"].append(hr)
+                    if view.phase == guide.names[1]:  # HOLD: live sink / turn numbers
+                        early = [f for f in trial["readings"]
+                                 if f.usable and trial["hold_start_ms"] <= f.timestamp_ms
+                                 < trial["hold_start_ms"] + config.HAND_WINDOW_S * 1000.0]
+                        if early:
+                            start_height = statistics.median(f.height for f in early)
+                            ratios = [f.palm_width_ratio for f in early if f.palm_width_ratio is not None]
+                            if hr.usable:
+                                sink = hr.height - start_height
+                                if ratios and hr.palm_width_ratio is not None:
+                                    rs = statistics.median(ratios)
+                                    if rs > 1e-9:
+                                        turn = (rs - hr.palm_width_ratio) / rs
+                elif view.finished_measuring:
+                    if trial is not None:
+                        row = finish_trial(trial)
+                        trial = None
+                        guide.trial_finished(row["quality"] == "usable", row["reason"])
+                    else:  # no frame was collected (camera stalled): count it as unusable
+                        guide.trial_finished(False, "too few usable frames")
+                if view.done:
+                    if done_since is None:
+                        done_since = now
+                        guide.summary_lines = tuple(
+                            verdict_lines(format_summary(summarise(trials)), "hand"))
+                    view = dataclasses.replace(view, summary_lines=guide.summary_lines)
+            elif trial is not None:
                 elapsed = time.monotonic() - trial["start"]
                 total = config.HAND_SETTLE_S + config.HAND_HOLD_S
                 if elapsed >= total:
@@ -152,13 +212,18 @@ def main(argv=None) -> int:
                 frame, obs, hr, mirrored=args.mirrored, show_points=show_points,
                 hand=expected, mode=trial["mode"] if trial is not None else mode, trials=trials,
                 phase_text=phase_text, trial_active=trial is not None,
-                start_height=start_height, sink=sink, turn=turn)
+                start_height=start_height, sink=sink, turn=turn, guide=view)
             cv2.imshow(title, shown)
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
                 break
             if key == ord("m"):
                 show_points = not show_points
+            elif guided:
+                if done_since is not None:
+                    waited = time.monotonic() - done_since
+                    if (key != 255 and waited > 1.0) or waited >= config.GUIDE_DONE_CLOSE_S:
+                        break
             elif trial is None and key == ord("1"):
                 hand = "left"
             elif trial is None and key == ord("2"):
@@ -181,10 +246,14 @@ def main(argv=None) -> int:
 
     text = format_summary(summarise(trials))
     print("\n" + text)
+    if guided and guide.notes:
+        print("\nNotes: " + "; ".join(guide.notes))
     with open(summary_path, "w", encoding="utf-8") as fh:
         fh.write(text + "\n")
     if trials:
         print("\nSaved: %s\n       %s" % (csv_path, summary_path))
+    LAST_RESULT.update({"summary": text, "csv": csv_path, "summary_path": summary_path,
+                        "trials": len(trials)})
     return 0
 
 

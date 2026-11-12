@@ -3,7 +3,9 @@
 Run from the repo root:
     python -m analysis.live_face [--camera 0] [--mirrored] [--person NAME] [--record-trials]
 
-Keys: n / l / r = label the next trials normal / acted_left / acted_right.
+Default (guided): the test runs by itself with big on-screen instructions.
+      Keys: q = stop (summary still printed), m = mesh dots. Add --per-label N for fewer trials.
+--manual (old mode), keys: n / l / r = label the next trials normal / acted_left / acted_right.
       SPACE = start a trial (1.0 s RELAX, then 3.0 s SMILE).  m = mesh dots.  q = quit + summary.
 
 Conventions: "left"/"right" are HER left/right. Positive reading = her LEFT
@@ -15,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import dataclasses
 import statistics
 import sys
 import time
@@ -24,10 +27,14 @@ from datetime import datetime
 from analysis import config
 from analysis.droop_summary import format_summary, summarise
 from analysis.face_metric import clip_reading, frame_reading
+from analysis.guide import Guide, Signal, face_plan, verdict_lines
 
 LABEL_KEYS = {ord("n"): "normal", ord("l"): "acted_left", ord("r"): "acted_right"}
 CSV_FIELDS = ["trial", "label", "quality", "corner_height", "corner_lift", "smile_score",
               "frames_usable", "frames_total", "reason"]
+
+
+LAST_RESULT: dict = {}  # filled by main(): "summary", "csv", "summary_path" (used by analysis.check)
 
 
 def _fmt(v) -> str:
@@ -42,9 +49,15 @@ def main(argv=None) -> int:
     parser.add_argument("--record-trials", action="store_true", help="save each trial as mp4")
     parser.add_argument("--no-angle-check", action="store_true",
                         help="do not drop frames on head angle (use if a frontal face shows 'head turned/tipped')")
+    parser.add_argument("--manual", action="store_true",
+                        help="old key-driven mode (n/l/r label, SPACE starts a trial)")
+    parser.add_argument("--per-label", type=int, default=None,
+                        help="guided mode: trials per label (default: config.GUIDE_FACE_PER_LABEL)")
     args = parser.parse_args(argv)
     if args.no_angle_check:
         config.CHECK_HEAD_ANGLES = False
+    guided = not args.manual
+    LAST_RESULT.clear()
 
     if not config.MODEL_PATH.exists():
         print("Model file missing. Run:  python -m analysis.get_models")
@@ -96,6 +109,13 @@ def main(argv=None) -> int:
             if new_file:
                 w.writeheader()
             w.writerow(row)
+        return row
+
+    guide = None
+    cur = None  # guided mode: the trial being measured
+    done_since = None
+    if guided:
+        guide = Guide(face_plan(args.per_label), "face")
 
     # Resizable window that keeps its shape: the full layout is ~1500x780 and
     # may not fit a laptop screen. Drag the corner to shrink it.
@@ -122,7 +142,40 @@ def main(argv=None) -> int:
 
             # Trial state machine
             phase_text = None
-            if trial is not None:
+            view = None
+            if guided:
+                now = time.monotonic()
+                ready = fr is not None and fr.usable
+                view = guide.update(now, Signal(ready=ready, face_ok=ready))
+                if view.collect:
+                    if cur is None:
+                        writer = None
+                        if args.record_trials:
+                            path = config.RECORDINGS_DIR / ("%s_trial%02d_%s.mp4" % (
+                                base, len(trials) + 1, guide.current.label))
+                            writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"),
+                                                     config.RECORD_FPS, (w, h))
+                        cur = {"label": guide.current.label, "readings": [], "writer": writer}
+                    cur["readings"].append(fr)
+                    if cur["writer"] is not None:
+                        cur["writer"].write(frame)
+                elif view.finished_measuring:
+                    if cur is not None:
+                        row = finish_trial(cur)
+                        cur = None
+                        guide.trial_finished(row["quality"] == "usable", row["reason"])
+                    else:  # no frame was collected (camera stalled): count it as unusable
+                        guide.trial_finished(False, "too few usable frames")
+                if view.done:
+                    if done_since is None:
+                        done_since = now
+                        text_now = format_summary(summarise(trials))
+                        guide.summary_lines = tuple(verdict_lines(text_now, "face"))
+                    view = dataclasses.replace(view, summary_lines=guide.summary_lines)
+                    label = "normal"
+                elif guide.current is not None:
+                    label = guide.current.label
+            elif trial is not None:
                 elapsed = time.monotonic() - trial["start"]
                 total = config.RELAX_SECONDS + config.SMILE_SECONDS
                 if elapsed >= total:
@@ -139,13 +192,19 @@ def main(argv=None) -> int:
 
             jit = statistics.pstdev(jitter_buf) if len(jitter_buf) >= 2 else None
             shown = display.render(frame, obs, fr, mirrored=args.mirrored, show_mesh=show_mesh,
-                                   label=label, trials=trials, jitter=jit, phase_text=phase_text)
+                                   label=label, trials=trials, jitter=jit, phase_text=phase_text,
+                                   guide=view)
             cv2.imshow("Droop test", shown)
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
                 break
             if key == ord("m"):
                 show_mesh = not show_mesh
+            elif guided:
+                if done_since is not None:
+                    waited = time.monotonic() - done_since
+                    if (key != 255 and waited > 1.0) or waited >= config.GUIDE_DONE_CLOSE_S:
+                        break
             elif key in LABEL_KEYS:
                 label = LABEL_KEYS[key]
             elif key == ord(" ") and trial is None:
@@ -156,17 +215,22 @@ def main(argv=None) -> int:
                                              config.RECORD_FPS, (w, h))
                 trial = {"label": label, "start": time.monotonic(), "readings": [], "writer": writer}
 
-    if trial is not None and trial["writer"] is not None:
-        trial["writer"].release()
+    for open_trial in (trial, cur):
+        if open_trial is not None and open_trial["writer"] is not None:
+            open_trial["writer"].release()
     cap.release()
     cv2.destroyAllWindows()
 
     text = format_summary(summarise(trials))
     print("\n" + text)
+    if guided and guide.notes:
+        print("\nNotes: " + "; ".join(guide.notes))
     config.RUNS_DIR.mkdir(parents=True, exist_ok=True)
     with open(summary_path, "w", encoding="utf-8") as fh:
         fh.write(text + "\n")
     print("\nSaved: %s\n       %s" % (csv_path, summary_path))
+    LAST_RESULT.update({"summary": text, "csv": csv_path, "summary_path": summary_path,
+                        "trials": len(trials)})
     return 0
 
 

@@ -85,5 +85,19 @@ DROP_SINK_VALUE = 1.0  # sink value (eye widths) given to a dropped hand; first 
 HAND_READINGS = ("hand_sink", "hand_height", "palm_turn", "hand_shake")  # candidate readings; the hand test picks the winner
 HAND_PRIMARY = "hand_sink"  # primary reading for now; first guess
 
+# ---- Guided (self-running) tests; every number is a first guess ----------------------
+GUIDE_READY_S = 0.8  # the face / hand must be usable this long, without a gap, before a trial starts; first guess
+GUIDE_HINT_AFTER_S = 8.0  # seconds of waiting before the window shows a hint; first guess
+GUIDE_RESULT_S = 2.0  # seconds the "Got it" / "did not count" message stays up; first guess
+GUIDE_MAX_RETRIES = 2  # an unusable trial is repeated at most this many times, then skipped; first guess
+GUIDE_FACE_PER_LABEL = 5  # face trials per label (normal, acted left, acted right); first guess
+GUIDE_HAND_PER_MODE = 5  # hand trials per hand and mode (normal, acted weak); first guess
+GUIDE_INTRO_S = 3.0  # length of the card shown before each block; first guess
+GUIDE_START_MIN_S = 3.0  # the start card stays at least this long; first guess
+GUIDE_START_FACE_S = 1.0  # and until the face has been seen this long; first guess
+GUIDE_LOWER_NO_HAND_S = 0.5  # "Lower your hand" ends after no hand was seen this long; first guess
+GUIDE_LOWER_MAX_S = 3.0  # or after this many seconds; first guess
+GUIDE_DONE_CLOSE_S = 60.0  # the finished screen closes by itself after this; first guess
+
 # ---- Output -----------------------------------------------------------------
 METRICS = ("corner_height", "corner_lift", "smile_score")  # the three candidate readings

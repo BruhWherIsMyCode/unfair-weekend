@@ -10,7 +10,7 @@ from typing import Optional
 import cv2
 import numpy as np
 
-from analysis import config
+from analysis import config, guide_draw
 from analysis.droop_summary import summarise
 
 FONT = cv2.FONT_HERSHEY_SIMPLEX
@@ -129,7 +129,7 @@ def _head_text(obs):
     return ", ".join(parts) if parts else "straight"
 
 
-def _draw_panel(panel, obs, fr, label, trials, jitter):
+def _draw_panel(panel, obs, fr, label, trials, jitter, guide=None):
     H = panel.shape[0]
     x0, x1 = PAD, PANEL_W - PAD
     bar_w = x1 - x0
@@ -228,7 +228,11 @@ def _draw_panel(panel, obs, fr, label, trials, jitter):
     y += 10
     cv2.line(panel, (x0, y), (x1, y), (90, 90, 90), 1)
     heading("TEST")
-    line(LABEL_NAMES.get(label, label), WHITE, 0.9, 2, 30)
+    if guide is not None:
+        for part in _wrap(guide.block or "Starting", 0.6, bar_w):
+            line(part, WHITE, 0.6, 1, 24)
+    else:
+        line(LABEL_NAMES.get(label, label), WHITE, 0.9, 2, 30)
     counts = {lab: sum(1 for t in trials if t["label"] == lab and t["quality"] == "usable")
               for lab in LABEL_NAMES}
     line("normal %d/10   left %d/10   right %d/10"
@@ -244,7 +248,10 @@ def _draw_panel(panel, obs, fr, label, trials, jitter):
             reason = (t.get("reason") or "").split(";")[0].split(" (")[0]
             txt = "#%d unusable: %s" % (t["trial"], reason)
         line(txt, GREY, 0.42, 1, 20)
-    line("n normal  l left  r right  SPACE start  m mesh  q quit", HEAD, 0.42, 1, 20)
+    if guide is not None:
+        line("Runs by itself. Q = stop.", HEAD, 0.5, 1, 20)
+    else:
+        line("n normal  l left  r right  SPACE start  m mesh  q quit", HEAD, 0.42, 1, 20)
 
     # 9. SO FAR
     heading("SO FAR")
@@ -272,13 +279,18 @@ def _draw_panel(panel, obs, fr, label, trials, jitter):
 
 
 def render(frame, obs, fr, *, mirrored: bool, show_mesh: bool, label: str, trials: list,
-           jitter: Optional[float], phase_text: Optional[str]):
-    """Return the whole window image: picture on the left, panel on the right."""
+           jitter: Optional[float], phase_text: Optional[str], guide=None):
+    """Return the whole window image: picture on the left, panel on the right.
+
+    guide: a GuideView in guided mode (banner, countdown, no key hints), else None.
+    """
     h, w = frame.shape[:2]
     scale = max(1.0, MIN_PICTURE_W / float(w), MIN_HEIGHT / float(h))
     pic = cv2.resize(frame, (int(round(w * scale)), int(round(h * scale))),
                      interpolation=cv2.INTER_LINEAR)
-    _draw_picture(pic, obs, fr, mirrored, scale, show_mesh, phase_text)
+    _draw_picture(pic, obs, fr, mirrored, scale, show_mesh, None if guide is not None else phase_text)
+    if guide is not None:
+        guide_draw.draw(pic, guide)
     panel = np.full((pic.shape[0], PANEL_W, 3), BG, dtype=np.uint8)
-    _draw_panel(panel, obs, fr, label, trials, jitter)
+    _draw_panel(panel, obs, fr, label, trials, jitter, guide)
     return np.hstack([pic, panel])

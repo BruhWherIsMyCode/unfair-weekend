@@ -12,7 +12,7 @@ from typing import List, Optional
 import cv2
 import numpy as np
 
-from analysis import config
+from analysis import config, guide_draw
 from analysis.hand_metric import HandFrameReading
 from analysis.hand_summary import summarise
 
@@ -108,7 +108,8 @@ def _draw_picture(pic, obs, hr: HandFrameReading, mirrored, scale, show_points, 
                 cv2.circle(pic, to_screen(p), 3, YELLOW, -1)
         c = to_screen(hr.palm_centre)
         half = int(40 * scale / 1.0)
-        # current height tick
+        # current height tick: green when the frame is usable, red when it is not but a
+        # palm centre is known (no palm centre known: nothing is drawn, see the guard above)
         cv2.line(pic, (c[0] - half, c[1]), (c[0] + half, c[1]), GREEN if hr.usable else RED, 3)
         # start height tick: the same palm shifted along the eye-line normal to the start height
         if start_height is not None and hr.eye_line is not None and hr.height is not None:
@@ -144,7 +145,7 @@ def _trial_line(t: dict) -> str:
 
 
 def _draw_panel(panel, hr: HandFrameReading, hand: str, mode: str, trials: List[dict],
-                trial_active: bool, sink: Optional[float], turn: Optional[float]):
+                trial_active: bool, sink: Optional[float], turn: Optional[float], guide=None):
     H = panel.shape[0]
     x0, x1 = PAD, PANEL_W - PAD
     bar_w = x1 - x0
@@ -229,7 +230,11 @@ def _draw_panel(panel, hr: HandFrameReading, hand: str, mode: str, trials: List[
     y += 10
     cv2.line(panel, (x0, y), (x1, y), (90, 90, 90), 1)
     heading("TEST")
-    line("%s  %s" % (HAND_NAMES[hand], MODE_NAMES[mode]), WHITE, 0.8, 2, 28)
+    if guide is not None:
+        for part in _wrap(guide.block or "Starting", 0.6, bar_w):
+            line(part, WHITE, 0.6, 1, 24)
+    else:
+        line("%s  %s" % (HAND_NAMES[hand], MODE_NAMES[mode]), WHITE, 0.8, 2, 28)
 
     def cnt(h, m):
         return sum(1 for t in trials if t["hand"] == h and t["mode"] == m and t["quality"] == "usable")
@@ -238,8 +243,11 @@ def _draw_panel(panel, hr: HandFrameReading, hand: str, mode: str, trials: List[
          WHITE, 0.45, 1, 20)
     if trials:
         line(_trial_line(trials[-1]), GREY, 0.42, 1, 20)
-    line("1 her left hand  2 her right hand  n normal  w acted weak", HEAD, 0.4, 1, 18)
-    line("SPACE start  m points  q quit", HEAD, 0.4, 1, 16)
+    if guide is not None:
+        line("Runs by itself. Q = stop.", HEAD, 0.5, 1, 20)
+    else:
+        line("1 her left hand  2 her right hand  n normal  w acted weak", HEAD, 0.4, 1, 18)
+        line("SPACE start  m points  q quit", HEAD, 0.4, 1, 16)
 
     # 8. SO FAR
     heading("SO FAR")
@@ -264,13 +272,20 @@ def _draw_panel(panel, hr: HandFrameReading, hand: str, mode: str, trials: List[
 
 def render(frame, obs, hr: HandFrameReading, *, mirrored: bool, show_points: bool, hand: str,
            mode: str, trials: List[dict], phase_text: Optional[str], trial_active: bool,
-           start_height: Optional[float], sink: Optional[float], turn: Optional[float]):
-    """Return the whole window image: picture on the left, panel on the right."""
+           start_height: Optional[float], sink: Optional[float], turn: Optional[float],
+           guide=None):
+    """Return the whole window image: picture on the left, panel on the right.
+
+    guide: a GuideView in guided mode (banner, countdown, no key hints), else None.
+    """
     h, w = frame.shape[:2]
     scale = max(1.0, MIN_PICTURE_W / float(w), MIN_HEIGHT / float(h))
     pic = cv2.resize(frame, (int(round(w * scale)), int(round(h * scale))),
                      interpolation=cv2.INTER_LINEAR)
-    _draw_picture(pic, obs, hr, mirrored, scale, show_points, phase_text, start_height)
+    _draw_picture(pic, obs, hr, mirrored, scale, show_points,
+                  None if guide is not None else phase_text, start_height)
+    if guide is not None:
+        guide_draw.draw(pic, guide)
     panel = np.full((pic.shape[0], PANEL_W, 3), BG, dtype=np.uint8)
-    _draw_panel(panel, hr, hand, mode, trials, trial_active, sink, turn)
+    _draw_panel(panel, hr, hand, mode, trials, trial_active, sink, turn, guide)
     return np.hstack([pic, panel])
