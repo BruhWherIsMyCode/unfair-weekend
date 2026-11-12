@@ -74,10 +74,10 @@ def face_plan(per_label: Optional[int] = None) -> List[Trial]:
          "Look at the camera. When it says SMILE, give a big normal smile.",
          "Relax your face first, then smile when the text says SMILE."),
         ("acted_left", "Part 2 of 3: droop on your LEFT side",
-         "Now ACT A DROOP on your LEFT side: smile, but keep your LEFT mouth corner down.",
+         "Now ACT A DROOP on your LEFT side: smile with your RIGHT side only, keep your LEFT mouth corner down.",
          "Do it when the text says SMILE. Your right side smiles as usual."),
         ("acted_right", "Part 3 of 3: droop on your RIGHT side",
-         "Now ACT A DROOP on your RIGHT side: smile, but keep your RIGHT mouth corner down.",
+         "Now ACT A DROOP on your RIGHT side: smile with your LEFT side only, keep your RIGHT mouth corner down.",
          "Do it when the text says SMILE. Your left side smiles as usual."),
     ]
     return [Trial("face", label, text, detail, block) for label, block, text, detail in blocks

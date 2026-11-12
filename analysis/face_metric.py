@@ -173,7 +173,10 @@ def frame_reading(obs: Optional[FrameObservation]) -> Optional[FrameReading]:
     left_smile = bs.get("mouthSmileLeft")
     right_smile = bs.get("mouthSmileRight")
     if left_smile is not None and right_smile is not None:
-        smile_strength = (left_smile + right_smile) / 2.0
+        # The STRONGER side: an acted (or real) one-sided droop halves the
+        # average and made the "no clear smile" gate reject exactly the
+        # trials we need to see (owner's first guided run).
+        smile_strength = max(left_smile, right_smile)
         smile_score = right_smile - left_smile  # positive = her left smiles less
     else:
         mouth_width = math.hypot(mouth_l[0] - mouth_r[0], mouth_l[1] - mouth_r[1])

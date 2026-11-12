@@ -41,7 +41,7 @@ RELAXED_FRACTION = 0.2  # share of usable frames (weakest smile) taken as the re
 PEAK_FRACTION = 0.2  # share of usable frames (strongest smile) taken as the peak; first guess
 MIN_PEAK_FRAMES = 3  # at least this many peak frames are used; first guess
 MIN_USABLE_FRAMES = 8  # fewer usable frames than this makes the clip unusable; first guess
-MIN_SMILE_RISE = 0.25  # peak minus relaxed smile strength below this means no smile happened; first guess
+MIN_SMILE_RISE = 0.15  # peak minus relaxed smile strength (stronger side) below this means no smile happened; lowered from 0.25 after the owner's first run rejected normal smiles
 
 # ---- Baseline ---------------------------------------------------------------
 BASELINE_K = 3.0  # range = median +/- K x robust spread; first guess
