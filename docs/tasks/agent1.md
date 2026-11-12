@@ -1,71 +1,77 @@
-# Agent 1 task: demo shell app (v3, 12 Nov night)
+# Agent 1 task: stage demo shell (v4, 12 Nov night)
 
-Overrides `docs/AGENT_1_IOS_APP.md` where they differ. Work on branch `agent-1/ios-app`, folder `ios/App/` only (AGENTS.md).
+Overrides `docs/AGENT_1_IOS_APP.md` and every earlier version of this file where they differ. Branch `agent-1/ios-app`, folder `ios/App/` only (see `AGENTS.md`). Your work reaches `main` only through a pull request.
 
 ## What we are building
 
-**Not a product. A stage shell for one scripted scene.** Everything is local, hard-coded and mocked. No backend, no `CheckInCore`, no camera, no measuring, no networking. It must look real on a big screen and never fail.
+**Not a product. A shell for one scripted stage scene**, on one iPhone (the "operator" phone), mirrored to a Mac and the big screen. Everything is local and hard-coded: no backend, no `CheckInCore`, no camera, no measuring, no networking, no accounts. It must look real and must not fail on stage.
 
-The design is the Claude Design export in `docs/design/export/` (file `Onas Calls Demo v5`). Rebuild it in SwiftUI faithfully: colours, type, spacing, copy. If something below conflicts with the design, the design wins on looks, this file wins on behaviour and wording rules.
+## The design
+
+`docs/design/export/` (PR #2, "Onas Calls Demo v5"). `onas-calls-demo-v5.html` is the real export: open it in a browser, switch to "Present" mode, step with the arrow keys. `unpacked/template.html` is the same markup as readable text. Rebuild its screens in SwiftUI faithfully: colours (take the hex values from the markup), type, spacing, copy. The storyboard frame, step numbers and "Made with Claude Design" are not part of the app.
+
+Its six steps and what each one is in the app:
+
+| Design step | In the app |
+|---|---|
+| 1 Lock screen | The real iOS lock screen. Not built by us |
+| 2 Notification "Call Fedya now. He seems different from his usual." | A real local notification from our app, app name "Ona's calls" |
+| 3 Family | **Home**: amber "NOT HIS USUAL / Call Fedya now" card with clip thumbnail on top, then "Everyone else" (Ona, Aldona: As usual) |
+| 4 Alert | **Alert**: clip playing with its 0:00 / 0:10 progress, the report text, buttons "Call Fedya", "Call 112", "He's fine", and the 112 line |
+| 5 Calling | The real system call screen after `tel:` (see below). Build the design's version only as the fallback |
+| 6 Declined | **Home, after the call**: "Declined at 13:02 / Call Fedya again", Fedya's row says "you called at 13:02" |
 
 ## The scene
 
-1. Fedya is on stage, talking about the product. His phone (iPhone 17 Pro Max) gets a video call (not our app, staged separately). He acts unwell. The call ends.
-2. **Our app, on the operator phone (iPhone 18 Pro Max), mirrored to the Mac and the big screen,** rings loudly with an incoming alert.
-3. The operator opens the app. Home screen: Fedya's profile with an amber banner above it ("Call Fedya now").
-4. Opens the alert: what changed from his usual, the clip, and three choices:
-   - **He's fine** (closes the alert, status back to "as usual").
-   - **I'll call him myself** (starts a real phone call to Fedya's number).
-   - **Call 112** (demo: fake, see Safety).
-5. The operator picks "I'll call him myself". The phone really calls Fedya. Fedya declines on stage and carries on.
+1. Before going on stage: operator opens the hidden demo panel, taps **Arm**, locks the phone.
+2. After the armed delay (default 60 s, set in the panel) the app's local notification lands on the lock screen with sound (design step 2). Meanwhile Fedya, on his own phone, takes the check-in call and acts unwell.
+3. Operator taps the notification → app opens on **Home** in the alert state (step 3) → taps the amber card → **Alert** (step 4), clip plays.
+4. Operator taps **Call Fedya** → the app opens `tel:<Fedya's number>` → Fedya's phone really rings on stage → he declines.
+5. When the call ends and the app is active again, it shows **Home, after the call** (step 6) with the real time.
 
-## Screens (match the design export)
+Other buttons:
+- **He's fine** → Fedya's card goes back to "As usual". End of scene.
+- **Call 112** → **never dials.** Shows the design's calling screen with "112" and a small visible label "DEMO – not dialled", then returns. There must be no `tel:112` (or any emergency number) anywhere in the code.
+- **Call Fedya again** → same as Call Fedya.
 
-1. **Home.** Persons list or Fedya's profile as in the design, with the amber alert banner when an alert is active; calm "as usual" state otherwise.
-2. **Incoming alert.** Full-screen, loud, call-like screen with ringtone and vibration until the operator taps it. Then goes to the alert detail.
-3. **Alert detail.** Text of what changed, the clip (plays inline, from a bundled mp4), the three choices.
-4. **Calling.** After "I'll call him myself": open `tel:` to Fedya's number (system call screen takes over, that is fine).
-5. **112 (fake).** A "Calling 112…" screen in our own UI with a visible small "DEMO – not dialled" label. Then back to home.
+## Hidden demo panel
 
-No other screens, no dead buttons. Anything in the design that this scene does not use: render it static or leave it out.
+Opened with a 2-second long-press on the "Family" title. Saved in `UserDefaults`. Contains:
+- Fedya's phone number (the only `tel:` target in the app).
+- Alert delay in seconds (presets 10 / 30 / 60 / 120).
+- **Arm**: schedules the local notification and puts the app in the alert state.
+- **Show alert now**: alert state without a notification, for rehearsal.
+- **Fake call screen** toggle: if on, "Call Fedya" shows the design's step-5 calling screen for 4 s, then "Declined", instead of dialling. Fallback for no signal on stage.
+- **Reset**: back to the start (everyone As usual, nothing armed, notification cancelled). The scene must be repeatable many times in a row without reinstalling.
 
-## Hidden demo controls
+Nothing else in the app is hidden or dead. No other screens, no settings, no tab bar.
 
-- **Trigger:** triple-tap on the home screen title fires the incoming alert after a delay chosen in the demo panel (0 / 5 / 10 s). Nothing visible on screen.
-- **Demo panel:** long-press (2 s) on the title. Contains: Fedya's phone number, delay, "Reset to as usual", which clip to use. Saved in `UserDefaults`.
-- **Reset** returns everything to the starting state, so the scene can be rehearsed many times in a row.
+## Technical rules
 
-## Loud on stage
+- SwiftUI, iOS 17+, iPhone only, portrait only. No third-party packages.
+- Generate the project with **XcodeGen** (`ios/App/project.yml` → `xcodegen generate`). Commit `project.yml`; the generated `.xcodeproj` may be committed too so a teammate without XcodeGen can open it. Signing team comes from an untracked `ios/App/Local.xcconfig` (`DEVELOPMENT_TEAM = ...`); commit `Local.xcconfig.example` instead.
+- State: one small `@Observable` store, states `asUsual` → `alert` → `calling` → `declined`, plus `fake112`.
+- Notification: `UNUserNotificationCenter`, ask permission on first launch, a custom sound (`.caf`, under 30 s, in the bundle, a loud ring). Try `interruptionLevel = .timeSensitive` to match the design's "TIME SENSITIVE" label; it needs the Time Sensitive Notifications capability. If the signing team cannot use it, fall back to `.active` and say so in the PR. [unverified whether a free Apple ID team allows it]
+- Detecting the end of the real call: `CXCallObserver` (CallKit, observing only, no entitlement needed) plus `scenePhase` returning to `.active`. Use the real time for "Declined at".
+- Clip: `AVPlayer` with a bundled mp4, looping, muted by default, with a mute toggle. Show the design's dark placeholder if the file is missing.
+- Keep the screen awake while the app is in the foreground (`isIdleTimerDisabled`).
+- All strings in one `Localizable.xcstrings`.
 
-- Play the ring with `AVAudioPlayer` on an `AVAudioSession` category `.playback`, so it sounds even with the silent switch on. Volume is the phone's; tell your human to set it to max.
-- The app stays in the foreground during the demo (it is mirrored anyway). Also schedule a local notification with sound as a backup in case the app is backgrounded. No push, no CallKit, no entitlements.
-- Keep the screen awake (`isIdleTimerDisabled = true`).
+## Private assets: never commit
 
-## Safety (must have, reviewed)
+- `ios/App/LocalAssets/clip.mp4` (Fedya acting, about 10 s) and `fedya.jpg`. Add `LocalAssets/` to `ios/App/.gitignore`. The app must build and run without them (placeholders). Reason: `AGENTS.md`, no recordings of people in a repo that goes public.
 
-- **The app must never dial 112 or any emergency number.** "Call 112" only shows the fake screen. There is no `tel:112` anywhere in the code. A real call to an emergency line from the stage is a real emergency-services call.
-- The only `tel:` target is the number typed into the demo panel.
+## Wording rules (`docs/PROJECT_CONTEXT.md` §2)
 
-## Wording (claim rules, `docs/PROJECT_CONTEXT.md` §2)
+- Never in any string: "stroke", "detect", "diagnose", "predict", "suspect", "medical", "safe", "risk", "100%".
+- Use the design copy as written. The alert ends with "If he seems unwell, call 112."
 
-- Never: "stroke", "detect", "diagnose", "predict", "suspect", "medical", "safe", "risk", "100%". Say "different from his usual", "noticed a change".
-- The alert text ends with "If he seems unwell, call 112." (the person in the demo is Fedya, so "he").
-- Example alert text: "The left corner of Fedya's mouth is lower than usual. It looked the same when he tried again. Call Fedya now. If he seems unwell, call 112."
-- Button labels: "He's fine", "I'll call him myself", "Call 112". All strings in one `Localizable.xcstrings`.
+## Verify before opening the PR
 
-## Assets
+1. `xcodebuild` builds for the Simulator with no errors (find a simulator with `xcrun simctl list devices available`).
+2. The scene runs in the Simulator with "Show alert now" and the fake call screen.
+3. `grep -rniE "stroke|detect|diagnos|predict|suspect|medical|\\bsafe\\b|100%" ios/App --include=*.swift --include=*.xcstrings --include=*.plist` finds nothing user-visible.
+4. `grep -rn "tel:" ios/App` shows only the number from the panel.
+5. `git status` shows no mp4, jpg, `.xcconfig` with a team id, or keys.
 
-- The clip: a short mp4 of Fedya acting the droop, recorded by the team, added to the app bundle locally. **Do not commit it** (no recordings of people in the repo, AGENTS.md). Put it in `ios/App/LocalAssets/` and add that folder to `ios/App/.gitignore`. Show a placeholder frame if the file is missing.
-- Fedya's photo: same rule, local only, placeholder if missing.
-
-## Tech
-
-- SwiftUI, iOS 17+, iPhone, portrait only. One target, no third-party packages.
-- The state is one small `@Observable` store: `asUsual` → `ringing` → `alertOpen` → `calling` / `fake112` → back.
-
-## Done means
-
-- From a cold start: triple-tap → ring after the delay → open → clip plays → "I'll call him myself" opens the call to the number in the panel → returning to the app shows home; Reset restores the start.
-- Run the scene 5 times in a row on the real iPhone without restarting the app.
-- A search of the strings finds none of the banned words, and the code contains no `112` inside a `tel:` URL.
-- PR into `main` saying what was tested on the device and what was not.
+In the PR say what ran in the Simulator, what ran on the real iPhone (notification on the lock screen, the real `tel:` call, the Declined state) and what did not run yet.
