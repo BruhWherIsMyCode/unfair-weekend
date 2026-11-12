@@ -15,3 +15,9 @@ The user selected a separate parent app during the architecture discussion and r
 - Not selected yet: final avatar mode, family notification provider, or deployment host. The still-image/audio fallback required by the brief remains part of the later golden path.
 
 Sources checked on 2026-11-12: [Simli SDK](https://docs.simli.com/api-reference/javascript), [Simli pricing](https://www.simli.com/pricing), [ElevenLabs speech](https://elevenlabs.io/docs/api-reference/text-to-speech/convert).
+
+## 2026-11-12: proposed adaptive conversation architecture
+
+The user requested a reviewable plan in which Claude leads the conversation while audio/video analyzers run in parallel and publish relevant observations. [ARCHITECTURE_PLAN.md](ARCHITECTURE_PLAN.md) proposes a coordinator for each call, pushed observation events, bounded Claude tools, command acknowledgments, and explicit interruption/notification rules. It preserves on-device video analysis as the initial assumption and identifies the shared-contract changes to agree with Agent 3.
+
+Status: design proposal only. The existing greeting demo is unchanged. The Claude conversation loop, analyzers, mid-call commands, notification handlers, and Speech Engine integration have not been implemented or tested. The user requested no pull requests for these experiments; the prototype PR was closed and further work stays on the backend branch unless instructed otherwise.
