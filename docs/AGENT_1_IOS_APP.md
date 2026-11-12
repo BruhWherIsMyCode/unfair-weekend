@@ -4,6 +4,13 @@ You build what the judges and the older person see.
 
 Read first, in this order: `PROJECT_CONTEXT.md` (§1, §2, §4 and the demo scene in §9), then `SHARED_CONTRACT.md`. Where they disagree, `SHARED_CONTRACT.md` wins. Nothing described here exists yet.
 
+## Change, 12 Nov evening (Alex): overrides everything below
+
+- **No parent screens.** The parent uses an existing video-call app (WhatsApp or similar, not final). Parent screens 1 to 5 and the parent role in Setup are paused; do not build them.
+- **The app is the family app.** The adult child sees statuses for one parent. Screens: `docs/design/CLAUDE_DESIGN_PROMPT.md` (v2, 13 screens) replaces the screen list below.
+- Still valid: iOS 17, portrait, show backend text verbatim, "Call {name}" button with her number from Setup, the demo panel and the ACTED mark, claim rules.
+- Open, not yours to solve: where the camera frames are measured now that the call is not in our app. Until the team decides, build on `MockCheckInSession` / mock `FamilyFeed` only.
+
 ## Mission
 
 A native iOS app with two roles on one build:
