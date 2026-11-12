@@ -102,4 +102,5 @@ class FacePointsExtractor:
             pitch_deg=pitch,
             roll_deg=roll,
             timestamp_ms=ts,
+            mesh=[(lm.x * w, lm.y * h) for lm in lms],
         )

@@ -39,6 +39,7 @@ class FrameObservation:
     pitch_deg: Optional[float] = None
     roll_deg: Optional[float] = None
     timestamp_ms: int = 0
+    mesh: List[Point] = field(default_factory=list)  # all face points in pixels, for display only
 
 
 @dataclass

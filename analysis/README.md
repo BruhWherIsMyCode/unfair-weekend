@@ -40,6 +40,8 @@ This answers one question: does an acted one-sided droop move a reading clearly 
 6. Press `l`, then do 10 acted droops on your left (the left corner stays down while the right smiles). Press `r` and do 10 on your right.
 7. Press `q`. The summary prints and is saved next to the CSV in `analysis/runs/`.
 
+**The window ("Droop test").** Left: the camera picture (not a mirror), with the four measured points. A cyan line runs through the two eye points and a second line through the two mouth points (green when the frame is usable, red when not). With a level face the two lines are parallel; a droop tilts the mouth line. During a trial the big `RELAX` / `SMILE` countdown shows at the bottom. Right: a side panel in plain words: face OK or why not, mouth level, smile, smile balance, head, steadiness, wink check, then the test label, trial counts, the last trial and the keys. Press `m` to show or hide a faint dot for every one of the 478 face points. The **SO FAR** block at the bottom of the panel is a live tally: per reading, the range of normal trials and how many acted left / right trials lie outside it (`OK` = all outside, `X` = some overlap), so you see during the test whether the droops separate.
+
 Add `--record-trials` to also save each trial as a video in `analysis/recordings/` (not committed) for testing the clip tool. Never commit recordings of people.
 
 **Reading the summary.** For each of the three readings you get a table per label and a verdict for each acted label. `separates` on the correct side means every acted trial lay beyond every normal trial: a pass. `overlaps` means some did not; the count says how many. `best metric` is the reading with the widest worst-case gap compared with the spread of normal smiles.

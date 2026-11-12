@@ -4,7 +4,7 @@ Run from the repo root:
     python -m analysis.live_face [--camera 0] [--mirrored] [--person NAME] [--record-trials]
 
 Keys: n / l / r = label the next trials normal / acted_left / acted_right.
-      SPACE = start a trial (1.0 s RELAX, then 3.0 s SMILE).  q = quit + summary.
+      SPACE = start a trial (1.0 s RELAX, then 3.0 s SMILE).  m = mesh dots.  q = quit + summary.
 
 Conventions: "left"/"right" are HER left/right. Positive reading = her LEFT
 side lower or weaker. The picture shown is NOT flipped (not a mirror): your
@@ -51,6 +51,7 @@ def main(argv=None) -> int:
         return 1
 
     import cv2  # imported here so --help works without the libraries
+    from analysis import display
     from analysis.face_points import FacePointsExtractor
 
     cap = cv2.VideoCapture(args.camera)
@@ -72,11 +73,7 @@ def main(argv=None) -> int:
     trial = None  # dict while a trial runs
     t0 = time.monotonic()
     last_ts = -1
-    font = cv2.FONT_HERSHEY_SIMPLEX
-
-    def put(img, text, y, color=(255, 255, 255), scale=0.6):
-        cv2.putText(img, text, (10, y), font, scale, (0, 0, 0), 3, cv2.LINE_AA)
-        cv2.putText(img, text, (10, y), font, scale, color, 1, cv2.LINE_AA)
+    show_mesh = False
 
     def finish_trial(tr):
         if tr["writer"] is not None:
@@ -116,16 +113,7 @@ def main(argv=None) -> int:
             if fr is not None and fr.usable:
                 jitter_buf.append(fr.corner_height)
 
-            shown = frame.copy()  # NOT flipped
-            h, w = shown.shape[:2]
-
-            # Points are in the un-mirrored coordinates; map back onto the shown picture.
-            if obs.face_found:
-                for name, (x, y) in obs.points.items():
-                    sx = (w - x) if args.mirrored else x
-                    cv2.circle(shown, (int(sx), int(y)), 4, (0, 255, 0), -1)
-                    text = "HER " + ("L" if "left" in name else "R") + (" eye" if "eye" in name else " mouth")
-                    cv2.putText(shown, text, (int(sx) + 6, int(y) - 6), font, 0.45, (0, 255, 255), 1, cv2.LINE_AA)
+            h, w = frame.shape[:2]
 
             # Trial state machine
             phase_text = None
@@ -144,34 +132,16 @@ def main(argv=None) -> int:
                     else:
                         phase_text = "SMILE  %.1f" % (total - elapsed)
 
-            put(shown, "not a mirror: your left is on screen right" if not args.mirrored
-                else "camera is mirrored (flipped back for measuring)", 20, (200, 200, 200), 0.5)
-            put(shown, "label: %s   trials: %d   [n/l/r label, SPACE trial, q quit]" % (label, len(trials)),
-                42, (0, 200, 255), 0.5)
-            if fr is not None and fr.corner_height is not None:
-                put(shown, "corner_height: %s   smile_strength: %.2f" % (_fmt(fr.corner_height), fr.smile_strength), 70)
-            else:
-                put(shown, "corner_height: -", 70)
-            angles = [obs.yaw_deg, obs.pitch_deg, obs.roll_deg]
-            put(shown, "yaw/pitch/roll: " + " / ".join("-" if a is None else "%.0f" % a for a in angles)
-                + "  [convention unverified]", 94)
-            status = "usable" if (fr is not None and fr.usable) else ("NOT usable: %s" % (fr.reason if fr else "?"))
-            put(shown, status, 118, (0, 255, 0) if status == "usable" else (0, 0, 255))
-            bl, br = obs.blendshapes.get("eyeBlinkLeft", 0.0), obs.blendshapes.get("eyeBlinkRight", 0.0)
-            if obs.face_found and abs(bl - br) >= config.WINK_MIN_DIFF:
-                put(shown, "blink: HER %s" % ("LEFT" if bl > br else "RIGHT"), 142, (255, 200, 0))
-            else:
-                put(shown, "blink: -", 142)
             jit = statistics.pstdev(jitter_buf) if len(jitter_buf) >= 2 else None
-            put(shown, "jitter (sd of corner_height, last %d): %s" % (config.JITTER_WINDOW, "-" if jit is None else "%.4f" % jit), 166)
-            if phase_text:
-                cv2.putText(shown, phase_text, (10, h - 20), font, 1.5, (0, 0, 255), 3, cv2.LINE_AA)
-
-            cv2.imshow("droop test", shown)
+            shown = display.render(frame, obs, fr, mirrored=args.mirrored, show_mesh=show_mesh,
+                                   label=label, trials=trials, jitter=jit, phase_text=phase_text)
+            cv2.imshow("Droop test", shown)
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
                 break
-            if key in LABEL_KEYS:
+            if key == ord("m"):
+                show_mesh = not show_mesh
+            elif key in LABEL_KEYS:
                 label = LABEL_KEYS[key]
             elif key == ord(" ") and trial is None:
                 writer = None
