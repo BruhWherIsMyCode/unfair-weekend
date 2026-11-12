@@ -97,6 +97,11 @@ def main(argv=None) -> int:
                 w.writeheader()
             w.writerow(row)
 
+    # Resizable window that keeps its shape: the full layout is ~1500x780 and
+    # may not fit a laptop screen. Drag the corner to shrink it.
+    cv2.namedWindow("Droop test", cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+    cv2.resizeWindow("Droop test", 1200, 624)
+
     with FacePointsExtractor(config.MODEL_PATH) as extractor:
         while True:
             ok, frame = cap.read()
