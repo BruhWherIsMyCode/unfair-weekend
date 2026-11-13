@@ -29,8 +29,9 @@ recordings, provider calls, seeded formulas or invented production thresholds.
 
 Not implemented here: application repositories, CallService persistence,
 CallSession, startup recovery, client endpoints, timers, outbox dispatch,
-task analyzers, metric formulas or end-to-end calls. The merged [Python foundation](README.md#python-foundation) provides an
-in-memory CallService. Schema tooling does not import that application or
+task analyzers, metric formulas or end-to-end calls. The merged
+[Python foundation](README.md#python-foundation) provides an in-memory
+CallService. Schema tooling does not import that application or
 persist its records automatically. Writers must implement the transactions
 below before claiming persistence works in the running backend.
 
