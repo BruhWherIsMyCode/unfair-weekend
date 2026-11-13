@@ -1,0 +1,18 @@
+{
+  "greet": "Hello, {name}. It's time for our short check-in.",
+  "q_medicine": "Have you taken your medicine today?",
+  "q_feeling": "How are you feeling today?",
+  "q_unusual": "Has anything felt unusual since our last call?",
+  "setup_phone": "Please hold the phone in your right hand, in front of your face, so I can see your face.",
+  "task_smile": "When the timer starts, please look at the camera and smile until it finishes.",
+  "task_arms": "Raise your left hand beside your face now, and hold it there until I say swap.",
+  "task_sentence": "Please repeat this sentence after me: Today I am sitting by the window.",
+  "repeat_smile": "Let's try once more. Keep your face in view and smile until the timer finishes.",
+  "repeat_arms": "Let's try once more. Hold the phone in your right hand. Raise your left hand beside your face now, and hold it there until I say swap.",
+  "repeat_sentence": "Let's try once more. Please say: Today I am sitting by the window.",
+  "camera_unavailable": "I can't see you right now. Please check that your camera is on. We can try again, or finish our check-in.",
+  "microphone_unavailable": "I can't hear you right now. Please check that your microphone is on. We can try again, or finish our check-in.",
+  "bye": "Thank you, {name}. Our check-in is finished. Goodbye.",
+  "sentence": "Today I am sitting by the window.",
+  "swap_hands": "Now swap: take the phone in your left hand, and raise your right hand beside your face."
+}

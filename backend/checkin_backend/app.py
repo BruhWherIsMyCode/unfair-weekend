@@ -145,7 +145,7 @@ class CallDesk:
         self.links: dict[str, ClientLink] = {}
         self.results: dict[str, dict[str, Any] | None] = {}
         self.tasks: set[asyncio.Task[Any]] = set()
-        self.driver = choose_driver(settings.call_runner)
+        self.driver = choose_driver(settings.call_runner, settings.database_path)
 
     def _spawn(self, coro: Any) -> None:
         task = asyncio.create_task(coro)

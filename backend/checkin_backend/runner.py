@@ -1,14 +1,18 @@
 """Runs one answered call: builds Agent 3's CallSession over a ClientLink and drives it to the end.
 
-The analysis package (`analysis/`, Agent 3) is imported when it is on the Python path. Without it the call
+The analysis package (`analysis/`, Agent 3) is imported when it is on the Python path, or when the repo root (the
+parent of `backend/`) holds it: that root is then added to the path. One function runs the call:
+`analysis.backend_entry.run_backend_call(link, modules)`. Without the package the call
 falls back to a scripted driver that plays the fixed lines, records answers and runs each task capture with
 no measurement, so the client and the call service can be exercised end to end. That fallback never produces
 a reading and always reports the session as incomplete.
 """
 
 import asyncio
-import os
+import importlib.util
+import sys
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 from .link import CallEnded, ClientLink, PlaybackFailed
@@ -19,15 +23,33 @@ QUESTIONS = ("q_medicine", "q_feeling", "q_unusual")
 CAPTURE_SETTINGS = {
     "smile": {"media_kind": "video", "duration_ms": 5000, "prepare_ms": 0, "stop_on_silence_ms": None,
               "format": "jpeg", "sample_period_ms": 200},
-    "arms": {"media_kind": "video", "duration_ms": 12000, "prepare_ms": 2000, "stop_on_silence_ms": None,
+    "arms": {"media_kind": "video", "duration_ms": 15000, "prepare_ms": 2000, "stop_on_silence_ms": None,
              "format": "jpeg", "sample_period_ms": 200},
     "sentence": {"media_kind": "audio", "duration_ms": 12000, "prepare_ms": 0, "stop_on_silence_ms": 1500,
                  "format": "pcm_s16le_16000_mono", "sample_period_ms": 250},
 }
 
 
+REPO_ROOT = Path(__file__).resolve().parents[2]  # the parent of backend/
+
+
+def ensure_analysis_path() -> bool:
+    """Make `analysis` importable. When it is missing and the repo root (the parent of backend/) holds
+    analysis/__init__.py, that root is added to sys.path, so the backend works without PYTHONPATH."""
+    if importlib.util.find_spec("analysis") is not None:
+        return True
+    if (REPO_ROOT / "analysis" / "__init__.py").is_file():
+        if str(REPO_ROOT) not in sys.path:
+            sys.path.insert(0, str(REPO_ROOT))
+        importlib.invalidate_caches()
+        return importlib.util.find_spec("analysis") is not None
+    return False
+
+
 def analysis_available() -> bool:
+    ensure_analysis_path()
     try:
+        import analysis.backend_entry  # noqa: F401
         import analysis.session.call_session  # noqa: F401
         import analysis.session.run_call  # noqa: F401
     except ImportError:
@@ -35,33 +57,22 @@ def analysis_available() -> bool:
     return True
 
 
-def _modules(kind: str) -> dict[str, Any]:
-    if kind == "fake":
+async def run_analysis_call(link: ClientLink, modules: str, database_path: str | None = None) -> dict[str, Any]:
+    """Agent 3's session over this link. All call settings are read by analysis.backend_entry (CALL_DRIVER, ...).
+    `database_path` (DATABASE_PATH) turns on Agent 3's recording in the shared database; None leaves it off."""
+    ensure_analysis_path()
+    from analysis.backend_entry import run_backend_call
+
+    # One writer for the shared database: when the call service's Store is on, Agent 3's recorder hands its jobs
+    # to the same writer thread (its calls row is then always committed before ours; summaries stay the Store's).
+    store = getattr(link, "store", None)
+    submit = store._submit if (database_path and store is not None and getattr(store, "enabled", False)) else None
+    chosen = None
+    if modules == "fake":
         from .fake_tasks import fake_modules
 
-        return fake_modules()
-    from analysis.tasks.stream_registry import STREAM_TASKS
-
-    return dict(STREAM_TASKS)
-
-
-async def run_analysis_call(link: ClientLink, modules: str) -> dict[str, Any]:
-    from analysis.session.call_session import CallSession
-    from analysis.session.run_call import run_call
-
-    session = CallSession(
-        link.call_id,
-        link.person.person_id,
-        link.person.name,
-        link,
-        _modules(modules),
-        baselines=link.person.baselines,
-        label=link.person.label,
-        initial_resources=link.initial_resources(),
-    )
-    link.attach(session)
-    mode = os.environ.get("CALL_DRIVER") or None
-    return await run_call(session, link, mode=mode)
+        chosen = fake_modules()
+    return await run_backend_call(link, modules=chosen, database_path=database_path, submit=submit)
 
 
 class ScriptedSession:
@@ -133,14 +144,14 @@ async def run_scripted_call(link: ClientLink) -> dict[str, Any]:
     return summary
 
 
-def choose_driver(kind: str) -> Callable[[ClientLink], Awaitable[dict[str, Any]]]:
+def choose_driver(kind: str, database_path: str | None = None) -> Callable[[ClientLink], Awaitable[dict[str, Any]]]:
     if kind == "auto":
         kind = "analysis" if analysis_available() else "scripted"
     if kind == "scripted":
         return run_scripted_call
     if kind in ("analysis", "fake"):
         modules = "fake" if kind == "fake" else "real"
-        return lambda link: run_analysis_call(link, modules)
+        return lambda link: run_analysis_call(link, modules, database_path)
     raise ValueError("CALL_RUNNER must be auto, analysis, fake or scripted")
 
 

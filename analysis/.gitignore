@@ -1,0 +1,8 @@
+models/
+recordings/
+data/
+runs/
+*.mp4
+*.mov
+*.avi
+__pycache__/

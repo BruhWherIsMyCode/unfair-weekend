@@ -1,0 +1,762 @@
+openapi: 3.1.0
+info:
+  title: 'One Python backend: task input, observations and interruptions (review draft)'
+  version: 0.2.0-draft
+  description: Not implemented. Agent 3 owns canonical publication into contract/. One Python backend; Agent
+    2 owns call/media/speech/delivery modules, Agent 3 owns CallSession/tasks/rules. Only client/backend boundaries
+    use HTTP/SSE. TaskObservation, TaskInterrupt, TaskResult and SessionResult are shared payload contracts
+    for in-process module calls, not RPC endpoints. This draft supersedes 0.1 internal service routes and completed-task
+    uploads. Changing required fields, enums or semantics requires affected-owner review and a new contract
+    version.
+security:
+- {DemoKey: []}
+x-script: {file: script.en.json, version: mvp-en-2, language: en}
+x-task-definitions:
+  smile:
+    sign: face
+    instruction: task_smile
+    repeat: repeat_smile
+    capture: {media_kind: video, duration_ms: 5000, prepare_ms: 0, stop_on_silence_ms: null, format: jpeg,
+      sample_period_ms: 200}
+    required_resource: camera
+    observation_period_ms: 1000
+  arms:
+    sign: arm
+    instruction: task_arms
+    repeat: repeat_arms
+    capture: {media_kind: video, duration_ms: 12000, prepare_ms: 2000, stop_on_silence_ms: null, format: jpeg,
+      sample_period_ms: 200}
+    required_resource: camera
+    observation_period_ms: 1000
+  sentence:
+    sign: speech
+    instruction: task_sentence
+    repeat: repeat_sentence
+    expected_text_key: sentence
+    capture:
+      media_kind: audio
+      duration_ms: 12000
+      prepare_ms: 0
+      stop_on_silence_ms: 1500
+      format: pcm_s16le_16000_mono
+      sample_period_ms: 250
+    required_resource: microphone
+    observation_period_ms: 1000
+x-answer-capture: {media_kind: audio, duration_ms: 15000, prepare_ms: 0, stop_on_silence_ms: 1500, format: null,
+  sample_period_ms: null}
+x-media-policy:
+  max_sample_bytes: 131072
+  max_attempt_bytes: 10485760
+  max_answer_bytes: 10485760
+  max_retention_s: 300
+  answer_types: [audio/mp4, audio/webm, audio/wav]
+  description: Video tasks send JPEG frames; sentence sends signed little-endian PCM16 mono at 16000 Hz. For
+    the initial 250ms audio chunk, at most 8000 decoded bytes, even byte count; last chunk may be shorter.
+    Video dimensions at most 640x480 in this initial proposal. Verify sizes, decoding and actual format, not
+    just the client label. Bound total input and queues. Task input is temporary, preferably in memory. Whole
+    task MP4 uploads cannot satisfy live observation semantics.
+x-sse:
+  channel: GET /v1/devices/{device_id}/events
+  events:
+    command.execute: '#/components/schemas/ClientCommandEvent'
+    command.cancel: '#/components/schemas/ClientCancelEvent'
+    task.progress: '#/components/schemas/TaskProgressEvent'
+  description: Additions to existing authenticated device stream. event_id is SSE id. Dedupe replayed commands
+    so they never play or capture twice. Replay only active work. Cancel terminal attempts and reject their
+    late samples even if the client misses cancellation. Parent progress omits metrics and baseline comparisons;
+    family keeps existing message.new upserted by message ID.
+paths:
+  /v1/calls/{call_id}/client-events:
+    parameters:
+    - {$ref: '#/components/parameters/CallId'}
+    post:
+      operationId: receiveClientEvent
+      security:
+      - {DemoKey: []}
+      description: Parent readiness, capture.started, playback completion, command cancellation/failure, resource.changed
+        or hang-up. Dedupe event_id; conflicting reuse is 409. CallSession handles events directly in process.
+        Resource events are immediate, not periodic observations. A capture.started acknowledgment or first
+        sample starts input watchdogs; no start within five seconds interrupts. Old resource sequence cannot
+        overwrite newer availability. Client cannot select interrupt policy.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ClientEvent'}
+      responses:
+        '204': {description: Accepted or identical duplicate acknowledged}
+        default: {$ref: '#/components/responses/Failure'}
+  /v1/calls/{call_id}/captures/{command_id}:
+    parameters:
+    - {$ref: '#/components/parameters/CallId'}
+    - {$ref: '#/components/parameters/CommandId'}
+    post:
+      operationId: uploadAnswerRecording
+      security:
+      - {DemoKey: []}
+      description: Ordinary answer recording only, not task input. Maximum 10 MiB and 15 seconds. Active answer_upload
+        command required. Exact duplicate bytes are idempotent, differing reuse is 409, closed/cancelled command
+        is 410. Backend transcribes, resolves the pending ask handler and deletes audio within five minutes
+        at most. A 204 means input accepted, not a successful transcript.
+      requestBody:
+        required: true
+        content:
+          audio/mp4:
+            schema: {type: string, format: binary}
+          audio/webm:
+            schema: {type: string, format: binary}
+          audio/wav:
+            schema: {type: string, format: binary}
+      responses:
+        '204': {description: Answer audio accepted; transcription result resolves the in-process handler}
+        default: {$ref: '#/components/responses/Failure'}
+  /v1/calls/{call_id}/speech/{command_id}:
+    parameters:
+    - {$ref: '#/components/parameters/CallId'}
+    - {$ref: '#/components/parameters/CommandId'}
+    get:
+      operationId: getPreparedSpeech
+      security:
+      - {DemoKey: []}
+      description: Only the call's active say command can fetch this prepared audio. Raw signed 16-bit little-endian
+        mono PCM at 16000 Hz. Client feeds Simli, or wraps/decodes for local fallback playback. Secret provider
+        keys never reach the client. Duration excludes optional silence padding.
+      responses:
+        '200':
+          description: Prepared script audio
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        default: {$ref: '#/components/responses/Failure'}
+  /v1/calls/{call_id}/attempts/{attempt_id}/samples:
+    parameters:
+    - {$ref: '#/components/parameters/CallId'}
+    - name: attempt_id
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/Id'}
+    post:
+      operationId: ingestTaskSample
+      description: Input for the current active sample_post attempt only. 204 accepts a sample, not a measurement.
+        Authenticate call ownership; reject format mismatch or invalid/oversized decoded media. Interrupted/completed/stale
+        attempt is 410; conflicting sequence is 409. Route to bounded module queue; do not build unbounded
+        media backlog or count missing input as usual.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MediaSample'}
+      responses:
+        '204': {description: Sample accepted or identical duplicate acknowledged}
+        default: {$ref: '#/components/responses/Failure'}
+  /v1/calls/{call_id}/attempts/{attempt_id}/finish:
+    parameters:
+    - {$ref: '#/components/parameters/CallId'}
+    - name: attempt_id
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/Id'}
+    post:
+      operationId: finishTaskInput
+      description: Client closes task input after all sample uploads are acknowledged. Last accepted sequence
+        must match last_sequence; captured_until_ms cannot precede last sample. 202 accepts input closure,
+        not final task success. Module finalizes asynchronously and resolves run_task. Identical repeat while
+        finalizing is 202; interrupted/terminal attempt is 410.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CaptureFinished'}
+      responses:
+        '202': {description: Input closed; final result is still pending}
+        default: {$ref: '#/components/responses/Failure'}
+components:
+  securitySchemes:
+    DemoKey: {type: apiKey, in: header, name: X-Demo-Key}
+  parameters:
+    CallId:
+      name: call_id
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/Id'}
+    CommandId:
+      name: command_id
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/Id'}
+  responses:
+    Failure:
+      description: 'JSON Error: 400 invalid_request; 401 unauthorized; 404 not_found; 409 conflict (ID/sequence
+        mismatch); 410 stream_closed or expired; 413 too_large; 415 unsupported_media; 503 unavailable. No
+        sample accepted on error.'
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+  schemas:
+    Id: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$'}
+    Task: {type: string, enum: [smile, arms, sentence]}
+    Question: {type: string, enum: [medicine, feeling, unusual]}
+    SpokenLine:
+      type: string
+      enum:
+      - greet
+      - q_medicine
+      - q_feeling
+      - q_unusual
+      - setup_phone
+      - task_smile
+      - task_arms
+      - task_sentence
+      - repeat_smile
+      - repeat_arms
+      - repeat_sentence
+      - camera_unavailable
+      - microphone_unavailable
+      - bye
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum:
+          - invalid_request
+          - unauthorized
+          - not_found
+          - conflict
+          - expired
+          - too_large
+          - unsupported_media
+          - unavailable
+          - timeout
+          - call_ended
+          - client_unavailable
+          - capture_failed
+          - transcription_failed
+          - playback_failed
+          - internal_error
+          - camera_unavailable
+          - microphone_unavailable
+          - stream_closed
+        message: {type: string, maxLength: 300, description: 'No secrets, provider response bodies or recordings'}
+    CaptureSettings:
+      type: object
+      additionalProperties: false
+      required: [media_kind, duration_ms, prepare_ms, stop_on_silence_ms, format, sample_period_ms]
+      properties:
+        media_kind: {type: string, enum: [audio, video]}
+        duration_ms: {type: integer, minimum: 1000, maximum: 15000}
+        prepare_ms: {type: integer, minimum: 0, maximum: 2000, description: 'Included at start of duration,
+            not added to it'}
+        stop_on_silence_ms:
+          type: [integer, 'null']
+          minimum: 1000
+          maximum: 2000
+          description: Stop only after speech then silence; no speech waits until max duration
+        format: {type: [string, 'null'], enum: [jpeg, pcm_s16le_16000_mono, null]}
+        sample_period_ms: {type: [integer, 'null'], minimum: 50, maximum: 1000}
+    CapturePurpose:
+      oneOf:
+      - type: object
+        additionalProperties: false
+        required: [kind, question_id]
+        properties:
+          kind: {const: answer}
+          question_id: {$ref: '#/components/schemas/Question'}
+      - type: object
+        additionalProperties: false
+        required: [kind, task]
+        properties:
+          kind: {const: task}
+          task: {$ref: '#/components/schemas/Task'}
+    CaptureCommand:
+      type: object
+      additionalProperties: false
+      required: [command_id, kind, purpose, settings, transport]
+      properties:
+        command_id: {$ref: '#/components/schemas/Id'}
+        kind: {const: capture}
+        purpose: {$ref: '#/components/schemas/CapturePurpose'}
+        settings: {$ref: '#/components/schemas/CaptureSettings'}
+        transport: {type: string, enum: [answer_upload, sample_post]}
+      description: Settings equal the task/answer registry entry. Task command_id equals attempt_id; task input
+        uses sample_post and ordinary answers use answer_upload. Only one active capture per call.
+      allOf:
+      - if:
+          properties:
+            purpose:
+              properties:
+                kind: {const: task}
+        then:
+          properties:
+            transport: {const: sample_post}
+            settings:
+              properties:
+                format: {type: string, enum: [jpeg, pcm_s16le_16000_mono]}
+                sample_period_ms: {type: integer}
+        else:
+          properties:
+            transport: {const: answer_upload}
+            settings:
+              properties:
+                format: {type: 'null'}
+                sample_period_ms: {type: 'null'}
+    ClientSayCommand:
+      type: object
+      additionalProperties: false
+      required: [command_id, kind, line_id, text, audio_path, duration_ms]
+      properties:
+        command_id: {$ref: '#/components/schemas/Id'}
+        kind: {const: say}
+        line_id: {$ref: '#/components/schemas/SpokenLine'}
+        text: {type: string, maxLength: 400, description: Rendered fixed script caption}
+        audio_path: {type: string, pattern: '^/v1/calls/[A-Za-z0-9_-]+/speech/[A-Za-z0-9_-]+$'}
+        duration_ms: {type: integer, minimum: 1, maximum: 30000}
+    ClientCommandEvent:
+      type: object
+      additionalProperties: false
+      required: [event_id, call_id, type, command]
+      properties:
+        event_id: {$ref: '#/components/schemas/Id'}
+        call_id: {$ref: '#/components/schemas/Id'}
+        type: {const: command.execute}
+        command:
+          oneOf:
+          - {$ref: '#/components/schemas/ClientSayCommand'}
+          - {$ref: '#/components/schemas/CaptureCommand'}
+    TranscriptResult:
+      type: object
+      additionalProperties: false
+      required: [kind, status, text]
+      properties:
+        kind: {const: transcript}
+        status: {type: string, enum: [heard, no_speech]}
+        text: {type: [string, 'null'], maxLength: 2000}
+      allOf:
+      - if:
+          properties:
+            status: {const: heard}
+        then:
+          properties:
+            text: {type: string, minLength: 1}
+        else:
+          properties:
+            text: {type: 'null'}
+      description: Local STT output; transcription failure or microphone interruption resolves the pending
+        ask handler explicitly as unavailable/interrupted rather than inventing text. No inter-service callback.
+    Baseline:
+      type: object
+      additionalProperties: false
+      required: [snapshot_id, sessions, needed, ready]
+      properties:
+        snapshot_id: {$ref: '#/components/schemas/Id'}
+        sessions: {type: integer, minimum: 0}
+        needed: {type: integer, minimum: 1}
+        ready: {type: boolean}
+    Quality:
+      type: object
+      additionalProperties: false
+      required: [status, reasons]
+      properties:
+        status: {type: string, enum: [usable, unusable]}
+        reasons:
+          type: array
+          items: {type: string, pattern: '^[a-z][a-z0-9_]*$'}
+          uniqueItems: true
+      allOf:
+      - if:
+          properties:
+            status: {const: unusable}
+        then:
+          properties:
+            reasons: {minItems: 1}
+    Reading:
+      type: object
+      additionalProperties: false
+      required: [metric_id, unit, value, usual_low, usual_high, outside, side]
+      properties:
+        metric_id: {type: string, minLength: 1, description: Versioned name; Agent 3 publishes formula before
+            numeric implementation}
+        unit: {type: string, minLength: 1, description: 'Unit from that metric definition, never an illness
+            probability'}
+        value: {type: number}
+        usual_low: {type: [number, 'null']}
+        usual_high: {type: [number, 'null']}
+        outside: {type: [boolean, 'null']}
+        side: {type: [string, 'null'], enum: [left, right, null], description: Parent's own left/right; null
+            if not defined}
+    TaskResult:
+      type: object
+      additionalProperties: false
+      required: [task, attempt_id, outcome, quality, performance, baseline, reading, interruption]
+      properties:
+        task: {$ref: '#/components/schemas/Task'}
+        attempt_id: {$ref: '#/components/schemas/Id'}
+        outcome: {type: string, enum: [completed, could_not_perform, failed, cancelled, interrupted]}
+        quality: {$ref: '#/components/schemas/Quality'}
+        performance: {type: string, enum: [observed, not_observed, uncertain]}
+        baseline: {$ref: '#/components/schemas/Baseline'}
+        reading:
+          oneOf:
+          - {$ref: '#/components/schemas/Reading'}
+          - {type: 'null'}
+        interruption:
+          oneOf:
+          - {$ref: '#/components/schemas/TaskInterrupt'}
+          - {type: 'null'}
+      allOf:
+      - if:
+          properties:
+            outcome: {const: completed}
+            quality:
+              properties:
+                status: {const: usable}
+            performance: {const: observed}
+        then:
+          properties:
+            reading: {$ref: '#/components/schemas/Reading'}
+        else:
+          properties:
+            reading: {type: 'null'}
+      - if:
+          properties:
+            baseline:
+              properties:
+                ready: {const: false}
+        then:
+          properties:
+            reading:
+              anyOf:
+              - {type: 'null'}
+              - type: object
+                properties:
+                  usual_low: {type: 'null'}
+                  usual_high: {type: 'null'}
+                  outside: {type: 'null'}
+        else:
+          properties:
+            reading:
+              anyOf:
+              - {type: 'null'}
+              - type: object
+                properties:
+                  usual_low: {type: number}
+                  usual_high: {type: number}
+                  outside: {type: boolean}
+      - if:
+          properties:
+            outcome: {const: interrupted}
+        then:
+          properties:
+            interruption: {$ref: '#/components/schemas/TaskInterrupt'}
+            reading: {type: 'null'}
+            quality:
+              properties:
+                status: {const: unusable}
+        else:
+          properties:
+            interruption: {type: 'null'}
+      description: Exactly one terminal result for the local attempt. Interrupted output includes TaskInterrupt
+        and no final reading. Partial observations stay in the log and cannot confirm change or enter the baseline.
+        Reading requires completed usable observed input. Missing baseline gives null comparison. CallSession
+        validates interruption identity matches this attempt and active call; late results cannot replace it.
+    SummaryAttempt:
+      type: object
+      additionalProperties: false
+      required: [value, usual_low, usual_high, outside]
+      properties:
+        value: {type: number}
+        usual_low: {type: [number, 'null']}
+        usual_high: {type: [number, 'null']}
+        outside: {type: [boolean, 'null']}
+      description: Only usable readings; nullable comparison extends v0 for learning sessions
+    SummarySign:
+      type: object
+      additionalProperties: false
+      required: [sign, side, attempts, confirmed]
+      properties:
+        sign: {type: string, enum: [face, arm, speech]}
+        side: {type: [string, 'null'], enum: [left, right, null]}
+        attempts:
+          type: array
+          maxItems: 2
+          items: {$ref: '#/components/schemas/SummaryAttempt'}
+        confirmed: {type: boolean}
+      allOf:
+      - if:
+          properties:
+            confirmed: {const: true}
+        then:
+          properties:
+            attempts:
+              minItems: 2
+              items:
+                properties:
+                  outside: {const: true}
+                  usual_low: {type: number}
+                  usual_high: {type: number}
+    SessionResult:
+      type: object
+      additionalProperties: false
+      required: [person_id, label, duration_s, answers, signs, status, baseline_sessions, baseline_needed,
+        clip_id]
+      properties:
+        person_id: {$ref: '#/components/schemas/Id'}
+        label: {type: string, enum: [live, normal, acted]}
+        duration_s: {type: integer, minimum: 0}
+        answers:
+          type: object
+          additionalProperties: false
+          required: [medicine, feeling, unusual]
+          properties:
+            medicine: {type: string, enum: ['yes', 'no', unclear]}
+            feeling: {type: string, maxLength: 2000}
+            unusual: {type: string, maxLength: 2000}
+        signs:
+          type: array
+          maxItems: 3
+          items: {$ref: '#/components/schemas/SummarySign'}
+        status: {type: string, enum: [as_usual, change_noticed, learning, incomplete]}
+        baseline_sessions: {type: integer, minimum: 0}
+        baseline_needed: {type: integer, minimum: 1}
+        clip_id: {type: 'null', description: No retained alert clip in this first draft}
+      description: Based on shared v0. This draft explicitly adds nullable comparison fields for learning and
+        restricts clip_id to null until evidence retention is agreed. Agent 3 reviews these compatibility changes.
+        Mid-call signs may be partial, but status change_noticed requires a confirmed sign. Final status follows
+        the documented rule priority.
+      allOf:
+      - if:
+          properties:
+            status: {const: change_noticed}
+        then:
+          properties:
+            signs:
+              contains:
+                properties:
+                  confirmed: {const: true}
+              minContains: 1
+    ClientBasicEvent:
+      type: object
+      additionalProperties: false
+      required: [event_id, type, command_id, error]
+      properties:
+        event_id: {$ref: '#/components/schemas/Id'}
+        type: {type: string, enum: [client.ready, playback.completed, command.failed, hangup, capture.started,
+            command.cancelled]}
+        command_id: {type: [string, 'null'], minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$'}
+        error:
+          oneOf:
+          - {$ref: '#/components/schemas/Error'}
+          - {type: 'null'}
+      allOf:
+      - if:
+          properties:
+            type: {enum: [client.ready, hangup]}
+        then:
+          properties:
+            command_id: {type: 'null'}
+            error: {type: 'null'}
+      - if:
+          properties:
+            type: {enum: [playback.completed, capture.started, command.cancelled]}
+        then:
+          properties:
+            command_id: {$ref: '#/components/schemas/Id'}
+            error: {type: 'null'}
+      - if:
+          properties:
+            type: {const: command.failed}
+        then:
+          properties:
+            command_id: {$ref: '#/components/schemas/Id'}
+            error: {$ref: '#/components/schemas/Error'}
+    ClientResourceEvent:
+      type: object
+      additionalProperties: false
+      required: [event_id, type, command_id, resource, state, sequence, reason]
+      properties:
+        event_id: {$ref: '#/components/schemas/Id'}
+        type: {const: resource.changed}
+        command_id:
+          oneOf:
+          - {$ref: '#/components/schemas/Id'}
+          - {type: 'null'}
+        resource: {type: string, enum: [camera, microphone]}
+        state: {type: string, enum: [available, unavailable]}
+        sequence: {type: integer, minimum: 0}
+        reason: {type: [string, 'null'], enum: [null, permission_denied, track_ended, device_missing, unknown]}
+      description: Call-scoped availability from client; command_id is active affected capture or null. sequence
+        increases per resource during the call, even after recovery; ignore older state events. Available has
+        null reason, unavailable has a reason. Input loss during a required operation is immediate; unrelated
+        resource changes update capability only.
+      allOf:
+      - if:
+          properties:
+            state: {const: available}
+        then:
+          properties:
+            reason: {type: 'null'}
+        else:
+          properties:
+            reason: {type: string}
+    ClientEvent:
+      oneOf:
+      - {$ref: '#/components/schemas/ClientBasicEvent'}
+      - {$ref: '#/components/schemas/ClientResourceEvent'}
+    MediaSample:
+      type: object
+      additionalProperties: false
+      required: [sequence, captured_ms, format, data_base64]
+      properties:
+        sequence: {type: integer, minimum: 0}
+        captured_ms: {type: integer, minimum: 0, maximum: 15000}
+        format: {type: string, enum: [jpeg, pcm_s16le_16000_mono]}
+        data_base64:
+          type: string
+          minLength: 4
+          maxLength: 174764
+          pattern: ^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$
+          contentEncoding: base64
+      description: Sample sequence starts at zero per attempt. captured_ms is capture-relative time, PCM timestamp
+        identifies the first audio sample. Format must match CaptureCommand. Actual decoded limits and codec
+        validation are mandatory; JSON Schema annotations do not decode media. Client serializes uploads; exact
+        duplicate sequence/bytes/timestamp is idempotent; different reuse or unseen older sequence is conflict.
+        Gaps remain explicit, never interpolated into observed performance.
+    CaptureFinished:
+      type: object
+      additionalProperties: false
+      required: [last_sequence, captured_until_ms]
+      properties:
+        last_sequence: {type: integer, minimum: -1}
+        captured_until_ms: {type: integer, minimum: 0, maximum: 15000}
+      description: Client stops locally then waits for all sample acknowledgments before finish. last_sequence
+        is highest sent sequence, -1 for none; it must match the last accepted sequence. Repeat identical finish
+        is accepted; conflicting finish is 409; terminal/interrupted attempt is 410.
+    ProvisionalMetric:
+      type: object
+      additionalProperties: false
+      required: [metric_id, unit, value]
+      properties:
+        metric_id: {type: string, minLength: 1}
+        unit: {type: string, minLength: 1}
+        value: {type: number}
+      description: Defined versioned feature only; provisional, not a baseline decision or illness probability.
+    ObservationQuality:
+      type: object
+      additionalProperties: false
+      required: [status, reasons]
+      properties:
+        status: {type: string, enum: [pending, usable, unusable]}
+        reasons:
+          type: array
+          items: {type: string, pattern: '^[a-z][a-z0-9_]*$'}
+          uniqueItems: true
+      allOf:
+      - if:
+          properties:
+            status: {const: unusable}
+        then:
+          properties:
+            reasons: {minItems: 1}
+    TaskObservation:
+      type: object
+      additionalProperties: false
+      required: [event_id, type, call_id, attempt_id, task, sequence, elapsed_ms, phase, quality, metrics,
+        signal]
+      properties:
+        event_id: {$ref: '#/components/schemas/Id'}
+        type: {const: task.observation}
+        call_id: {$ref: '#/components/schemas/Id'}
+        attempt_id: {$ref: '#/components/schemas/Id'}
+        task: {$ref: '#/components/schemas/Task'}
+        sequence: {type: integer, minimum: 0}
+        elapsed_ms: {type: integer, minimum: 0, maximum: 15000}
+        phase: {type: string, enum: [capturing, finalizing]}
+        quality: {$ref: '#/components/schemas/ObservationQuality'}
+        metrics:
+          type: array
+          items: {$ref: '#/components/schemas/ProvisionalMetric'}
+        signal: {type: string, enum: [none, framing_unusable, task_unperformable]}
+      description: Active module emits about once per second and on material quality transitions. Empty provisional
+        metrics are valid. Only active matching attempt accepts increasing sequences. framing_unusable requires
+        unusable quality; routine updates are coalesced in session state, never sent to Claude as repeated
+        tool results. Terminal events cannot be dropped. During finalizing, report pending work if needed so
+        watchdog distinguishes a stalled analyzer.
+      allOf:
+      - if:
+          properties:
+            signal: {const: framing_unusable}
+        then:
+          properties:
+            quality:
+              properties:
+                status: {const: unusable}
+    TaskInterrupt:
+      type: object
+      additionalProperties: false
+      required: [event_id, type, call_id, attempt_id, code, source_event_id, recoverable]
+      properties:
+        event_id: {$ref: '#/components/schemas/Id'}
+        type: {const: task.interrupted}
+        call_id: {$ref: '#/components/schemas/Id'}
+        attempt_id: {$ref: '#/components/schemas/Id'}
+        code:
+          type: string
+          enum:
+          - camera_unavailable
+          - microphone_unavailable
+          - framing_unusable
+          - no_samples
+          - analysis_stalled
+          - task_unperformable
+          - capture_failed
+        source_event_id:
+          oneOf:
+          - {$ref: '#/components/schemas/Id'}
+          - {type: 'null'}
+        recoverable: {type: boolean}
+      description: Created by CallSession policy from observation, resource event or watchdog. Null source_event_id
+        means a server timeout. Stops current attempt before returning early tool result; recovery uses a new
+        attempt. Permanent permission denial has recoverable false; availability events can permit a bounded
+        recovery. A hang-up cancels rather than causing another Claude turn.
+    ClientCancelEvent:
+      type: object
+      additionalProperties: false
+      required: [event_id, call_id, type, command_id, reason]
+      properties:
+        event_id: {$ref: '#/components/schemas/Id'}
+        call_id: {$ref: '#/components/schemas/Id'}
+        type: {const: command.cancel}
+        command_id: {$ref: '#/components/schemas/Id'}
+        reason: {type: string, enum: [task_interrupted, call_ended, timeout]}
+      description: Stop capture/playback immediately, acknowledge command.cancelled; duplicate cancel is harmless.
+    TaskProgressEvent:
+      type: object
+      additionalProperties: false
+      required: [event_id, call_id, attempt_id, type, elapsed_ms, phase, input_quality, hint]
+      properties:
+        event_id: {$ref: '#/components/schemas/Id'}
+        call_id: {$ref: '#/components/schemas/Id'}
+        attempt_id: {$ref: '#/components/schemas/Id'}
+        type: {const: task.progress}
+        elapsed_ms: {type: integer, minimum: 0, maximum: 15000}
+        phase: {type: string, enum: [capturing, finalizing, stopped]}
+        input_quality: {type: string, enum: [pending, usable, unusable]}
+        hint: {type: [string, 'null'], enum: [null, look_at_camera, show_both_arms, check_camera, check_microphone]}
+      description: Neutral parent UI projection only. Never includes metric values, outside flags or a health
+        verdict.
+x-interrupt-policy:
+  observation_period_ms: 1000
+  framing_unusable_ms: 2000
+  capture_start_timeout_ms: 5000
+  no_samples_ms: 2000
+  analysis_stalled_ms: 3000
+  cancel_ack_timeout_ms: 1000
+  recovery_wait_ms: 10000
+  description: Engineering starting values, not evaluated protocols. Camera/microphone loss is immediate when
+    required. Sustained framing loss uses monotonic server receipt time from the first bad observation; a usable
+    observation clears it. Expected raise-phase movement is not framing failure. Input and analyzer watchdogs
+    start on capture.started or first received sample, whichever arrives first. A missing start acknowledgment/sample
+    for five seconds interrupts as no_samples. analyze-stalled applies only when samples are arriving. Partial
+    outside values never confirm a change. Hang-up cancels without another model turn.
