@@ -8,7 +8,7 @@ from dataclasses import asdict
 from secrets import compare_digest
 from typing import Annotated, Any, Literal
 
-from fastapi import Depends, FastAPI, Header, Request
+from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -31,6 +31,7 @@ from .store import NoStore, Store
 
 IdStr = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,128}$")]
 KEEPALIVE_S = 15.0
+POLL_WAIT_MAX_S = 25.0  # below Cloudflare's 100 s proxy timeout and the phones' 30 s request timeout
 log = logging.getLogger(__name__)
 
 
@@ -386,6 +387,33 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
 
         return StreamingResponse(stream(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+    @app.get("/v1/devices/{device_id}/events/poll", dependencies=auth)
+    async def poll_events(device_id: str, request: Request, after: Annotated[int | None, Query(ge=0)] = None,
+                          wait_s: Annotated[float, Query(ge=0, le=POLL_WAIT_MAX_S)] = 20.0) -> JSONResponse:
+        # The event stream as long polling, for networks that buffer an open stream (a Cloudflare quick tunnel).
+        # Waits until an event arrives or wait_s passes; the client sends the returned cursor back as `after`.
+        hub = desk_of(request).hub
+        events, queue, cursor = hub.subscribe_after(device_id, after)
+        try:
+            if not events:
+                try:
+                    first = await asyncio.wait_for(queue.get(), wait_s)
+                except TimeoutError:
+                    first = None
+                if first is not None:
+                    events.append(first)
+            while not queue.empty():
+                event = queue.get_nowait()
+                if event is None:
+                    break
+                events.append(event)
+        finally:
+            hub.unsubscribe(device_id, queue)
+        cursor = max([cursor] + [event.seq for event in events])
+        frames = [{"id": e.event_id, "event": e.type, "data": json.dumps(e.data, separators=(",", ":"))}
+                  for e in events]
+        return JSONResponse({"events": frames, "cursor": cursor}, headers={"Cache-Control": "no-store"})
 
     @app.post("/v1/calls", dependencies=auth)
     async def start_call(body: StartCall, request: Request) -> JSONResponse:
