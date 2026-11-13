@@ -50,7 +50,8 @@ final class CallWalkthroughTests: XCTestCase {
 
         // After about 3 s Done leaves to the iPhone home screen; reopened, the app is waiting again.
         // XCUIApplication.state does not notice a self-suspend, so look for the home screen's icon instead.
-        let icon = XCUIApplication(bundleIdentifier: "com.apple.springboard").icons["Check-in"]
+        // Both apps carry the name HeartLine, so take the first match in case both are installed.
+        let icon = XCUIApplication(bundleIdentifier: "com.apple.springboard").icons.matching(identifier: "HeartLine").firstMatch
         let left = Date().addingTimeInterval(10)
         while Date() < left && !(icon.exists && !icon.frame.isEmpty) {
             Thread.sleep(forTimeInterval: 0.3)
