@@ -23,7 +23,8 @@ final class CommandDecodingTests: XCTestCase {
         """
         let event = try JSON.decoder.decode(CommandExecuteEvent.self, from: Data(say.utf8))
         XCTAssertEqual(event.command, .say(SayCommand(commandId: "c1", lineId: "greet", text: "Hello, Ona.",
-                                                      audioPath: "/v1/calls/call_1/speech/c1", durationMs: 2400)))
+                                                      audioPath: "/v1/calls/call_1/speech/c1", durationMs: 2400,
+                                                      videoPath: nil)))
         let capture = """
         {"event_id":"exec_A1","call_id":"call_1","type":"command.execute","command":{"command_id":"A1","kind":"capture",
         "purpose":{"kind":"task","task":"smile"},"settings":{"media_kind":"video","duration_ms":5000,"prepare_ms":0,
@@ -36,6 +37,20 @@ final class CommandDecodingTests: XCTestCase {
         XCTAssertEqual(command.purpose.task, "smile")
         XCTAssertEqual(command.settings.samplePeriodMs, 200)
         XCTAssertNil(command.settings.stopOnSilenceMs)
+    }
+
+    func testDecodesOptionalAvatarClip() throws {
+        let say = """
+        {"event_id":"exec_c2","call_id":"call_1","type":"command.execute","command":{"command_id":"c2","kind":"say",
+        "line_id":"greet","text":"Hello, Ona.","audio_path":"/v1/calls/call_1/speech/c2","duration_ms":2800,
+        "video_path":"/v1/calls/call_1/video/c2"}}
+        """
+        let event = try JSON.decoder.decode(CommandExecuteEvent.self, from: Data(say.utf8))
+        guard case .say(let command) = event.command else {
+            return XCTFail("expected a say command")
+        }
+        XCTAssertEqual(command.videoPath, "/v1/calls/call_1/video/c2")
+        XCTAssertEqual(command.audioPath, "/v1/calls/call_1/speech/c2")
     }
 
     func testFakeMediaIsWellFormed() {

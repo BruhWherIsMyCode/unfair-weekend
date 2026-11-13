@@ -56,6 +56,8 @@ final class AppState {
     private(set) var model: CallModel?
     private(set) var connection: Connection = .notSetUp
     let camera = SelfViewCamera()
+    /// Plays the backend's prepared avatar clips; the call screen shows its video as the avatar.
+    private(set) var clips: AvatarClips?
 
     @ObservationIgnored private var devices: ParentDevices?
     @ObservationIgnored private var connectTask: Task<Void, Never>?
@@ -69,13 +71,19 @@ final class AppState {
         }
         #if targetEnvironment(simulator)
         // The Simulator has no front camera, and its voice-chat audio unit aborts on start
-        // (AURemoteIO RPC timeout). Fake devices there, so the screens can still be walked through.
-        devices = FakeDevices.make()
+        // (AURemoteIO RPC timeout). Fake devices there, except the clip player (AVPlayer works there),
+        // so the screens and the avatar clips can still be walked through.
+        let fake = FakeDevices.make()
+        let clips = PhoneDevices.makeClips()
+        devices = ParentDevices(player: fake.player, recorder: fake.recorder, camera: fake.camera,
+                                microphone: fake.microphone, clips: clips)
         #else
         let phone = PhoneDevices.make()
+        let clips = phone.clips as? AvatarClips
         devices = ParentDevices(player: phone.player, recorder: phone.recorder, camera: camera,
-                                microphone: phone.microphone)
+                                microphone: phone.microphone, clips: clips)
         #endif
+        self.clips = clips
         camera.setAvailabilityHandler { [weak self] available, problem in
             Task { @MainActor in
                 self?.model?.resourceChanged(.camera, available: available, problem: problem)

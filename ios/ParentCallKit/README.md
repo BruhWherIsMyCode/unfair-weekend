@@ -12,7 +12,12 @@ camera or microphone is lost. The design team builds the screens on top of `Call
   `idle`, `ringing`, `connecting`, `speaking(caption)`, `listening(questionId)`,
   `task(name, secondsLeft, hint)`, `finishing`, `ended(reason)`. Phases never carry a measurement or a verdict.
 - `ParentDevices`: injected protocols for the speech player, answer recorder, camera and microphone.
-  - `PhoneDevices.make()` (`AVDevices.swift`): AVFoundation implementations. **Written, not compiled or run yet.**
+  - `PhoneDevices.make()` (`AVDevices.swift`): AVFoundation implementations, including `AvatarClips`.
+- Avatar clips: a `say` command may carry `video_path`, a prepared Simli MP4 with the line's own audio.
+  `CallClient` downloads it with the demo key and plays it through `devices.clips` (AVPlayer; show
+  `AvatarClips.player` full screen). `playback.completed` is sent only on `AVPlayerItemDidPlayToEndTime`. A failed
+  download or playback stops the clip and falls back to the PCM `audio_path`, so both are never heard together.
+  Cancel, hang-up and teardown stop the clip and cancel its download. Without a clip player, lines play as PCM.
   - `FakeDevices.make()`: synthetic input for tests, previews and the simulator executable.
 - `parent-call-sim`: a command-line run of the real client against a backend, using fake devices.
 

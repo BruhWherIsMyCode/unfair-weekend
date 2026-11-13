@@ -33,6 +33,8 @@ public struct SayCommand: Decodable, Sendable, Equatable {
     public let text: String
     public let audioPath: String
     public let durationMs: Int
+    /// Prepared avatar clip (MP4 with this line's audio). Absent when the backend has none: play `audioPath`.
+    public let videoPath: String?
 }
 
 public struct CaptureCommand: Decodable, Sendable, Equatable {

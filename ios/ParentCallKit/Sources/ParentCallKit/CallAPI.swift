@@ -29,21 +29,28 @@ public struct CallAPI: Sendable {
         return request
     }
 
+    /// Cancelling the calling task cancels the transfer (hang-up, command cancel) and throws CancellationError.
     @discardableResult
     func send(_ request: URLRequest) async throws -> (Data, Int) {
-        let (data, status) = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(Data, Int), Error>) in
-            let task = session.dataTask(with: request) { data, response, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                    return
+        let inFlight = InFlightTask()
+        let (data, status) = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(Data, Int), Error>) in
+                let task = session.dataTask(with: request) { data, response, error in
+                    if let error {
+                        let cancelled = (error as? URLError)?.code == .cancelled
+                        continuation.resume(throwing: cancelled ? CancellationError() : error)
+                        return
+                    }
+                    guard let http = response as? HTTPURLResponse else {
+                        continuation.resume(throwing: APIError.badResponse)
+                        return
+                    }
+                    continuation.resume(returning: (data ?? Data(), http.statusCode))
                 }
-                guard let http = response as? HTTPURLResponse else {
-                    continuation.resume(throwing: APIError.badResponse)
-                    return
-                }
-                continuation.resume(returning: (data ?? Data(), http.statusCode))
+                inFlight.start(task)
             }
-            task.resume()
+        } onCancel: {
+            inFlight.cancel()
         }
         if status >= 300 {
             let code = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["code"] as? String
@@ -90,6 +97,14 @@ public struct CallAPI: Sendable {
         try await send(request(path)).0
     }
 
+    /// The prepared avatar clip for one say command (video/mp4).
+    func video(path: String) async throws -> Data {
+        var req = request(path)
+        req.timeoutInterval = 60
+        req.setValue("video/mp4", forHTTPHeaderField: "Accept")
+        return try await send(req).0
+    }
+
     func uploadAnswer(callId: String, commandId: String, audio: Data, contentType: String) async throws {
         var req = request("/v1/calls/\(callId)/captures/\(commandId)", method: "POST")
         req.setValue(contentType, forHTTPHeaderField: "Content-Type")
@@ -111,5 +126,31 @@ public struct CallAPI: Sendable {
             "last_sequence": lastSequence,
             "captured_until_ms": capturedUntilMs,
         ])
+    }
+}
+
+/// A URLSession task that may be cancelled before or after it starts.
+final class InFlightTask: @unchecked Sendable {
+    private let lock = NSLock()
+    private var task: URLSessionDataTask?
+    private var cancelled = false
+
+    func start(_ task: URLSessionDataTask) {
+        let alreadyCancelled = lock.withLock { () -> Bool in
+            self.task = task
+            return cancelled
+        }
+        task.resume()
+        if alreadyCancelled {
+            task.cancel()
+        }
+    }
+
+    func cancel() {
+        let task = lock.withLock { () -> URLSessionDataTask? in
+            cancelled = true
+            return self.task
+        }
+        task?.cancel()
     }
 }

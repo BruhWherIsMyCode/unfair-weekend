@@ -63,7 +63,9 @@ Fixed task texts belong to the UI. The sentence text comes from the backend: the
 
 - CallKit: the design asks for the system incoming-call screen. We render our own lookalike in-app.
   Real CallKit needs a VoIP push, which is out of scope for the demo; label it as staged.
-- Avatar video is the full-screen background. Until Simli is wired into the parent app, use a looping
-  local avatar clip or a still image, with the 1.08 → 1.0 settle animation.
+- Avatar video is the full-screen background: `AvatarClips.player` in an AVPlayerLayer, holding the last frame
+  between lines, with the 1.08 → 1.0 settle animation. Simli clips are square with the mouth about 52% down, so the
+  app bottom-aligns them large enough that the mouth stays above the card (even lifted). Before the first clip,
+  or when the backend sends none, show a local loop/still or the design's placeholder.
 - "Next call at 18:00" is static text in the UI.
 - Wording: no numbers, results or health words anywhere on her screens.

@@ -182,6 +182,7 @@ public actor CallClient {
             task.cancel()
         }
         await devices.player.stop()
+        await devices.clips?.stop()
         await devices.recorder.stop()
         await devices.camera.stop()
         await devices.microphone.stop()
@@ -225,12 +226,37 @@ public actor CallClient {
 
     private func performSay(_ say: SayCommand) async throws {
         onPhase(.speaking(caption: say.text))
+        if let videoPath = say.videoPath, let clips = devices.clips {
+            if try await playClip(say, path: videoPath, with: clips) {
+                try await post(["type": "playback.completed", "command_id": say.commandId, "error": nil])
+                return
+            }
+        }
         let audio = try await api.speech(path: say.audioPath)
         try Task.checkCancellation()
         onEvent(.speaking(lineId: say.lineId, text: say.text, durationMs: say.durationMs, at: Date()))
         try await devices.player.play(pcm16k: audio, durationMs: say.durationMs)
         try Task.checkCancellation()
         try await post(["type": "playback.completed", "command_id": say.commandId, "error": nil])
+    }
+
+    /// Plays the line's prepared clip. True only when it played to its end. False when the clip could not be
+    /// fetched or played: the clip is stopped first, so the PCM fallback never plays over it. Cancellation throws.
+    private func playClip(_ say: SayCommand, path: String, with clips: AvatarClipPlayer) async throws -> Bool {
+        do {
+            let mp4 = try await api.video(path: path)
+            try Task.checkCancellation()
+            onEvent(.speaking(lineId: say.lineId, text: say.text, durationMs: say.durationMs, at: Date()))
+            try await clips.play(mp4: mp4)
+            try Task.checkCancellation()
+            return true
+        } catch {
+            await clips.stop()
+            if error is CancellationError || Task.isCancelled {
+                throw CancellationError()
+            }
+            return false
+        }
     }
 
     private func performAnswer(_ capture: CaptureCommand) async throws {
@@ -352,6 +378,7 @@ public actor CallClient {
         }
         running = [:]
         await devices.player.stop()
+        await devices.clips?.stop()
         await devices.recorder.stop()
         await devices.camera.stop()
         await devices.microphone.stop()

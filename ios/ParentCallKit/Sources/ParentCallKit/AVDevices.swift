@@ -8,7 +8,13 @@ public enum PhoneDevices {
     public static func make() -> ParentDevices {
         let audio = AudioSessionBox()
         return ParentDevices(player: PCMPlayer(audio: audio), recorder: WAVRecorder(audio: audio),
-                             camera: FrontCamera(), microphone: PCMMicrophone(audio: audio))
+                             camera: FrontCamera(), microphone: PCMMicrophone(audio: audio),
+                             clips: AvatarClips(audio: audio))
+    }
+
+    /// Only the clip player, with its own audio session handling (for the Simulator, whose other devices are fake).
+    public static func makeClips() -> AvatarClips {
+        AvatarClips(audio: AudioSessionBox())
     }
 
     public static func requestPermissions() async -> (camera: Bool, microphone: Bool) {
@@ -32,6 +38,120 @@ final class AudioSessionBox: @unchecked Sendable {
         try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])
         try session.setActive(true)
         configured = true
+    }
+}
+
+/// Plays prepared avatar clips with their own audio. Show `player` full screen (AVPlayerLayer) as the avatar;
+/// between lines it keeps the last frame. `play` returns only on AVPlayerItemDidPlayToEndTime; a failed item,
+/// a failed-to-play-to-end notification or `stop()` throw instead, so a timer is never taken as completion.
+public final class AvatarClips: AvatarClipPlayer, @unchecked Sendable {
+    public let player: AVPlayer
+    private let audio: AudioSessionBox
+    private let lock = NSLock()
+    private var waiter: CheckedContinuation<Void, Error>?
+    private var generation = 0
+    private var observers: [NSObjectProtocol] = []
+    private var status: NSKeyValueObservation?
+    private var file: URL?
+
+    enum ClipError: Error {
+        case failed
+    }
+
+    init(audio: AudioSessionBox) {
+        self.audio = audio
+        player = AVPlayer()
+        player.actionAtItemEnd = .pause
+        player.automaticallyWaitsToMinimizeStalling = false
+    }
+
+    public func play(mp4: Data) async throws {
+        try audio.activate()
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("clip-\(UUID().uuidString).mp4")
+        try mp4.write(to: url, options: .atomic)
+        let ticket = lock.withLock { generation }
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                DispatchQueue.main.async {
+                    self.start(url, ticket: ticket, continuation: continuation)
+                }
+            }
+        } onCancel: {
+            self.halt()
+        }
+    }
+
+    public func stop() async {
+        halt()
+    }
+
+    /// Main thread.
+    private func start(_ url: URL, ticket: Int, continuation: CheckedContinuation<Void, Error>) {
+        let stale = lock.withLock { () -> Bool in
+            if ticket != generation {
+                return true
+            }
+            waiter = continuation
+            return false
+        }
+        if stale {
+            try? FileManager.default.removeItem(at: url)
+            continuation.resume(throwing: CancellationError())
+            return
+        }
+        clearObservers()
+        let item = AVPlayerItem(url: url)
+        let center = NotificationCenter.default
+        observers = [
+            center.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: item, queue: .main) {
+                [weak self] _ in self?.finish(nil)
+            },
+            center.addObserver(forName: AVPlayerItem.failedToPlayToEndTimeNotification, object: item, queue: .main) {
+                [weak self] _ in self?.finish(ClipError.failed)
+            },
+        ]
+        status = item.observe(\.status, options: [.new]) { [weak self] item, _ in
+            if item.status == .failed {
+                self?.finish(ClipError.failed)
+            }
+        }
+        let previous = file
+        file = url
+        player.replaceCurrentItem(with: item)
+        player.play()
+        if let previous {
+            try? FileManager.default.removeItem(at: previous)
+        }
+    }
+
+    private func finish(_ error: Error?) {
+        let continuation = lock.withLock { () -> CheckedContinuation<Void, Error>? in
+            let waiting = waiter
+            waiter = nil
+            return waiting
+        }
+        guard let continuation else { return }
+        DispatchQueue.main.async { self.clearObservers() }
+        if let error {
+            continuation.resume(throwing: error)
+        } else {
+            continuation.resume()
+        }
+    }
+
+    /// Stops the current clip (keeping its frame) and invalidates any clip that has not started yet.
+    private func halt() {
+        lock.withLock { generation += 1 }
+        DispatchQueue.main.async { self.player.pause() }
+        finish(CancellationError())
+    }
+
+    private func clearObservers() {
+        for observer in observers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        observers = []
+        status = nil
     }
 }
 

@@ -7,6 +7,7 @@ struct InCallView: View {
     let screen: CallScreen
     let title: String
     let camera: SelfViewCamera
+    let clips: AVPlayer?
     let onEnd: () -> Void
 
     /// Avatar settle 1.08 -> 1.0 and the late fade-in of self-view and End.
@@ -15,7 +16,7 @@ struct InCallView: View {
 
     var body: some View {
         ZStack {
-            AvatarBackground()
+            AvatarBackground(clips: clips)
                 .scaleEffect(settled ? 1 : 1.08)
                 .ignoresSafeArea()
 
@@ -238,10 +239,37 @@ struct CardContent: View {
     }
 }
 
-/// The full-screen avatar. Until Simli is in the parent app this is a local clip or still from
-/// ios/ParentApp/LocalAssets (git-ignored), or the design's striped placeholder when neither exists.
+/// The full-screen avatar: the backend's prepared clip for the current line (Simli video with its voice),
+/// holding its last frame between lines. Before the first clip, or when the backend offers none, a local
+/// loop or still from ios/ParentApp/LocalAssets (git-ignored), else the design's striped placeholder.
 struct AvatarBackground: View {
+    let clips: AVPlayer?
+
     var body: some View {
+        ZStack {
+            placeholder
+            if let clips {
+                GeometryReader { geometry in
+                    let side = Self.clipSide(for: geometry.size)
+                    ClipLayer(player: clips)
+                        .frame(width: side, height: side)
+                        .position(x: geometry.size.width / 2, y: geometry.size.height - side / 2)
+                }
+            }
+        }
+    }
+
+    /// Simli clips are square, with the mouth about 52% down the frame. Filled to the screen height, the mouth
+    /// would sit behind the card (220 pt tall, 300 pt above the bottom, lifted 44 pt during smile and arms).
+    /// Bottom-aligned at this size, the mouth stays just above even the lifted card on any phone height; the top
+    /// of the hair is cropped instead.
+    static func clipSide(for size: CGSize) -> CGFloat {
+        let mouthToBottom: CGFloat = 300 + 220 + 44 + 10
+        return max((mouthToBottom / (1 - 0.52)).rounded(), size.width, size.height)
+    }
+
+    @ViewBuilder
+    private var placeholder: some View {
         if let clip = Bundle.main.url(forResource: "avatar", withExtension: "mp4") {
             LoopingClip(url: clip)
         } else if let path = Bundle.main.path(forResource: "avatar", ofType: "jpg"),
@@ -284,4 +312,20 @@ struct LoopingClip: UIViewRepresentable {
             layer as! AVPlayerLayer
         }
     }
+}
+
+/// AVPlayerLayer for the avatar clips: aspect-filled, transparent until the first clip plays.
+struct ClipLayer: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> LoopingClip.PlayerView {
+        let view = LoopingClip.PlayerView()
+        view.backgroundColor = .clear
+        view.playerLayer.backgroundColor = UIColor.clear.cgColor
+        view.playerLayer.videoGravity = .resizeAspectFill
+        view.playerLayer.player = player
+        return view
+    }
+
+    func updateUIView(_ uiView: LoopingClip.PlayerView, context: Context) {}
 }

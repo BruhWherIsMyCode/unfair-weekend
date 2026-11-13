@@ -7,6 +7,13 @@ public protocol SpeechPlayer: Sendable {
     func stop() async
 }
 
+/// Plays one prepared avatar clip: an MP4 whose own audio track is the line. The app shows the video full screen
+/// as the avatar. Returns only when the clip has played to its end; throws when it fails or is stopped.
+public protocol AvatarClipPlayer: Sendable {
+    func play(mp4: Data) async throws
+    func stop() async
+}
+
 /// Records one spoken answer. Returns the audio and its content type (audio/wav, audio/mp4 or audio/webm).
 public protocol AnswerRecorder: Sendable {
     func record(maxMs: Int, stopOnSilenceMs: Int?) async throws -> (Data, String)
@@ -34,11 +41,15 @@ public struct ParentDevices: Sendable {
     public let recorder: AnswerRecorder
     public let camera: CameraSource
     public let microphone: MicrophoneSource
+    /// Optional: without it, every line plays as PCM even when the backend offers a clip.
+    public let clips: AvatarClipPlayer?
 
-    public init(player: SpeechPlayer, recorder: AnswerRecorder, camera: CameraSource, microphone: MicrophoneSource) {
+    public init(player: SpeechPlayer, recorder: AnswerRecorder, camera: CameraSource, microphone: MicrophoneSource,
+                clips: AvatarClipPlayer? = nil) {
         self.player = player
         self.recorder = recorder
         self.camera = camera
         self.microphone = microphone
+        self.clips = clips
     }
 }

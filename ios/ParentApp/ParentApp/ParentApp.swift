@@ -40,7 +40,9 @@ struct RootView: View {
                              })
                     .transition(.opacity.animation(Motion.glide(0.6)))
             case .call:
-                InCallView(screen: screen, title: title, camera: app.camera) { app.model?.hangUp() }
+                InCallView(screen: screen, title: title, camera: app.camera, clips: app.clips?.player) {
+                    app.model?.hangUp()
+                }
                     .transition(.asymmetric(insertion: .opacity.animation(Motion.glide(0.7)),
                                             removal: .opacity.animation(Motion.glide(0.6))))
             case .done:
