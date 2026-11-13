@@ -173,6 +173,8 @@ class ToolHandlers:
         usable = [r for r in records if r.usable and r.reading is not None]
         if not usable:
             return True
+        if limits.CONFIRM_FROM_ONE_READING:
+            return False  # v12b: one usable reading settles the task (an outside one has already told the family)
         evals = rules.evaluate_all({t: self.session.records_for(t) for t in limits.TASKS})
         if evals[task].confirmed:
             return False

@@ -1,6 +1,8 @@
 """The fixed-order driver: the pure next_step, the answer parsing and whole calls on fakes. Written, not run."""
 from __future__ import annotations
 
+import pytest
+
 import asyncio
 
 from analysis.session import limits
@@ -172,6 +174,7 @@ def test_re_ask_that_is_heard_the_second_time_is_recorded():
     asyncio.run(scenario())
 
 
+@pytest.mark.usefixtures("two_readings")
 def test_a_first_outside_smile_is_repeated_and_two_outside_smiles_publish_once():
     async def scenario():
         rig = CallRig(corners=(0.11, 0.09))
@@ -184,6 +187,7 @@ def test_a_first_outside_smile_is_repeated_and_two_outside_smiles_publish_once()
     asyncio.run(scenario())
 
 
+@pytest.mark.usefixtures("two_readings")
 def test_outside_then_within_is_repeated_once_and_not_confirmed():
     async def scenario():
         rig = CallRig(corners=(0.11, 0.01))
@@ -194,6 +198,7 @@ def test_outside_then_within_is_repeated_once_and_not_confirmed():
     asyncio.run(scenario())
 
 
+@pytest.mark.usefixtures("two_readings")
 def test_left_then_right_hand_outside_is_not_confirmed():
     async def scenario():
         rig = CallRig(sinks=({"left": 0.4}, {"right": 0.4}))
@@ -216,6 +221,7 @@ def test_left_hand_outside_twice_is_confirmed_on_the_left():
     asyncio.run(scenario())
 
 
+@pytest.mark.usefixtures("two_readings")
 def test_face_and_arm_outside_on_the_same_side_confirm_each_other_with_no_repeat():
     # v12: corner height above her usual = her LEFT corner lower; with her left hand sinking that is one finding
     async def scenario():
@@ -233,6 +239,7 @@ def test_face_and_arm_outside_on_the_same_side_confirm_each_other_with_no_repeat
     asyncio.run(scenario())
 
 
+@pytest.mark.usefixtures("two_readings")
 def test_an_outside_face_alone_is_repeated_once_after_the_arms():
     async def scenario():
         rig = CallRig(corners=(0.11, 0.09))  # arms within her usual
@@ -244,12 +251,29 @@ def test_an_outside_face_alone_is_repeated_once_after_the_arms():
     asyncio.run(scenario())
 
 
+@pytest.mark.usefixtures("two_readings")
 def test_face_and_arm_on_different_sides_do_not_confirm_each_other():
     async def scenario():
         rig = CallRig(corners=(0.11, 0.01), sinks=({"right": 0.4}, {}))  # face: her left; arm: her right
         await rig.drive(FixedOrderDriver(rig.handlers).run())
         assert len(rig.session.task_attempts["smile"]) == 2 and len(rig.session.task_attempts["arms"]) == 2
         assert [p["phase"] for p in rig.adapter.published] == ["final"]
+
+    asyncio.run(scenario())
+
+
+def test_one_lopsided_smile_tells_the_family_with_no_repeat():
+    # v12b, the demo default (limits.CONFIRM_FROM_ONE_READING): one outside reading confirms
+    async def scenario():
+        rig = CallRig(corners=(0.11,))
+        await rig.drive(FixedOrderDriver(rig.handlers).run())
+        assert len(rig.session.task_attempts["smile"]) == 1 and len(rig.session.task_attempts["arms"]) == 1
+        assert "repeat_smile" not in rig.adapter.said and "repeat_arms" not in rig.adapter.said
+        mid = rig.adapter.published[0]
+        assert mid["phase"] == "mid_call" and mid["summary"]["status"] == "change_noticed"
+        face = next(s for s in mid["summary"]["signs"] if s["sign"] == "face")
+        assert face["confirmed"] is True and face["side"] == "left" and len(face["attempts"]) == 1
+        assert rig.adapter.published[-1]["summary"]["status"] == "change_noticed"
 
     asyncio.run(scenario())
 

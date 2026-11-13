@@ -187,6 +187,7 @@ def test_two_outside_smiles_publish_a_change_and_nothing_is_added(tmp_path):
     assert usual(tmp_path)["smile"]["sessions"] == 2 and usual(tmp_path)["arms"]["sessions"] == 2
 
 
+@pytest.mark.usefixtures("two_readings")
 def test_one_outside_reading_then_inside_is_as_usual_but_adds_nothing(tmp_path):
     env = seeded_env(tmp_path)
     summary = run(Link(), env, modules(corners=(0.11, 0.01)))

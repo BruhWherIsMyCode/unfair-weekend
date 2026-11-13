@@ -172,7 +172,8 @@ class FamilyDelivery:
             raise ValueError("phase must be mid_call or final")
         message_id = self._by_call.get(call_id)
         previous = self._messages.get(message_id) if message_id else None
-        keep_change = previous is not None and previous.kind == "change_noticed"
+        # A later change summary (more confirmed signs, e.g. the arm after the face) re-renders the change text.
+        keep_change = previous is not None and previous.kind == "change_noticed" and kind != "change_noticed"
         # A concern is replaced only by a confirmed change, never by a calmer summary.
         keep_concern = previous is not None and previous.kind == "concern_raised" and kind != "change_noticed"
         if keep_change or keep_concern:

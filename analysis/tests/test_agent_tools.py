@@ -1,6 +1,8 @@
 """The shared tool handlers: every guard, with a fake clock, fake adapter and fake readers. Written, not run."""
 from __future__ import annotations
 
+import pytest
+
 import asyncio
 import json
 
@@ -135,6 +137,7 @@ def test_setup_phone_is_played_before_the_first_video_task_and_not_again():
     asyncio.run(scenario())
 
 
+@pytest.mark.usefixtures("two_readings")
 def test_run_task_returns_plain_facts_only():
     async def scenario():
         rig = CallRig(corners=(0.11, 0.09), required_tasks=("smile",))  # both smile readings outside her usual; v12: no arms to wait for

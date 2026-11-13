@@ -22,6 +22,10 @@ MAX_USABLE_PER_TASK = 2  # a third usable reading is never needed (two confirm o
 # v11 (owner, after real calls): an attempt that ends without a usable reading (unusable, could_not_perform,
 # interrupted, failed) is repeated at most ONCE; the second not-measured attempt of a task skips the task.
 MAX_NOT_MEASURED_PER_TASK = 2
+# v12b (owner, for a short demo call): ONE usable reading outside her usual that points to weakness confirms the
+# change and the family is told; no task is repeated to confirm. Only a try that measured nothing keeps its one
+# technical repeat. False restores the two-reading rule (the same task twice, or the face and an arm on one side).
+CONFIRM_FROM_ONE_READING = True
 
 WATCHDOG_TICK_S = 0.1  # how often the session re-checks its watchdogs (through the clock)
 SAMPLE_QUEUE_MAX = 64  # bounded sample queue per attempt; a full queue drops the new sample and logs it

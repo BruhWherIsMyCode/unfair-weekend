@@ -385,7 +385,7 @@ class SummarySign:
         _req(isinstance(self.confirmed, bool), "confirmed must be a boolean")
         attempts = [a.to_dict() for a in self.attempts]
         if self.confirmed:
-            # v12: one attempt when the face and an arm confirmed each other on the same side (rules.evaluate_all)
+            # v12/v12b: one attempt (one outside reading, or the face and an arm on the same side)
             _req(len(attempts) >= 1, "a confirmed sign needs an attempt")
             for a in attempts:
                 _req(a["outside"] is True and _is_num(a["usual_low"]) and _is_num(a["usual_high"]),
@@ -430,12 +430,10 @@ class SessionResult:
             _req(isinstance(self.answers[k], str) and len(self.answers[k]) <= 2000, "answers.%s too long" % k)
         _req(len(self.signs) <= 3, "at most 3 signs")
         signs = [s.to_dict() for s in self.signs]
-        # v12: a sign confirmed from ONE attempt is only the face and an arm confirming each other on one side
-        single = [s for s in signs if s["confirmed"] and len(s["attempts"]) == 1]
-        if single:
-            _req(len(single) == 2 and {s["sign"] for s in single} == {"face", "arm"}
-                 and single[0]["side"] is not None and single[0]["side"] == single[1]["side"],
-                 "a confirmation from one attempt needs the face and an arm outside on the same side")
+        # v12b: a sign may be confirmed from ONE outside attempt (limits.CONFIRM_FROM_ONE_READING)
+        for s in signs:
+            if s["confirmed"]:
+                _req(all(a["outside"] is True for a in s["attempts"]), "a confirmed sign has only outside attempts")
         _req(self.status in STATUSES, "status %r not in %s" % (self.status, STATUSES))
         if self.status == "change_noticed":
             _req(any(s["confirmed"] for s in signs), "change_noticed requires a confirmed sign")

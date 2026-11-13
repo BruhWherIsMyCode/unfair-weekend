@@ -211,6 +211,7 @@ def test_alert_family_has_no_tool_row_but_its_turn_and_the_summary_status_are_ke
 
 # ---- summaries, change and learning rules -------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("two_readings")
 def test_a_confirmed_change_writes_a_mid_call_then_a_final_summary_and_no_new_baseline(env):
     path, writer = env
     add_call(path)

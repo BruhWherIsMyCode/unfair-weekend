@@ -2,6 +2,8 @@
 switch to the fixed-order fallback. Written, not run. FakeClock only; no network; the real client is never built."""
 from __future__ import annotations
 
+import pytest
+
 import asyncio
 import json
 import os
@@ -304,6 +306,7 @@ def test_a_client_that_could_not_be_built_goes_straight_to_the_fixed_order():
 
 # ---- Claude never decides a result -----------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("two_readings")
 def test_a_confirmed_change_is_published_even_if_claude_fails_right_after():
     async def scenario():
         os.environ["ANTHROPIC_API_KEY"] = SECRET
@@ -325,3 +328,11 @@ def test_a_confirmed_change_is_published_even_if_claude_fails_right_after():
             os.environ.pop("ANTHROPIC_API_KEY", None)
 
     asyncio.run(scenario())
+
+
+def test_the_prompt_lists_only_the_checks_of_this_call():
+    # acted phone run: the agent announced "one more little exercise" for the sentence, which the phone does not have
+    rig = CallRig(required_tasks=("smile", "arms"))
+    prompt = build_system_prompt("Ona", rig.handlers.script, checks=["smile", "arms"])
+    assert "in this order: smile, then arms. There are no other checks" in prompt
+    assert "{checks}" not in prompt and "{name}" not in prompt

@@ -5,6 +5,8 @@ FakeClock, fake adapters, scripted fake Claude; no mediapipe, no network, no rea
 """
 from __future__ import annotations
 
+import pytest
+
 import asyncio
 import json
 
@@ -150,6 +152,7 @@ def test_the_fixed_order_driver_obeys_the_same_budget():
     asyncio.run(scenario())
 
 
+@pytest.mark.usefixtures("two_readings")
 def test_a_usable_outside_reading_has_no_retry_hint():
     async def scenario():
         rig = CallRig(corners=(0.11, 0.09), required_tasks=("smile",))  # v12: no arms to wait for: the same-task repeat

@@ -214,6 +214,15 @@ def cross_partner(task: str) -> Optional[str]:
     return CROSS_TASKS[1] if task == CROSS_TASKS[0] else CROSS_TASKS[0]
 
 
+def points_to_weakness(task: str, reading: Dict[str, Any]) -> bool:
+    """An outside reading in the direction of weakness: a sinking hand, a lopsided smile (either side), a slower
+    sentence. A hand held higher than usual is outside but not a sign."""
+    direction = reading_direction(reading)
+    if task == "sentence":
+        return direction > 0
+    return reading_side(task, reading) is not None
+
+
 def reading_side(task: str, reading: Dict[str, Any]) -> Optional[str]:
     """The side (her left or right) an outside reading points to, or None.
 
@@ -245,9 +254,27 @@ def cross_confirmation(records_by_task: Dict[str, Sequence[FinalRecord]]
     return None
 
 
-def evaluate_all(records_by_task: Dict[str, Sequence[FinalRecord]]) -> Dict[str, SignEvaluation]:
-    """evaluate_sign per task, then the cross-task rule: a same-side face and arm pair confirms both signs."""
+def evaluate_all(records_by_task: Dict[str, Sequence[FinalRecord]],
+                 one_reading: Optional[bool] = None) -> Dict[str, SignEvaluation]:
+    """evaluate_sign per task, then the cross-task rule: a same-side face and arm pair confirms both signs.
+
+    With `one_reading` (default limits.CONFIRM_FROM_ONE_READING) one usable outside reading that points to weakness
+    confirms its sign, and an outside reading that does not (a hand held higher) settles the task as not a sign."""
+    if one_reading is None:
+        one_reading = limits.CONFIRM_FROM_ONE_READING
     evals = {task: evaluate_sign(records) for task, records in records_by_task.items()}
+    if one_reading:
+        for task, records in records_by_task.items():
+            e = evals[task]
+            if e.confirmed:
+                continue
+            usable = [r for r in records if r.usable and r.reading is not None and r.baseline_ready]
+            sign = next((r.reading for r in usable if points_to_weakness(task, r.reading)), None)
+            if sign is not None:
+                evals[task] = SignEvaluation([sign], True, reading_side(task, sign), e.latest_outside,
+                                             e.baseline_ready)
+            elif e.latest_outside:
+                evals[task] = SignEvaluation(e.attempts, False, None, False, e.baseline_ready)
     pair = cross_confirmation(records_by_task)
     if pair is not None:
         side, readings = pair

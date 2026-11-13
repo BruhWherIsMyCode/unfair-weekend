@@ -494,8 +494,8 @@ components:
           properties:
             attempts:
               minItems: 1
-              description: Two outside attempts of the same task, or one when the face and an arm are outside on
-                the same side in the same call and confirm each other (v12).
+              description: One outside attempt confirms (v12b, the demo rule), or two of the same task / the face
+                and an arm on the same side under the two-reading rule.
               items:
                 properties:
                   outside: {const: true}

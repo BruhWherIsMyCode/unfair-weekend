@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from analysis.session import limits
 from analysis.session.fallback import FixedOrderDriver
@@ -39,11 +39,14 @@ class _RequestTimeout(Exception):
     pass
 
 
-def build_system_prompt(name: str, script: Dict[str, str], prompt_path: Optional[Path] = None) -> str:
-    """agent_system.md with its two placeholders filled by str.replace: {lines} then {name}."""
+def build_system_prompt(name: str, script: Dict[str, str], prompt_path: Optional[Path] = None,
+                        checks: Sequence[str] = ("smile", "arms", "sentence")) -> str:
+    """agent_system.md with its placeholders filled by str.replace: {lines}, {checks} (the checks of THIS call, in
+    order: on the phone the sentence is not one, and announcing it cost the call a line and a step), then {name}."""
     template = Path(prompt_path or PROMPT_PATH).read_text("utf-8")
     lines = "\n".join('- %s: "%s"' % (line_id, script[line_id]) for line_id in CAUSABLE_LINES if line_id in script)
-    return template.replace("{lines}", lines).replace("{name}", name)
+    order = ", then ".join(checks) if checks else "none"
+    return template.replace("{lines}", lines).replace("{checks}", order).replace("{name}", name)
 
 
 def _loggable(name: Any, args: Any) -> Dict[str, Any]:
@@ -91,7 +94,8 @@ class ClaudeAgent:
         if self.client is None:
             await self._fallback(self.unavailable_reason or "no_client")
             return
-        system = build_system_prompt(self.session.person_name, self.handlers.script, self.prompt_path)
+        checks = [t for t in limits.TASKS if t in self.session.required_tasks]
+        system = build_system_prompt(self.session.person_name, self.handlers.script, self.prompt_path, checks)
         tools = self.handlers.tool_definitions()
         messages: List[Dict[str, Any]] = [{"role": "user", "content": FIRST_MESSAGE}]
         schema_streak = 0
