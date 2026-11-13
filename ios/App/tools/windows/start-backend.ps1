@@ -3,15 +3,15 @@
     Starts the check-in backend (call service) on this Windows PC, so the parent iPhone app can reach it over Wi-Fi.
 
 .DESCRIPTION
-    The call service the parent app needs is on the agent-4/call-service branch (PR #9), not on this branch.
-    The script fetches that branch into a folder next to this repo (<repo>-call-service) and runs the backend
-    from there. Your own checkout and branch are not touched.
+    It runs the backend from main (call service, voice and avatar clips), whatever branch is checked out here:
+    main is fetched into a folder next to this repo (<repo>-call-service) and run from there, up to date on
+    every start. Your own checkout and branch are not touched. -Branch runs another branch instead.
 
     Steps: fetch the branch, install uv if missing, install dependencies, open the firewall port (when run as
     administrator), print what to type into the phone, then run the server until you press Ctrl+C.
 
 .PARAMETER Branch
-    Branch with the call service. Default: agent-4/call-service.
+    Branch to run the backend from. Default: main.
 .PARAMETER Port
     TCP port. Default: 8000.
 .PARAMETER DemoKey
@@ -34,7 +34,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Branch = "agent-4/call-service",
+    [string]$Branch = "main",
     [int]$Port = 8000,
     [string]$DemoKey = $env:DEMO_KEY,
     [ValidateSet("auto", "analysis", "fake", "scripted")]
@@ -171,6 +171,25 @@ try {
     }
     foreach ($name in $providerKeys.Keys) {
         if ($values[$name]) { Write-Host "  ${name}: set" } else { Write-Host "  ${name}: not set" }
+    }
+
+    # ------------------------------------------------------------ voice and avatar clips
+    Step "Voice and avatar clips"
+    if ($values["ELEVENLABS_API_KEY"]) {
+        Write-Host "Prepared lines are reused; only new lines are generated (the first run takes about 2 minutes)."
+        $env:ELEVENLABS_API_KEY = $values["ELEVENLABS_API_KEY"]
+        if ($values["SIMLI_API_KEY"]) {
+            $env:SIMLI_API_KEY = $values["SIMLI_API_KEY"]
+            uv run --locked python -m checkin_backend.prepare --video
+        } else {
+            uv run --locked python -m checkin_backend.prepare
+            Write-Host "No Simli key: no avatar clips, lines play as voice."
+        }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Preparation stopped (see above). The backend still starts; lines without a clip play as voice." -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "No ElevenLabs key: nothing to prepare (lines are captions only)."
     }
 
     # ------------------------------------------------------------ 4. firewall

@@ -2,18 +2,18 @@
 # Starts the check-in backend (call service) on this Ubuntu machine, so the parent iPhone app can reach it
 # over Wi-Fi.
 #
-# The call service the parent app needs is on the agent-4/call-service branch (PR #9), not on this branch.
-# This fetches that branch into a folder next to this repo (<repo>-call-service) and runs the backend from
-# there. Your own checkout and branch are not touched.
+# It runs the backend from main (call service, voice and avatar clips), whatever branch is checked out here:
+# main is fetched into a folder next to this repo (<repo>-call-service) and run from there, up to date on
+# every start. Your own checkout and branch are not touched. --branch runs another branch instead.
 #
-# Usage: ./start-backend.sh [--port 8000] [--branch agent-4/call-service] [--runner auto|analysis|fake|scripted]
+# Usage: ./start-backend.sh [--port 8000] [--branch main] [--runner auto|analysis|fake|scripted]
 #                           [--reset-keys]
 # Keys: DEMO_KEY is made once. ELEVENLABS_API_KEY (voice, transcription) and SIMLI_API_KEY (avatar clips) are asked
 #       for on the first run (Enter skips) and stored in ~/.local/share/checkin-backend/ (mode 600), never in the repo.
 #       A key set in the environment wins; --reset-keys asks again.
 set -euo pipefail
 
-BRANCH="agent-4/call-service"
+BRANCH="main"
 PORT=8000
 RUNNER="auto"
 RESET_KEYS=0
@@ -130,6 +130,23 @@ fi
 for name in ELEVENLABS_API_KEY SIMLI_API_KEY; do
     if [ -n "${!name:-}" ]; then echo "  $name: set"; else echo "  $name: not set"; fi
 done
+
+# ---------------------------------------------------------------- voice and avatar clips
+step "Voice and avatar clips"
+if [ -n "${ELEVENLABS_API_KEY:-}" ]; then
+    echo "Prepared lines are reused; only new lines are generated (the first run takes about 2 minutes)."
+    if [ -n "${SIMLI_API_KEY:-}" ]; then
+        ELEVENLABS_API_KEY="$ELEVENLABS_API_KEY" SIMLI_API_KEY="$SIMLI_API_KEY" \
+            uv run --locked python -m checkin_backend.prepare --video \
+            || warn "Preparation stopped (see above). The backend still starts; lines without a clip play as voice."
+    else
+        ELEVENLABS_API_KEY="$ELEVENLABS_API_KEY" uv run --locked python -m checkin_backend.prepare \
+            || warn "Preparation stopped (see above). The backend still starts."
+        echo "No Simli key: no avatar clips, lines play as voice."
+    fi
+else
+    echo "No ElevenLabs key: nothing to prepare (lines are captions only)."
+fi
 
 # ---------------------------------------------------------------- 4. firewall
 step "Firewall"

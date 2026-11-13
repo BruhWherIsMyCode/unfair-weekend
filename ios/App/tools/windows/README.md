@@ -1,9 +1,9 @@
 # Run the backend on a Windows PC
 
 For testing the parent iPhone app (`ios/ParentApp`) when the backend cannot run on a Mac.
-The call service the app needs is on the `agent-4/call-service` branch (PR #9). The script
-fetches that branch into a folder next to this repo (`<repo>-call-service`) and runs the backend
-from there. Your own checkout and branch stay as they are.
+The script runs the backend from `main` (call service, voice and avatar clips), whatever branch
+you have checked out: it fetches `main` into a folder next to this repo (`<repo>-call-service`)
+and runs it from there, up to date on every start. Your own checkout and branch stay as they are.
 
 ## Needs
 
@@ -31,6 +31,12 @@ On the first run the script asks for the ElevenLabs key (voice, transcription) a
 can read them, never in the repo, and reused after that. `.\start-backend.ps1 -ResetKeys` asks again.
 A key already set in the environment wins. Without the ElevenLabs key the avatar's lines are silent:
 you see captions only, and answers are not transcribed.
+
+Before starting the server, the script prepares the voice for every script line (ElevenLabs key)
+and the avatar clips (Simli key) with `main`'s `checkin_backend.prepare`. Prepared lines are kept in
+the backend's ignored `.cache/` and reused, so only the first run on a machine takes about 2 minutes
+and uses provider credits. If preparation fails, the server still starts and lines without a clip
+play as voice only.
 
 ## If the phone cannot connect
 
