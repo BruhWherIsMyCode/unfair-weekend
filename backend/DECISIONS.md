@@ -11,7 +11,15 @@ Current as of 13 Nov 2026. [ARCHITECTURE_PLAN.md](ARCHITECTURE_PLAN.md) owns the
 - **Explicit confirmation and delivery.** Two usable final outside readings under the agreed rule trigger a fixed family message. A final summary updates the same call/message ID. Technical failure is not a measured change.
 - **One draft interface source.** [proposals/](proposals/README.md) contains review draft 0.2, exact lines and synthetic fixtures. Agent 3 still needs to review/publish the complete canonical contract in `contract/`.
 
-The Python runtime, task analysis, baselines, interrupts, family delivery and real client integration are **not implemented** by this work. The current iOS stage task remains a separate mock. The user has requested a PR and merge for the prototype, plan and documentation cleanup.
+The first Python foundation implements protected health, configuration and local connection lifecycle. Client call routes, provider adapters in Python, task analysis, baselines, interrupts, family delivery and real client integration remain **unimplemented**. The current iOS stage task remains a separate mock.
+
+## Python foundation
+
+The app factory in `checkin_backend/app.py` owns a `CallService` during FastAPI lifespan. `DEMO_KEY` is required; no provider credential is needed for health or local lifecycle tests. The existing v0 health sketch supplies `/v1/health` and `{ok: true}`; other baseline network routes await Agent 3's canonical publication under issue #6. Local immutable call records do not define client payloads.
+
+Connection state is confined to one process and one asyncio event loop, separate from CallSession's conversation/measurement state. Ring timeout defaults to 30 seconds; connected-call duration defaults to 180 seconds from the first answer. Monotonic time governs deadlines. Late answers cannot revive expired calls, repeated transitions cannot extend deadlines, and closing the app ends active calls and joins deadline tasks. A cancelled consumer does not cancel the shared terminal result. Records are held in memory until process exit; SQLite history remains future work.
+
+Local verification uses `uv run --locked --extra dev pytest -q`. It covers protected health, configuration, lifecycle cleanup, no-answer expiry, connected deadlines, answer/timeout ordering, active-person isolation, terminal replay and cancelled waiters. A real Uvicorn HTTP smoke check returned authenticated 200 and missing-key 401, completed application shutdown after SIGTERM and kept the generated credential out of logs. The runtime lock uses FastAPI 0.162.5, Starlette 1.10.0 and Uvicorn 0.54.0; a `pip-audit` check of the exported runtime requirements reported no known vulnerabilities. These checks do not verify a real client, provider playback, analyzer cancellation or family delivery. [backend/README.md](README.md#python-foundation) contains install/run instructions.
 
 ## Runnable provider experiment
 
