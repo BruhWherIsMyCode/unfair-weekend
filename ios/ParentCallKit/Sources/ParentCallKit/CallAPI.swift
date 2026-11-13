@@ -70,7 +70,39 @@ public struct CallAPI: Sendable {
         _ = try await postJSON("/v1/devices", ["device_id": deviceId, "role": "parent", "person_id": personId])
     }
 
-    func events(deviceId: String, lastEventId: String?) -> SSEConnection {
+    /// A Cloudflare quick tunnel (*.trycloudflare.com) holds back an open event stream, so events are long-polled there.
+    public static func prefersPolling(_ url: URL) -> Bool {
+        url.host?.lowercased().hasSuffix(".trycloudflare.com") ?? false
+    }
+
+    struct EventPage: Decodable {
+        struct Frame: Decodable {
+            let id: String
+            let event: String
+            /// The event's JSON as text, as in an SSE `data:` line.
+            let data: String
+        }
+
+        let events: [Frame]
+        let cursor: Int
+    }
+
+    /// One long poll: returns when an event arrives or after `waitS` seconds (then with no events).
+    func pollEvents(deviceId: String, after: Int?, waitS: Int = 20) async throws -> EventPage {
+        var path = "/v1/devices/\(deviceId)/events/poll?wait_s=\(waitS)"
+        if let after {
+            path += "&after=\(after)"
+        }
+        var req = request(path)
+        req.timeoutInterval = TimeInterval(waitS + 15)
+        let (data, _) = try await send(req)
+        return try JSONDecoder().decode(EventPage.self, from: data)
+    }
+
+    func events(deviceId: String, lastEventId: String?) -> EventConnection {
+        if Self.prefersPolling(baseURL) {
+            return PollConnection(api: self, deviceId: deviceId)
+        }
         var req = request("/v1/devices/\(deviceId)/events")
         req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         req.timeoutInterval = 3600
