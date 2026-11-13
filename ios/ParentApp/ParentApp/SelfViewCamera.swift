@@ -220,9 +220,11 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
         guard wanted, let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         var image = CIImage(cvPixelBuffer: pixels)
         if image.extent.width > image.extent.height {
-            // Still landscape (the connection's rotation did not take): turn it 90 degrees counter-clockwise.
-            // Checked on an iPhone 18 Pro Max with the camera debug screen: clockwise (.right) gave her upside down.
-            image = image.oriented(.left)
+            // Still landscape: the connection's settings (90 degrees, not mirrored) did not take, so this is the
+            // front camera's default buffer. Turn it 90 degrees counter-clockwise, then mirror it. Checked on an
+            // iPhone 18 Pro Max with the camera debug screen: clockwise (.right) gave her upside down, and only the
+            // mirrored picture put her raised hand on the right side for the analysis.
+            image = image.oriented(.left).oriented(.upMirrored)
         }
         guard let space = CGColorSpace(name: CGColorSpace.sRGB),
               let jpeg = context.jpegRepresentation(
