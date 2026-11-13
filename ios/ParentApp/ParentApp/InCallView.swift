@@ -147,12 +147,12 @@ struct InCallView: View {
 struct CardContent: View {
     let card: CallScreen.Card
 
-    /// The card crossfades whenever this changes: line id, question number or task name.
+    /// The card crossfades whenever this changes: line id, question number, or task and its part.
     static func identity(_ card: CallScreen.Card) -> String {
         switch card {
         case .assistant(let subtitle): return "assistant:\(subtitle.lineId)"
         case .question(let number, _, _, _): return "question:\(number)"
-        case .task(_, _, let task, _, _): return "task:\(task)"
+        case .task(_, _, let task, let part, _, _): return "task:\(task):\(part.rawValue)"
         case .sentence: return "task:sentence"
         }
     }
@@ -165,15 +165,15 @@ struct CardContent: View {
             case .question(let number, let total, let subtitle, let listening):
                 Subtitles(label: "Question \(number) of \(total)", subtitle: subtitle)
                 listeningSlot(listening)
-            case .task(let step, let total, let task, let timer, let hint):
+            case .task(let step, let total, _, let part, let timer, let hint):
                 VStack(alignment: .leading, spacing: 8) {
                     CardLabel(text: "Step \(step) of \(total)")
-                    Text(Self.title(task))
+                    Text(Self.title(part))
                         .font(.system(size: 34, weight: .bold))
                         .tracking(-0.6)
                         .lineLimit(2)
                         .minimumScaleFactor(0.7)
-                    subline(Self.hintText(hint) ?? Self.instruction(task))
+                    subline(Self.hintText(hint) ?? Self.instruction(part))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 TimerRing(timer: timer)
@@ -214,19 +214,24 @@ struct CardContent: View {
             .minimumScaleFactor(0.8)
     }
 
-    static func title(_ task: String) -> String {
-        switch task {
-        case "smile": return "Smile wide"
-        case "arms": return "Raise one hand"
-        default: return "Follow the voice"
+    /// Follows the spoken lines: task_smile, smile_now, task_arms, swap_hands.
+    static func title(_ part: CallScreen.TaskPart) -> String {
+        switch part {
+        case .relax: return "Relax your face"
+        case .smile: return "Smile wide"
+        case .leftHand: return "Raise your left hand"
+        case .rightHand: return "Now your right hand"
+        case .other: return "Follow the voice"
         }
     }
 
-    static func instruction(_ task: String) -> String {
-        switch task {
-        case "smile": return "Relax, then smile when asked"
-        case "arms": return "Left hand first, then swap"
-        default: return "Look at the screen"
+    static func instruction(_ part: CallScreen.TaskPart) -> String {
+        switch part {
+        case .relax: return "Smile when I say smile"
+        case .smile: return "Hold it until the timer ends"
+        case .leftHand: return "Keep it up until I say swap"
+        case .rightHand: return "Phone in your left hand"
+        case .other: return "Look at the screen"
         }
     }
 

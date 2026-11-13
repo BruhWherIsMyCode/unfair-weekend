@@ -48,6 +48,7 @@ class ProductionHandReader:
 
     def __init__(self, mirrored: bool = False) -> None:
         self.mirrored = mirrored
+        self.on_frame: Optional[Callable[..., Any]] = None  # debug mode only: (image, ts, side, face_obs, hands, mirrored)
         self._ctx: Any = None
         self._reader: Any = None
 
@@ -61,6 +62,11 @@ class ProductionHandReader:
             self._ctx = HandFrameReader()
             self._reader = self._ctx.__enter__()
         face_obs, hands = self._reader.process(image, timestamp_ms, mirrored=self.mirrored)
+        if self.on_frame is not None:  # debug mode: only reports what was seen
+            try:
+                self.on_frame(image, timestamp_ms, expected_side, face_obs, hands, self.mirrored)
+            except Exception:  # never into the measuring
+                pass
         return hand_frame_reading(face_obs, hands, expected_side)
 
     def close(self) -> None:
@@ -173,8 +179,9 @@ class StreamArms:
     def __init__(self, frame_reader: Optional[FrameReader] = None, decode: Optional[Decoder] = None,
                  phases: Sequence[Phase] = limits.ARMS_PHASES, period_ms: int = OBSERVATION_PERIOD_MS,
                  use_executor: bool = True, mirrored: bool = False,
-                 raise_grace_ms: int = limits.ARMS_RAISE_GRACE_MS) -> None:
+                 raise_grace_ms: int = limits.ARMS_RAISE_GRACE_MS, debug: Any = None) -> None:
         self._frame_reader = frame_reader
+        self.debug = debug  # a debug_view.DebugView (UW_DEBUG=on) or None: reports only, never changes a reading
         self.raise_grace_ms = int(raise_grace_ms)  # per hold phase: time to raise the hand before framing counts
         self.mirrored = mirrored  # for the production reader a run creates itself (a mirrored front camera)
         self._decode = decode
@@ -213,6 +220,10 @@ class StreamArms:
         if reader is None:
             owned_reader = ProductionHandReader(self.mirrored)
             reader = owned_reader
+        if self.debug is not None and hasattr(reader, "on_frame"):
+            debug, attempt_id = self.debug, context.attempt_id
+            reader.on_frame = lambda image, ts, side, face_obs, hands, mirrored: debug.arms_frame(
+                attempt_id, ts, side, image, face_obs, hands, mirrored)
         loop = asyncio.get_running_loop()
         holds = hold_windows(self.phases)
         frames: Dict[str, List[Optional[HandFrameReading]]] = {"left": [], "right": []}

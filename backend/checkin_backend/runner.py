@@ -24,6 +24,9 @@ log = logging.getLogger(__name__)
 
 READY_TIMEOUT_S = 15.0
 TASKS = ("smile", "arms", "sentence")
+# The cue lines Agent 3's session plays after a capture starts (analysis/session/limits.py SMILE_CUE_MS and the
+# ARMS_PHASES swap). The stand-in runners play the same ones, so the phone's task card and timer behave alike.
+CUES = {"smile": [{"at_ms": 1500, "line_id": "smile_now"}], "arms": [{"at_ms": 6500, "line_id": "swap_hands"}]}
 QUESTIONS = ("q_medicine", "q_feeling", "q_unusual")
 CAPTURE_SETTINGS = {
     "smile": {"media_kind": "video", "duration_ms": 6000, "prepare_ms": 0, "stop_on_silence_ms": None,
@@ -90,10 +93,13 @@ class ScriptedSession:
     def __init__(self, link: ClientLink) -> None:
         self.link = link
         self.hung_up = False
-        self.started: set[str] = set()
+        self.started: dict[str, asyncio.Event] = {}
+
+    def started_event(self, attempt_id: str) -> asyncio.Event:
+        return self.started.setdefault(attempt_id, asyncio.Event())
 
     def handle_capture_started(self, attempt_id: str) -> str:
-        self.started.add(attempt_id)
+        self.started_event(attempt_id).set()
         return "applied"
 
     def handle_cancel_ack(self, attempt_id: str) -> None:
@@ -107,6 +113,20 @@ class ScriptedSession:
 
     def hang_up(self) -> None:
         self.hung_up = True
+
+
+async def play_cues(link: ClientLink, started: asyncio.Event, cues: list[dict[str, Any]]) -> None:
+    """Each cue `at_ms` after the phone reported capture.started. A failed cue is skipped, never fails the task."""
+    await started.wait()
+    begin = asyncio.get_running_loop().time()
+    for cue in sorted(cues, key=lambda c: c["at_ms"]):
+        delay = begin + cue["at_ms"] / 1000 - asyncio.get_running_loop().time()
+        if delay > 0:
+            await asyncio.sleep(delay)
+        try:
+            await link.say(cue["line_id"])
+        except (CallEnded, PlaybackFailed):
+            return
 
 
 async def run_scripted_call(link: ClientLink) -> dict[str, Any]:
@@ -127,6 +147,7 @@ async def run_scripted_call(link: ClientLink) -> dict[str, Any]:
         await link.say(f"task_{task}")
         attempt_id = f"S{number}"
         await link.start_capture(attempt_id, task, CAPTURE_SETTINGS[task])
+        cues = asyncio.ensure_future(play_cues(link, session.started_event(attempt_id), CUES.get(task, [])))
         window_s = CAPTURE_SETTINGS[task]["duration_ms"] / 1000
         count = 0
         try:
@@ -135,6 +156,9 @@ async def run_scripted_call(link: ClientLink) -> dict[str, Any]:
                     count += 1
         except TimeoutError:
             await link.cancel_capture(attempt_id, "timeout")
+        finally:
+            cues.cancel()
+            await asyncio.gather(cues, return_exceptions=True)
         link.log.append({"kind": "scripted_task", "task": task, "samples": count})
     if not session.hung_up:
         await link.say("bye")
