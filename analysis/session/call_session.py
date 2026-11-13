@@ -38,6 +38,7 @@ class _Runtime:
         self.driver: Optional["asyncio.Future"] = None
         self.pump: Optional["asyncio.Future"] = None
         self.module_task: Optional["asyncio.Future"] = None
+        self.cue_task: Optional["asyncio.Future"] = None  # plays the task's mid-task cue lines
         self.module_finished = False
         self.module_result: Any = None
         self.module_error: Optional[str] = None
@@ -79,6 +80,9 @@ class CallSession:
 
         self.hung_up = False
         self.finished = False
+        # Counts resource changes, interruptions and hang-up. The call driver compares it before and after a model
+        # request: when it moved, the model's answer was decided on an old state and is not executed.
+        self.event_version = 0
         self._final: Optional[Dict[str, Any]] = None
         self.message_id: Optional[str] = None
         self.published: List[Dict[str, Any]] = []
@@ -114,6 +118,26 @@ class CallSession:
     def _records_for(self, task: str) -> List[rules.FinalRecord]:
         return [r for r in self.records if r.task == task]
 
+    # ---- small public views for the call driver (read-only) ------------------------------------------
+
+    def records_for(self, task: str) -> List[rules.FinalRecord]:
+        return list(self._records_for(task))
+
+    def note(self, kind: str, **fields: Any) -> None:
+        """Append a decision to the log from outside (the call driver)."""
+        self._log(kind, **fields)
+
+    @property
+    def active_attempt_id(self) -> Optional[str]:
+        return self._active.attempt_id if self._active is not None else None
+
+    def recovery_pending(self, resource: str) -> bool:
+        """True when an interruption left a recovery wait for this resource that was not used yet."""
+        return resource in self._recovery_open and self.resources[resource].state != "available"
+
+    def time_left_s(self) -> float:
+        return limits.CALL_MAX_S - (self.clock.now() - self.started_at)
+
     def _spawn(self, coro: Any) -> None:
         fut = asyncio.ensure_future(coro)
         self._background.add(fut)
@@ -145,6 +169,7 @@ class CallSession:
             return "stale"
         self._resource_seq[ev.resource] = ev.sequence
         self.resources[ev.resource] = rules.ResourceInfo(ev.state, ev.reason, ev.event_id)
+        self.event_version += 1
         self._log("resource_changed", resource=ev.resource, state=ev.state, reason=ev.reason, event_id=ev.event_id)
         if ev.state == "available":
             self._resource_back[ev.resource].set()
@@ -205,6 +230,7 @@ class CallSession:
         if self.hung_up:
             return
         self.hung_up = True
+        self.event_version += 1
         self._log("hang_up")
         attempt, rt = self._active, self._rt
         if attempt is not None and attempt.is_active:
@@ -331,11 +357,40 @@ class CallSession:
                 return
             rt.pump = asyncio.ensure_future(self._pump(attempt, rt, self.adapter.samples(attempt.attempt_id)))
             rt.module_task = asyncio.ensure_future(self._run_module(attempt, rt))
+            cues = definition.get("cues") or []
+            if cues:  # spawned: playing a cue never blocks sample intake or the watchdogs
+                rt.cue_task = asyncio.ensure_future(self._play_cues(attempt, cues))
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             self._log("drive_failed", attempt_id=attempt.attempt_id, error=type(exc).__name__)
             self._request_stop(attempt, "interrupted", "capture_failed", None, True, "playback or capture start failed")
+
+    async def _play_cues(self, attempt: Attempt, cues: Sequence[Dict[str, Any]]) -> None:
+        """Play each cue line `at_ms` after capture started. A failed playback is logged, never fails the attempt."""
+        try:
+            for cue in sorted(cues, key=lambda c: c["at_ms"]):
+                while attempt.capture_started_at is None and attempt.is_active:
+                    await self.clock.sleep(limits.WATCHDOG_TICK_S)
+                if not attempt.is_active or self.hung_up:
+                    return
+                wait = attempt.capture_started_at + cue["at_ms"] / 1000.0 - self.clock.now()
+                if wait > 0:
+                    await self.clock.sleep(wait)
+                if not attempt.is_active or self.hung_up:
+                    return
+                self._log("cue", attempt_id=attempt.attempt_id, line=cue["line_id"], at_ms=cue["at_ms"])
+                try:
+                    await self.adapter.say(cue["line_id"])
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    self._log("cue_failed", attempt_id=attempt.attempt_id, line=cue["line_id"],
+                              error=type(exc).__name__)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # a malformed cue definition is also only logged
+            self._log("cue_failed", attempt_id=attempt.attempt_id, error=type(exc).__name__)
 
     async def _pump(self, attempt: Attempt, rt: _Runtime, source: Any) -> None:
         """Move the attempt's samples from the adapter to the module's bounded queue."""
@@ -447,6 +502,8 @@ class CallSession:
                                       code or "capture_failed", source_event_id, recoverable)
         if not attempt.begin_stop(self.clock.now(), kind, why, interrupt):
             return False
+        if kind == "interrupted":
+            self.event_version += 1  # a decision made before this interruption is stale
         self._log("attempt_stopping", attempt_id=attempt.attempt_id, stop_kind=kind, code=code, why=why,
                   source_event_id=source_event_id)
         if interrupt is not None and code in ("camera_unavailable", "microphone_unavailable") and recoverable:
@@ -480,7 +537,7 @@ class CallSession:
     async def _stop_workers(self, rt: _Runtime) -> None:
         """Cancel the driver, pump and module. A module that will not stop keeps the analyzer slot busy."""
         rt.cancel_event.set()
-        helpers = [t for t in (rt.driver, rt.pump) if t is not None]
+        helpers = [t for t in (rt.driver, rt.pump, rt.cue_task) if t is not None]
         for t in helpers:
             if not t.done():
                 t.cancel()
@@ -639,7 +696,17 @@ class CallSession:
 
     def baseline_update(self) -> Dict[str, float]:
         """metric_id -> value that may enter the baseline after this call (nothing if acted or a change was confirmed)."""
-        return rules.baseline_values_to_store(self.label, self.records, self._confirmed_any())
+        out = rules.baseline_values_to_store(self.label, self.records, self._confirmed_any())
+        if limits.ARMS_METRIC_ID in out:  # arms: one value per hand, not one value for the task
+            del out[limits.ARMS_METRIC_ID]
+            first = next((r for r in self._records_for("arms") if not r.interrupted and r.usable
+                          and r.reading is not None), None)
+            per_hand = getattr(self.modules.get("arms"), "attempt_values", None)
+            values = per_hand(first.attempt_id) if (first is not None and callable(per_hand)) else {}
+            for side, key in limits.ARMS_BASELINE_KEYS.items():
+                if values.get(side) is not None:
+                    out[key] = float(values[side])
+        return out
 
     async def _publish(self, phase: str) -> bool:
         summary = self.build_session_result().to_dict()

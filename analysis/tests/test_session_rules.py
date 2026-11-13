@@ -194,3 +194,39 @@ def test_acted_and_confirmed_sessions_never_enter_the_baseline():
 def test_interrupted_and_unusable_attempts_do_not_enter_the_baseline():
     records = [rec(usable=False, outcome="interrupted"), rec(usable=False, outcome="completed")]
     assert rules.baseline_values_to_store("live", records, False) == {}
+
+
+# ---- v6: same-side confirmation ------------------------------------------------------------------------
+
+def test_left_hand_outside_then_right_hand_outside_is_not_confirmed():
+    ev_ = rules.evaluate_sign([rec(0.11, attempt="A1", side="left"), rec(0.09, attempt="A2", side="right")])
+    assert ev_.confirmed is False and ev_.side is None and len(ev_.attempts) == 2
+
+
+def test_the_same_side_twice_confirms_and_names_the_side():
+    for side in ("left", "right"):
+        ev_ = rules.evaluate_sign([rec(0.11, attempt="A1", side=side), rec(0.09, attempt="A2", side=side)])
+        assert ev_.confirmed is True and ev_.side == side
+
+
+def test_a_pair_is_found_even_when_a_different_side_came_in_between():
+    records = [rec(0.11, attempt="A1", side="left"), rec(0.09, attempt="A2", side="right"),
+               rec(0.10, attempt="A3", side="left")]
+    ev_ = rules.evaluate_sign(records)
+    assert ev_.confirmed is True and ev_.side == "left"
+
+
+def test_a_missing_side_does_not_disagree_with_a_named_one():
+    assert rules.sides_match({"side": None}, {"side": "left"}) is True
+    assert rules.sides_match({"side": "left"}, {"side": "right"}) is False
+    assert rules.sides_match({"side": "left"}, {"side": "left"}) is True
+    ev_ = rules.evaluate_sign([rec(0.11, attempt="A1", side=None), rec(0.09, attempt="A2", side="left")])
+    assert ev_.confirmed is True and ev_.side == "left"
+
+
+def test_smile_sides_follow_the_same_rule():
+    # smile readings outside on opposite sides cannot both be "above" and "below" the same range, but if a
+    # caller hands over mismatching sides with the same direction they are not one finding
+    a = rec(0.11, attempt="A1", side="left")
+    b = rec(0.09, attempt="A2", side="right")
+    assert rules.evaluate_sign([a, b]).confirmed is False

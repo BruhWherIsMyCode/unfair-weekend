@@ -25,7 +25,35 @@ SAMPLE_QUEUE_MAX = 64  # bounded sample queue per attempt; a full queue drops th
 
 BASELINE_NEEDED_DEFAULT = 5  # used for the summary when no baseline is known
 
-TASK_WINDOW_S = {"smile": 5.0, "arms": 12.0, "sentence": 12.0}
+# ---- v6: the one-hand arms task ----------------------------------------------------------------
+# One 12 s capture window, two halves. (phase, start_ms, end_ms, expected side or None). A sample belongs to a
+# phase when start_ms <= captured_ms < end_ms. Hold phases are measured; settle and swap frames are ignored.
+# Side words are HER left and right. First guesses, editable in this one place.
+ARMS_PHASES = (
+    ("settle", 0, 1000, None),
+    ("hold_left", 1000, 5000, "left"),
+    ("swap", 5000, 7000, None),
+    ("settle", 7000, 8000, None),
+    ("hold_right", 8000, 12000, "right"),
+)
+ARMS_METRIC_ID = "hand_sink_v1"
+ARMS_BASELINE_KEYS = {"left": "arms.hand_left.hand_sink", "right": "arms.hand_right.hand_sink"}
+
+# ---- v6: the call driver (Claude tool loop and fixed-order fallback) ----------------------------
+LISTEN_TIMEOUT_S = 8.0  # how long adapter.listen waits for her answer
+CLAUDE_TIMEOUT_S = 6.0  # one model request
+CLAUDE_MAX_TURNS = 30  # more requests than this switches to the fixed-order driver
+CLAUDE_MAX_TOKENS = 300
+FINISH_GUARD_S = 30.0  # finish_call is allowed without further checks when less than this remains of CALL_MAX_S
+MAX_ASKS_PER_QUESTION = 2
+ANSWER_MAX_CHARS = 200  # record_answer value limit
+TRANSCRIPT_TO_CLAUDE_CHARS = 500
+QUESTIONS = ("q_medicine", "q_feeling", "q_unusual")
+ANSWER_KEY = {"q_medicine": "medicine", "q_feeling": "feeling", "q_unusual": "unusual"}
+SAYABLE_LINES = ("greet", "setup_phone")
+RESOURCES = ("camera", "microphone")
+
+TASK_WINDOW_S ={"smile": 5.0, "arms": 12.0, "sentence": 12.0}
 TASK_SIGN = {"smile": "face", "arms": "arm", "sentence": "speech"}
 TASK_RESOURCE = {"smile": "camera", "arms": "camera", "sentence": "microphone"}
 TASKS = ("smile", "arms", "sentence")

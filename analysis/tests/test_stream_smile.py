@@ -176,9 +176,9 @@ def test_definitions_use_the_published_capture_settings():
     assert STREAM_TASKS["sentence"].definition()["required_resource"] == "microphone"
 
 
-def test_arms_and_sentence_are_stubs_that_fail_with_a_clear_reason():
+def test_sentence_is_a_stub_that_fails_with_a_clear_reason():  # arms became real in v6 (test_stream_arms.py)
     async def scenario():
-        for name in ("arms", "sentence"):
+        for name in ("sentence",):
             context = TaskContext("call_t", "A5", name, LEARNING, asyncio.Event())
             result = await STREAM_TASKS[name].run(context, sample_stream(), lambda o: None)
             d = result.to_dict()

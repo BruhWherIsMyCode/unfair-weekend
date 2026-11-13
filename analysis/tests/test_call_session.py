@@ -424,6 +424,139 @@ def test_acted_session_does_not_enter_the_baseline_but_live_does():
     asyncio.run(scenario())
 
 
+# ---- v6: cues, event version, per-hand baseline ------------------------------------------------------------
+
+class CueModule:
+    """A scripted module whose definition carries cues."""
+
+    def __init__(self, inner, cues):
+        self.inner, self.cues, self.name = inner, cues, inner.name
+
+    def definition(self):
+        d = self.inner.definition()
+        d["cues"] = self.cues
+        return d
+
+    async def run(self, context, samples, emit_observation):
+        return await self.inner.run(context, samples, emit_observation)
+
+
+def rig_with_cues(cues):
+    rig = Rig()
+    modules = dict(rig.session.modules)  # a copy: rig.module must keep pointing at the scripted module
+    modules["smile"] = CueModule(rig.module, cues)
+    rig.session.modules = modules
+    return rig
+
+
+def test_a_cue_is_played_at_its_offset_after_capture_started_without_blocking_samples():
+    async def scenario():
+        rig = rig_with_cues([{"at_ms": 2000, "line_id": "swap_hands"}])
+        rig.adapter.say_gate = None
+        aid = await rig.start()
+        assert rig.adapter.said == ["task_smile"]
+        await rig.tick(1.5, sample_every=0.5)
+        assert "swap_hands" not in rig.adapter.said
+        await rig.tick(1.0, sample_every=0.5)
+        assert rig.adapter.said == ["task_smile", "swap_hands"]
+        assert [e["line"] for e in rig.kinds("cue")] == ["swap_hands"]
+        assert rig.session.attempts[aid].samples_received >= 4  # intake went on while the cue played
+        rig.module.finish(rig.module.usable_result(0.01))
+        await rig.clock.settle()
+        assert (await rig.task)["outcome"] == "completed"
+        assert rig.adapter.said.count("swap_hands") == 1
+
+    asyncio.run(scenario())
+
+
+def test_a_slow_cue_playback_does_not_block_samples_or_watchdogs():
+    async def scenario():
+        rig = rig_with_cues([{"at_ms": 500, "line_id": "swap_hands"}])
+        aid = await rig.start()
+        rig.adapter.say_gate = asyncio.Event()  # the cue line "plays" for a long time
+        await rig.tick(1.0, sample_every=0.25)
+        before = rig.session.attempts[aid].samples_received
+        await rig.tick(1.0, sample_every=0.25)
+        assert rig.session.attempts[aid].samples_received > before and rig.session.attempts[aid].is_active
+        rig.adapter.say_gate.set()
+        rig.module.finish(rig.module.usable_result(0.01))
+        await rig.clock.settle()
+        assert (await rig.task)["outcome"] == "completed"
+
+    asyncio.run(scenario())
+
+
+def test_a_failed_cue_playback_is_logged_and_never_fails_the_attempt():
+    async def scenario():
+        rig = rig_with_cues([{"at_ms": 500, "line_id": "swap_hands"}])
+        await rig.start()
+        rig.adapter.fail_say = True
+        await rig.tick(1.5, sample_every=0.5)
+        assert rig.kinds("cue_failed") and rig.kinds("cue_failed")[0]["error"] == "RuntimeError"
+        rig.module.finish(rig.module.usable_result(0.01))
+        await rig.clock.settle()
+        assert (await rig.task)["outcome"] == "completed"
+
+    asyncio.run(scenario())
+
+
+def test_a_cue_is_not_played_when_the_attempt_ends_first():
+    async def scenario():
+        rig = rig_with_cues([{"at_ms": 3000, "line_id": "swap_hands"}])
+        await rig.start()
+        await rig.tick(1.0, sample_every=0.5)
+        rig.session.handle_resource_event(resource_event("e1", "camera", "unavailable", 1))
+        await rig.clock.settle()
+        assert (await rig.task)["outcome"] == "interrupted"
+        await rig.clock.advance(5.0)
+        assert "swap_hands" not in rig.adapter.said
+
+    asyncio.run(scenario())
+
+
+def test_tasks_without_cues_play_nothing_extra():
+    async def scenario():
+        rig = Rig()
+        await complete(rig, 0.01)
+        assert rig.adapter.said == ["task_smile"] and rig.kinds("cue") == []
+
+    asyncio.run(scenario())
+
+
+def test_the_event_version_counts_interruptions():
+    async def scenario():
+        rig = Rig()
+        await rig.start()
+        await rig.tick(0.5)
+        before = rig.session.event_version
+        rig.session.handle_resource_event(resource_event("e1", "camera", "unavailable", 1))
+        assert rig.session.event_version >= before + 1
+        await rig.clock.settle()
+        await rig.task
+        assert rig.session.event_version >= before + 2  # the resource change and the interruption it caused
+
+    asyncio.run(scenario())
+
+
+def test_arms_baseline_update_stores_one_value_per_hand():
+    from analysis.tests.agent_helpers import CallRig
+
+    async def scenario():
+        rig = CallRig(required_tasks=("arms",), sinks=({"left": 0.04},))
+        await rig.greet()
+        await rig.run_tool("run_task", {"task": "arms"})
+        update = rig.session.baseline_update()
+        assert set(update) == {"arms.hand_left.hand_sink", "arms.hand_right.hand_sink"}  # not "hand_sink_v1"
+        assert abs(update["arms.hand_left.hand_sink"] - 0.04) < 1e-9 and abs(update["arms.hand_right.hand_sink"]) < 1e-9
+
+        acted = CallRig(label="acted")
+        await acted.greet()
+        await acted.run_tool("run_task", {"task": "arms"})
+        assert acted.session.baseline_update() == {}  # same eligibility rule as the smile
+
+    asyncio.run(scenario())
+
+
 def test_invalid_module_result_becomes_a_failed_attempt():
     async def scenario():
         rig = Rig()

@@ -23,6 +23,10 @@ class CallAdapter(Protocol):
     async def cancel_capture(self, attempt_id: str, reason: str) -> None:
         """Send command.cancel for this attempt. Duplicates are harmless."""
 
+    async def listen(self, question_id: str, timeout_s: float) -> Optional[str]:
+        """The transcript of her answer after a question line played (Agent 2's speech-to-text).
+        None when nothing was heard within `timeout_s`."""
+
     def samples(self, attempt_id: str) -> AsyncIterator[Dict[str, Any]]:
         """The ordered samples of this attempt; the iterator ends when the client finished its input."""
 
@@ -54,10 +58,16 @@ def render_family_text(summary: Dict[str, Any], name: str) -> str:
 class FakeAdapter:
     """Records every call. Tests push samples and trigger client events by hand."""
 
-    CLIENT_CALLS = ("say", "start_capture", "cancel_capture")  # calls that go to the parent client
+    CLIENT_CALLS = ("say", "start_capture", "cancel_capture", "listen")  # calls that go to the parent client
+    SILENT = None  # a scripted answer meaning "she said nothing"
 
     def __init__(self, person_name: str = "Ona", message_id: str = "msg_demo",
-                 auto_ack_start: bool = True, auto_ack_cancel: bool = True) -> None:
+                 auto_ack_start: bool = True, auto_ack_cancel: bool = True,
+                 answers: Optional[Dict[str, Any]] = None) -> None:
+        # question_id -> transcript, or SILENT, or a list consumed one entry per listen() (e.g. [SILENT, "yes"]).
+        # A question that is not scripted is silent.
+        self.answers: Dict[str, Any] = dict(answers or {})
+        self.silent = False  # True: every listen() hears nothing
         self.person_name = person_name
         self.message_id = message_id
         self.auto_ack_start = auto_ack_start
@@ -96,6 +106,15 @@ class FakeAdapter:
         self._queue(attempt_id).put_nowait(None)
         if self.auto_ack_cancel and self.session is not None:
             self.session.handle_cancel_ack(attempt_id)
+
+    async def listen(self, question_id: str, timeout_s: float) -> Optional[str]:
+        self.calls.append(("listen", (question_id,)))
+        if self.silent:
+            return None
+        scripted = self.answers.get(question_id)
+        if isinstance(scripted, list):
+            scripted = scripted.pop(0) if scripted else None
+        return scripted
 
     def samples(self, attempt_id: str) -> AsyncIterator[Dict[str, Any]]:
         self.calls.append(("samples", (attempt_id,)))

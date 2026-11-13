@@ -148,6 +148,14 @@ def reading_direction(reading: Dict[str, Any]) -> int:
     return 0
 
 
+def sides_match(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+    """Two readings agree on the side when both name one and it is the same (a missing side does not disagree).
+
+    Left hand outside, then right hand outside is NOT a confirmation: they are different findings."""
+    sa, sb = a.get("side"), b.get("side")
+    return sa is None or sb is None or sa == sb
+
+
 @dataclass
 class SignEvaluation:
     attempts: List[Dict[str, Any]]  # usable readings, at most two (the confirming pair when confirmed)
@@ -158,8 +166,9 @@ class SignEvaluation:
 
 
 def evaluate_sign(records: Sequence[FinalRecord]) -> SignEvaluation:
-    """Confirmation: two independent usable final readings outside on the same sign (direction),
-    the same metric version and the same frozen baseline. Interrupted/partial attempts never count."""
+    """Confirmation: two independent usable final readings outside on the same sign (direction) and the same
+    side (compared when both name one), the same metric version and the same frozen baseline.
+    Interrupted/partial attempts never count."""
     usable = [r for r in records if r.usable and r.reading is not None]
     if not usable:
         return SignEvaluation([], False, None, None, None)
@@ -168,9 +177,10 @@ def evaluate_sign(records: Sequence[FinalRecord]) -> SignEvaluation:
         for j in range(i + 1, len(outside)):
             a, b = outside[i], outside[j]
             if (reading_direction(a.reading) == reading_direction(b.reading)
+                    and sides_match(a.reading, b.reading)
                     and a.reading["metric_id"] == b.reading["metric_id"]
                     and a.snapshot_id == b.snapshot_id):
-                side = a.reading.get("side") if a.reading.get("side") == b.reading.get("side") else None
+                side = a.reading.get("side") or b.reading.get("side")
                 return SignEvaluation([a.reading, b.reading], True, side,
                                       usable[-1].reading.get("outside"), usable[-1].baseline_ready)
     last = usable[-1]
