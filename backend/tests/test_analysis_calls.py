@@ -111,6 +111,7 @@ async def test_a_normal_call_says_swap_hands_during_the_arms_capture_is_as_usual
     assert status["reason"] == "completed"
     assert status["summary"]["status"] == "as_usual"
     assert status["message"]["kind"] == "as_usual"
+    assert "agent_remark" not in sim.said  # no learning introduction once all required checks are ready
     assert [m["phase"] for m in family] == ["final"]
     order = ["greet", "q_medicine", "q_feeling", "q_unusual", "setup_phone", "task_smile", "smile_now", "task_arms", "swap_hands", "bye"]
     positions = [sim.said.index(line) for line in order]
@@ -176,6 +177,34 @@ async def test_a_learning_usual_gives_a_learning_message_and_collects_the_first_
     assert status["summary"]["status"] == "learning"
     assert status["message"]["kind"] == "learning"
     assert usual(data)["smile"]["sessions"] == 1
+    assert sim.said[:3] == ["greet", "agent_remark", "q_medicine"]
+    assert "learn what is usual for you" in sim.said_commands[1]["text"]
+    assert "2 successful check-in calls in total" in sim.said_commands[1]["text"]
+    assert "2 successful calls are still needed" in sim.said_commands[1]["text"]
+
+
+@pytest.mark.anyio
+async def test_two_fresh_calls_train_and_the_third_can_send_a_change_alert(monkeypatch, tmp_path):
+    corners = [0.01]
+    data = install(monkeypatch, tmp_path, seeded=False, corners=corners)
+    monkeypatch.delenv("UW_BASELINE_NEEDED")  # exercise the backend's real default, not a test override
+    async with Server("analysis") as server:
+        for remaining in (2, 1):
+            sim = SimClient(base=server.base, key=KEY, time_scale=0.05)
+            status = await run_call(server, sim, timeout=90)
+            assert status["summary"]["status"] == "learning"
+            assert status["summary"]["baseline_needed"] == 2
+            assert sim.said[:3] == ["greet", "agent_remark", "q_medicine"]
+            assert f"Including this one, {remaining} successful call" in sim.said_commands[1]["text"]
+        assert usual(data)["smile"]["ready"] and usual(data)["arms"]["ready"]
+        corners[:] = [0.11]
+        sim = SimClient(base=server.base, key=KEY, time_scale=0.05)
+        status = await run_call(server, sim, timeout=90)
+    assert status["summary"]["status"] == "change_noticed"
+    assert status["message"]["kind"] == "change_noticed"
+    assert status["message"]["text"].endswith("If she seems unwell, call 112.")
+    assert sim.said[:2] == ["greet", "q_medicine"]
+    assert usual(data)["smile"]["sessions"] == usual(data)["arms"]["sessions"] == 2
 
 
 @pytest.mark.anyio

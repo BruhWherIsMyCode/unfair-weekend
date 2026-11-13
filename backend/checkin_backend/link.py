@@ -24,6 +24,7 @@ from uuid import uuid4
 from .delivery import FamilyDelivery
 from .avatar import ClipGateway
 from .hub import DeviceHub
+from .learning import introduction
 from .media import MAX_ATTEMPT_BYTES
 from .logging_config import log_event
 from .people import Person
@@ -141,6 +142,7 @@ class ClientLink:
         self.ready = asyncio.Event()
         self.resources: dict[str, str] = {}
         self.ended = False
+        self._learning_announced = False
         self.log: list[dict[str, Any]] = []
         self._commands: dict[str, Command] = {}
         self._captures: dict[str, Capture] = {}
@@ -236,6 +238,11 @@ class ClientLink:
 
     async def say(self, line_id: str) -> None:
         await self._say(line_id, render_line(self.script, line_id, self.person.name))
+        if line_id == "greet" and not self._learning_announced:
+            text = introduction(self.session)
+            if text is not None:
+                await self.say_text(text)
+                self._learning_announced = True
 
     async def say_text(self, text: str) -> None:
         """The call agent's own words (Agent 3's optional `say_text` capability, already checked by the call code).
