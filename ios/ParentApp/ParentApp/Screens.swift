@@ -186,13 +186,16 @@ struct IdleView: View {
 struct SettingsView: View {
     let initial: AppSettings
     let onSave: (AppSettings) -> Void
+    /// Opens the camera debug screen (after this sheet closes).
+    var onCameraDebug: () -> Void = {}
 
     @Environment(\.dismiss) private var dismiss
     @State private var draft: AppSettings
 
-    init(initial: AppSettings, onSave: @escaping (AppSettings) -> Void) {
+    init(initial: AppSettings, onSave: @escaping (AppSettings) -> Void, onCameraDebug: @escaping () -> Void = {}) {
         self.initial = initial
         self.onSave = onSave
+        self.onCameraDebug = onCameraDebug
         _draft = State(initialValue: initial)
     }
 
@@ -221,6 +224,17 @@ struct SettingsView: View {
                     TextField("p_demo", text: $draft.personId)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                }
+                Section {
+                    Button("Camera debug") {
+                        onCameraDebug()
+                        dismiss()
+                    }
+                    .disabled(!initial.isComplete)
+                } header: {
+                    Text("Debug")
+                } footer: {
+                    Text("Runs the real smile or arms analysis on this camera, with no call and no assistant, and shows what it sees. Nothing is stored.")
                 }
                 Section("This phone") {
                     Text(UserDefaults.standard.string(forKey: "parent.device_id") ?? "not registered yet")

@@ -14,6 +14,8 @@ struct ParentApp: App {
 struct RootView: View {
     @State private var app = AppState()
     @State private var showSettings = false
+    @State private var showCameraDebug = false
+    @State private var cameraDebugAfterSettings = false
     /// The ring title ("Daily check-in"), kept for the pill during the call.
     @State private var title = "Daily check-in"
 
@@ -54,8 +56,20 @@ struct RootView: View {
         }
         .animation(Motion.glide(0.6), value: step(screen.mode))
         .preferredColorScheme(.dark)
-        .sheet(isPresented: $showSettings) {
-            SettingsView(initial: app.settings) { app.update($0) }
+        .sheet(isPresented: $showSettings, onDismiss: {
+            if cameraDebugAfterSettings {
+                cameraDebugAfterSettings = false
+                showCameraDebug = true
+            }
+        }) {
+            SettingsView(initial: app.settings, onSave: { app.update($0) },
+                         onCameraDebug: { cameraDebugAfterSettings = true })
+        }
+        .fullScreenCover(isPresented: $showCameraDebug) {
+            CameraDebugView(model: CameraDebugModel(settings: app.settings, preview: app.camera,
+                                                    frames: app.debugFrames)) {
+                showCameraDebug = false
+            }
         }
         .onChange(of: screen.mode, initial: true) { _, mode in
             follow(mode)
@@ -86,6 +100,8 @@ struct RootView: View {
         switch mode {
         case .ringing(_, let ringTitle):
             title = ringTitle
+            // A real call wins over the debug screen.
+            showCameraDebug = false
             app.camera.stopPreview()
             // In the background nobody sees the app's ring screen: ring through the system call screen.
             if UIApplication.shared.applicationState != .active {

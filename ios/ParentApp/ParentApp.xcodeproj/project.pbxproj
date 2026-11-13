@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0CBA70E6FC2D56BED76FFBA3 /* CameraDebug.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A2B0A2488F5937F9472F648 /* CameraDebug.swift */; };
 		17909E4E993695A13F500700 /* SelfViewCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E099E3676BF6DE1389F35DB /* SelfViewCamera.swift */; };
 		1F031DC315903AAF7F33EF69 /* ParentApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 851499AFEB7F3993CC924E90 /* ParentApp.swift */; };
 		30F1B5DBE7B64217FB9F1751 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58C60194AAA8D180C426459F /* AppState.swift */; };
@@ -17,9 +18,11 @@
 		79E7445B89DF3854C4C9C9D8 /* LiveAvatar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A74C0FEF6DF838D7D47C153E /* LiveAvatar.swift */; };
 		80842A3FB1D27121D292A5C9 /* Screens.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE144CCFE495A004BF074600 /* Screens.swift */; };
 		8C035AD0BCF330FD10D45EFC /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = BB238408FCA87666D8C978C7 /* Assets.xcassets */; };
+		C8770C97746907A4D67A3D1E /* CameraDebugTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5AB40086111411266B42257 /* CameraDebugTests.swift */; };
 		CA97905CB0C301F348A530AA /* SystemCalls.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB8CDDB52B0AFEFC6F52DB89 /* SystemCalls.swift */; };
 		D20B56B842FD56D566192915 /* CallComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EFC03CFE1263E702B386BC0 /* CallComponents.swift */; };
 		D5CE7750267F839840D11599 /* LiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = C7B23293F9AA5DE763A0C526 /* LiveKit */; };
+		F723D07AD90A8D20029C851A /* CameraDebugView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5921FDB2871FCD30E851021 /* CameraDebugView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -33,6 +36,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		0A2B0A2488F5937F9472F648 /* CameraDebug.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraDebug.swift; sourceTree = "<group>"; };
 		0C5578A0571874269900DC5F /* CallWalkthroughTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallWalkthroughTests.swift; sourceTree = "<group>"; };
 		18D14F330415274907728F54 /* InCallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InCallView.swift; sourceTree = "<group>"; };
 		1E81CB9AD2785BCBE6BD2427 /* ParentApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ParentApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -44,6 +48,8 @@
 		A74C0FEF6DF838D7D47C153E /* LiveAvatar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveAvatar.swift; sourceTree = "<group>"; };
 		B356EBF1BACD8BF09068D288 /* ParentCallKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ParentCallKit; path = ../ParentCallKit; sourceTree = SOURCE_ROOT; };
 		BB238408FCA87666D8C978C7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		C5921FDB2871FCD30E851021 /* CameraDebugView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraDebugView.swift; sourceTree = "<group>"; };
+		C5AB40086111411266B42257 /* CameraDebugTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraDebugTests.swift; sourceTree = "<group>"; };
 		CE144CCFE495A004BF074600 /* Screens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Screens.swift; sourceTree = "<group>"; };
 		EB8CDDB52B0AFEFC6F52DB89 /* SystemCalls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCalls.swift; sourceTree = "<group>"; };
 		F6F6637610645BBD2E786519 /* App.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = App.xcconfig; sourceTree = "<group>"; };
@@ -86,6 +92,7 @@
 			isa = PBXGroup;
 			children = (
 				0C5578A0571874269900DC5F /* CallWalkthroughTests.swift */,
+				C5AB40086111411266B42257 /* CameraDebugTests.swift */,
 			);
 			path = ParentAppUITests;
 			sourceTree = "<group>";
@@ -96,6 +103,8 @@
 				58C60194AAA8D180C426459F /* AppState.swift */,
 				BB238408FCA87666D8C978C7 /* Assets.xcassets */,
 				8EFC03CFE1263E702B386BC0 /* CallComponents.swift */,
+				0A2B0A2488F5937F9472F648 /* CameraDebug.swift */,
+				C5921FDB2871FCD30E851021 /* CameraDebugView.swift */,
 				18D14F330415274907728F54 /* InCallView.swift */,
 				A74C0FEF6DF838D7D47C153E /* LiveAvatar.swift */,
 				851499AFEB7F3993CC924E90 /* ParentApp.swift */,
@@ -248,6 +257,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				71584DBEA61F9FA073E677EF /* CallWalkthroughTests.swift in Sources */,
+				C8770C97746907A4D67A3D1E /* CameraDebugTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -257,6 +267,8 @@
 			files = (
 				30F1B5DBE7B64217FB9F1751 /* AppState.swift in Sources */,
 				D20B56B842FD56D566192915 /* CallComponents.swift in Sources */,
+				0CBA70E6FC2D56BED76FFBA3 /* CameraDebug.swift in Sources */,
+				F723D07AD90A8D20029C851A /* CameraDebugView.swift in Sources */,
 				3BBE10E25A3849AFF646B8A9 /* InCallView.swift in Sources */,
 				79E7445B89DF3854C4C9C9D8 /* LiveAvatar.swift in Sources */,
 				1F031DC315903AAF7F33EF69 /* ParentApp.swift in Sources */,
