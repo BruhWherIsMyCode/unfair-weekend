@@ -18,7 +18,7 @@ from .provider_io import PendingAssets, ProviderError, ProviderHTTPError, privat
 from .speech import check_pcm
 
 MAX_VIDEO_BYTES = 30 * 1024 * 1024
-DEFAULT_FACE_ID = "bf13113a-355a-4d97-8b90-4edccd1da7b2"
+DEFAULT_FACE_ID = "fa57b877-4b8a-4650-bc43-4d52ae795cdc"
 MAX_DOWNLOAD_ATTEMPTS = 20
 DOWNLOAD_WAIT_TIMEOUT_S = 300.0
 MAX_ETA_WAIT_S = 60.0
