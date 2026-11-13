@@ -297,7 +297,9 @@ class ClientLink:
 
     async def publish(self, summary: dict[str, Any], phase: str, message_id: str | None = None) -> dict[str, Any]:
         kind = summary.get("status", "incomplete")
-        message = self.delivery.publish(self.call_id, self.person, kind, phase, summary.get("signs"))
+        message = self.delivery.publish(
+            self.call_id, self.person, kind, phase, summary.get("signs"), summary.get("concern")
+        )
         return {"message_id": message.message_id, "delivery": "stored"}
 
     async def send_progress(self, event: dict[str, Any]) -> None:

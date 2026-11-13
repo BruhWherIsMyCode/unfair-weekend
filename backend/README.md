@@ -28,6 +28,27 @@ uv build --out-dir .cache/python-dist
 
 Tests exercise a complete HTTP/SSE call with mocked voice, transcripts and video transport, plus lifecycle, cache, cancellation, authentication and provider-error paths. Real provider generation and iPhone audio/video playback are untested in this worktree; provider credentials are not configured. No provider credits are used by the tests. The separate iOS family stage shell remains mocked.
 
+## Running with Agent 3's analysis
+
+`CALL_RUNNER=analysis` (or `auto`, which picks it when the package imports) runs `analysis.backend_entry.run_backend_call(link)` for every answered call: Agent 3's `CallSession` over this backend's `ClientLink`, the real smile and arms tasks on the JPEG frames the phone streams, her usual from a baseline store, and the family message from the result. The backend finds `analysis/` itself when it is in the repo root (the parent of `backend/`); no `PYTHONPATH` is needed. Install its requirements into the backend environment and fetch the model files once, from the repo root:
+
+```bash
+uv pip install -r analysis/requirements.txt   # or: pip install -r analysis/requirements.txt, inside the backend's venv
+python -m analysis.get_models
+```
+
+Optional environment variables (all can stay empty; see `.env.example`). They are read for each call and checked before it starts; an invalid value ends the call with an `incomplete` family message.
+
+- `CALL_RUNNER`: `auto`, `analysis`, `fake` (stand-in tasks, never a reading), `scripted`.
+- `CALL_DRIVER`: `fixed` (default; the fixed order, no model) or `claude`. Empty follows `UW_CLAUDE=on`.
+- `UW_CLAUDE_BACKEND`: `api` (default, needs `ANTHROPIC_API_KEY`) or `subscription` (the `claude` CLI login; the API key variable is removed from the process first).
+- `UW_MIRRORED`: `on` when the phone frames are mirrored (default `off`).
+- `UW_BASELINE_PERSON`: the key her usual is stored under (default: the person id). `UW_DATA_DIR`: the folder of the JSON baseline files (default `analysis/data`). `UW_BASELINE_NEEDED`: normal calls before her usual is ready (default 5; use 1-2 to try it out).
+- `UW_SAFETY_FLOOR`: only `off` turns off the mid-call message for two same-side readings outside her usual. Experiments only.
+- `UW_CALL_LOG`: `off` hides the live log (one plain line per step, prefixed `[call <id>]`). `UW_RUNS_DIR`: where the call record JSON is written (default `analysis/runs/calls`).
+
+Required checks on the phone path are smile and arms; the sentence is not measured on the server yet. Four script lines changed text with the one-hand phone script (`setup_phone`, `task_arms`, `repeat_arms`, new `swap_hands`; `data/script.en.json` is a copy of `contract/script.en.json`), so run `python -m checkin_backend.prepare` again to speak them; unchanged lines are reused from the cache. This integration was written by Agent 3 for Agent 2's review. Never run: real phone frames, mediapipe on the server, Claude, real providers.
+
 ## Shared database
 
 [Open the interactive database guide](guides/database-guide.html) in a browser
