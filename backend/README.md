@@ -1,6 +1,50 @@
-# Simli + ElevenLabs avatar test
+# Backend
 
-The next-step design is in [ARCHITECTURE_PLAN.md](ARCHITECTURE_PLAN.md): one Python backend, periodic observations during the active task, interruptions/recovery and a fixed example script. [Contract draft and checks](proposals/README.md). This is the agreed architecture direction; the runnable application below is still the Node greeting experiment and has not been ported.
+The [architecture decision](ARCHITECTURE_PLAN.md) places analyzers on the real parent client and keeps task policy, window timers, aggregation, baseline and final results in one Python backend. The [shared database guide](DATABASE_SCHEMA.md) and [initial SQLite migration](storage/migrations/0001_initial.sql) define persistence for the modules that will implement this flow. The old [OpenAPI 0.2 draft](proposals/README.md) is historical; its task sample-upload transport is superseded.
+
+<a id="python-foundation"></a>
+
+## Python voice and video call service
+
+The parent call service from PR #9 is integrated here with the human's permission. It now supplies English ElevenLabs speech, transcribes uploaded answers, and offers locally prepared Simli MP4s per active speech command. [Voice/video setup and the iOS playback handoff](VOICE_VIDEO.md) describe configuration, preparation, fallback and the provisional `video_path` extension.
+
+```bash
+cd backend
+uv sync --locked --extra dev
+cp .env.example .env  # fill in the ignored local file
+uv run --locked --env-file .env python -m checkin_backend.prepare --video --only-line greet
+uv run --locked --env-file .env python -m checkin_backend.prepare --video
+uv run --locked --env-file .env uvicorn checkin_backend.app:create_app --factory --host 0.0.0.0 --port 8000
+```
+
+`DEMO_KEY` is required. Provider keys enable real speech/transcription and explicit video generation. Prepared assets are cached; no video generation runs during calls. The existing parent app's PCM playback works with the speech route; **displaying the new video requires its owner's iOS change**. Without a key or cached audio the demo sends silence and reports `voiced: false`.
+
+Implemented: registration/SSE, call lifecycle, playback acknowledgments, answer upload/STT, voice/cache and prepared video delivery, in-memory family feed, and a scripted fallback. Agent 3's session driver is selected when available. Without it, measuring is absent and the call finishes `incomplete`. The reused raw-task-media routes are compatibility/demo code from PR #9, not the revised observation protocol requested in [issue #10](https://github.com/BruhWherIsMyCode/unfair-weekend/issues/10). Runtime database persistence, SMS, deployed HTTPS and background ringing remain unimplemented.
+
+```bash
+uv run --locked --extra dev pytest -q
+uv build --out-dir .cache/python-dist
+```
+
+Tests exercise a complete HTTP/SSE call with mocked voice, transcripts and video transport, plus lifecycle, cache, cancellation, authentication and provider-error paths. Real provider generation and iPhone audio/video playback are untested in this worktree; provider credentials are not configured. No provider credits are used by the tests. The separate iOS family stage shell remains mocked.
+
+## Shared database
+
+[Open the interactive database guide](guides/database-guide.html) in a browser
+for Russian explanations of all tables, their relationships, three call
+scenarios and observation history. It is one self-contained HTML file; the
+teaching model does not write to an actual database.
+
+From `backend/`, using Python 3 and SQLite 3.38+:
+
+```bash
+python3 -m storage --database .cache/checkin.sqlite3
+python3 -m unittest discover -s storage/tests -v
+```
+
+Built here: migration tooling, schema constraints and synthetic storage tests. Runtime repositories, observation routes, CallSession, client analyzers, timers and notifications are not implemented by this change. The call service above has in-memory runtime state; the migration does not yet persist its records. [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) gives the transactions each writer must implement.
+
+## Simli + ElevenLabs greeting reference
 
 A local browser prototype: type a short line, generate its voice with ElevenLabs, and send that audio to a live Simli avatar. The browser plays the synchronized video and audio returned by Simli. It does not request camera or microphone access.
 
@@ -35,7 +79,7 @@ npm test
 
 Tests use mocked provider responses and never spend API credits. They cover the audio format, persistent cache, duplicate requests, session caps, input validation, local request restrictions, and error redaction.
 
-## Status and scope
+## Status of the Node reference
 
 - Built: demo page, backend token creation, ElevenLabs speech generation, audio cache, timing display, and session cleanup.
 - Verified: build, seven mocked-provider tests, Chromium setup state, and live ElevenLabs/Simli greeting playback and automatic session cleanup. A replay reused the speech cache. Timing observations are recorded in `DECISIONS.md`.

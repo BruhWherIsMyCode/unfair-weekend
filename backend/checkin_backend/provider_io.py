@@ -1,0 +1,79 @@
+"""Bounded provider requests and private, atomic generated-asset writes."""
+
+import asyncio
+import os
+import tempfile
+from collections.abc import Awaitable, Callable
+from pathlib import Path
+from typing import Any, TypeVar
+
+import httpx
+
+T = TypeVar("T")
+
+
+class ProviderError(RuntimeError):
+    """A message that contains no provider response body or credentials."""
+
+
+async def provider_bytes(
+    client: httpx.AsyncClient,
+    method: str,
+    url: str,
+    *,
+    provider: str,
+    limit: int,
+    timeout_s: float,
+    **kwargs: Any,
+) -> bytes:
+    try:
+        async with asyncio.timeout(timeout_s):
+            async with client.stream(method, url, **kwargs) as response:
+                if response.status_code != 200:
+                    raise ProviderError(f"{provider} returned HTTP {response.status_code}")
+                chunks = bytearray()
+                async for chunk in response.aiter_bytes():
+                    if len(chunks) + len(chunk) > limit:
+                        raise ProviderError(f"{provider} response exceeds the size limit")
+                    chunks.extend(chunk)
+                return bytes(chunks)
+    except (httpx.HTTPError, TimeoutError):
+        raise ProviderError(f"{provider} could not be reached within the time limit") from None
+
+
+def private_write(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=path.name, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+class PendingAssets:
+    """Coalesce generation; cancelling a consumer does not cancel another's asset."""
+
+    def __init__(self) -> None:
+        self.tasks: dict[str, asyncio.Task[Any]] = {}
+
+    async def get(self, key: str, generate: Callable[[], Awaitable[T]]) -> T:
+        if key not in self.tasks:
+            task = asyncio.create_task(generate())
+            self.tasks[key] = task
+
+            def finished(done: asyncio.Task[Any]) -> None:
+                if self.tasks.get(key) is done:
+                    self.tasks.pop(key)
+                if not done.cancelled():
+                    done.exception()
+
+            task.add_done_callback(finished)
+        return await asyncio.shield(self.tasks[key])
+
+    async def aclose(self) -> None:
+        tasks = list(self.tasks.values())
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
