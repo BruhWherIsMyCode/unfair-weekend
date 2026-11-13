@@ -1,8 +1,11 @@
 openapi: 3.1.0
 info:
-  title: 'One Python backend: task input, observations and interruptions (review draft)'
+  title: 'Historical 0.2: server task input, observations and interruptions'
   version: 0.2.0-draft
-  description: Not implemented. Agent 3 owns canonical publication into contract/. One Python backend; Agent
+  description: Historical transport, superseded by backend/ARCHITECTURE_PLAN.md on 13 Nov 2026. Do not implement
+    these task sample-upload routes. The new decision uses client analyzers and server policy/timers/aggregation;
+    Agent 3 must publish revised client observations and stop/drain contracts. Shapes below remain frozen historical
+    fixtures, not the new protocol. Not implemented. Agent 3 owns canonical publication into contract/. One Python backend; Agent
     2 owns call/media/speech/delivery modules, Agent 3 owns CallSession/tasks/rules. Only client/backend boundaries
     use HTTP/SSE. TaskObservation, TaskInterrupt, TaskResult and SessionResult are shared payload contracts
     for in-process module calls, not RPC endpoints. This draft supersedes 0.1 internal service routes and completed-task

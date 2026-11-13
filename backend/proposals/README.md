@@ -1,4 +1,6 @@
-# One Python backend: contract draft 0.2
+# Historical contract draft 0.2
+
+**Superseded transport, 13 Nov 2026:** the [new architecture decision](../ARCHITECTURE_PLAN.md) runs analyzers on the real parent client. Structured observations go to the server; the server owns policy, clocks, aggregation and final `TaskResult`. Do not implement this draft's JPEG/PCM upload routes or assume its local observation interface is the new client ingress. Agent 3 must publish a revised start/observation/stop/drain contract, including sufficient feature data for server aggregation. This folder retains 0.2 unchanged in shape for historical fixture checks; passing them does not validate the new protocol. Storage is specified separately in [DATABASE_SCHEMA.md](../DATABASE_SCHEMA.md).
 
 Status: **review draft, not implemented**. Agent 3 owns eventual canonical publication in `contract/`. Drafts stay under `backend/` to respect Agent 2's folder permissions. The [architecture plan](../ARCHITECTURE_PLAN.md) explains the complete call, periodic observations, interruption rules and fixed example script.
 

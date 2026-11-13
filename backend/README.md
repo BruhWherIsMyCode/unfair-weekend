@@ -1,6 +1,6 @@
 # Backend
 
-The [architecture plan](ARCHITECTURE_PLAN.md) describes one Python backend with active-task observations, interruptions/recovery and a fixed script. The Python foundation below implements health and local connection state. The Node greeting experiment remains the provider reference to port. [Contract draft and checks](proposals/README.md).
+The [architecture decision](ARCHITECTURE_PLAN.md) places analyzers on the real parent client and keeps task policy, window timers, aggregation, baseline and final results in one Python backend. The [shared database guide](DATABASE_SCHEMA.md) and [initial SQLite migration](storage/migrations/0001_initial.sql) define persistence for the modules that will implement this flow. The old [OpenAPI 0.2 draft](proposals/README.md) is historical; its task sample-upload transport is superseded.
 
 ## Python foundation
 
@@ -32,7 +32,23 @@ uv build --out-dir .cache/python-dist
 
 The tests cover app startup/shutdown, authentication, deadline/answer races, duplicate transitions, person isolation and cancelled waiters. The app uses FastAPI's [lifespan and TestClient context](https://fastapi.tiangolo.com/advanced/testing-events/) for resource cleanup checks. Tests do not contact providers or use people recordings.
 
-Built and locally tested: Python entrypoint, protected `/v1/health`, configuration and local connection lifecycle. Pending: registration/SSE and call HTTP routes, playback acknowledgments, Python provider adapters, media ingress, Agent 3 integration, persistence and family delivery. Baseline network schemas are awaiting canonical publication in [issue #6](https://github.com/BruhWherIsMyCode/unfair-weekend/issues/6); local records are not a replacement wire contract. The iOS stage shell remains mocked. This foundation does not yet demonstrate a joined call.
+Built and locally tested: Python entrypoint, protected `/v1/health`, configuration and local connection lifecycle. Pending: registration/SSE and call HTTP routes, playback acknowledgments, Python provider adapters, observation ingress, Agent 3 integration, persistence wiring and family delivery. Revised client observation/start/stop schemas await canonical publication in [issue #10](https://github.com/BruhWherIsMyCode/unfair-weekend/issues/10); local records are not a replacement wire contract. The iOS stage shell remains mocked. This foundation does not yet demonstrate a joined call.
+
+## Shared database
+
+[Open the interactive database guide](guides/database-guide.html) in a browser
+for Russian explanations of all tables, their relationships, three call
+scenarios and observation history. It is one self-contained HTML file; the
+teaching model does not write to an actual database.
+
+From `backend/`, using Python 3 and SQLite 3.38+:
+
+```bash
+python3 -m storage --database .cache/checkin.sqlite3
+python3 -m unittest discover -s storage/tests -v
+```
+
+Built here: migration tooling, schema constraints and synthetic storage tests. Runtime repositories, observation routes, CallSession, client analyzers, timers and notifications are not implemented by this change. The Python foundation above provides health/configuration and an in-memory CallService; the migration does not yet persist its records. [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) gives the transactions each writer must implement.
 
 ## Call service (parent client protocol)
 
@@ -94,7 +110,7 @@ npm test
 
 Tests use mocked provider responses and never spend API credits. They cover the audio format, persistent cache, duplicate requests, session caps, input validation, local request restrictions, and error redaction.
 
-### Greeting reference status and scope
+## Status and scope
 
 - Built: demo page, backend token creation, ElevenLabs speech generation, audio cache, timing display, and session cleanup.
 - Verified: build, seven mocked-provider tests, Chromium setup state, and live ElevenLabs/Simli greeting playback and automatic session cleanup. A replay reused the speech cache. Timing observations are recorded in `DECISIONS.md`.
