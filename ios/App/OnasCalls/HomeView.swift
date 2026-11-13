@@ -111,10 +111,19 @@ private struct AlertCard: View {
                     .font(.system(size: 30, weight: .bold))
                     .tracking(-0.7)
                 HStack(spacing: 14) {
-                    ClipThumbnail()
+                    ClipThumbnail(live: store.liveMessage != nil, first: store.clip?.frames.first)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Same on both tries").font(.system(size: 15, weight: .semibold))
-                        Text("10 second clip").font(.system(size: 13)).foregroundStyle(Palette.amberTime)
+                        Group {
+                            if store.liveMessage == nil {
+                                Text("10 second clip")
+                            } else if let clip = store.clip {
+                                Text("\(clip.seconds) second clip")
+                            } else {
+                                Text("Open the report")
+                            }
+                        }
+                        .font(.system(size: 13)).foregroundStyle(Palette.amberTime)
                     }
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.right")
@@ -227,12 +236,15 @@ private struct PersonRow: View {
 
 /// 112x64 clip thumbnail with a play button.
 private struct ClipThumbnail: View {
+    /// A real alert shows its own first frame (or stripes), never the staged clip.
+    var live = false
+    var first: UIImage?
     @State private var frame: UIImage?
 
     var body: some View {
         ZStack {
-            if let frame {
-                Image(uiImage: frame).resizable().scaledToFill()
+            if let image = live ? first : frame {
+                Image(uiImage: image).resizable().scaledToFill()
             } else {
                 Stripes(colors: Palette.thumbStripes, band: 6)
             }

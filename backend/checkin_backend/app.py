@@ -207,6 +207,8 @@ class CallDesk:
             if link.session is not None and not link.ended:
                 link.session.hang_up()
             link.close()
+            # The alert clip, if any, was copied to the delivery shelf; nothing else keeps her frames.
+            link.release_frames()
         if ended.state == CallState.NO_ANSWER and person is not None:
             self.delivery.publish(call.call_id, person, "no_answer", "final")
 
@@ -468,6 +470,13 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
     async def finish(call_id: str, attempt_id: str, body: FinishIn, request: Request) -> Response:
         desk_of(request).link(call_id).on_finish(attempt_id, body.last_sequence, body.captured_until_ms)
         return Response(status_code=202)
+
+    @app.get("/v1/clips/{clip_id}", dependencies=auth)
+    async def alert_clip(clip_id: str, request: Request) -> JSONResponse:
+        clip = desk_of(request).delivery.clips.get(clip_id)
+        if clip is None:
+            raise ApiError(404, "not_found", "This clip does not exist or has expired.")
+        return JSONResponse(clip.as_json(), headers={"Cache-Control": "no-store"})
 
     @app.get("/v1/families/{family_id}/messages", dependencies=auth)
     async def messages(family_id: str, request: Request) -> list[dict[str, Any]]:

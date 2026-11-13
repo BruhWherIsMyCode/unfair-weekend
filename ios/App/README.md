@@ -1,6 +1,18 @@
 # Ona's calls: stage demo shell (iOS)
 
-A shell for one scripted stage scene on the operator iPhone. Everything is local and hard-coded: no backend, no camera, no measuring, no networking. The task is `docs/tasks/agent1.md`, the design is `docs/design/export/`.
+A shell for one scripted stage scene on the operator iPhone, which can also receive real alerts from the check-in backend. The task is `docs/tasks/agent1.md`, the design is `docs/design/export/`.
+
+## Real alerts from the check-in call
+
+In the demo panel, under **Check-in backend**, set the backend address (`http://<mac-ip>:8000`), the demo key and the family (`f_demo`), then **Connect**. The app registers as a family device and listens for `message.new`:
+
+- **Change from her usual, or a concern:** a time-sensitive notification with the alert sound, the amber card, and the alert screen with the backend's own text and the clip. The clip is her camera frames from both tries at the task that showed the change (`GET /v1/clips/{id}`). It is kept only in the backend's memory and expires after 30 min. A real alert never shows the staged `clip.mp4`.
+- **Could not finish, or no answer:** a plain notification with the backend's text.
+- **As usual, or still learning:** nothing.
+
+Demo workaround, not for the App Store: after connecting, a silent audio loop (the `audio` background mode) keeps the app running in the background, so alerts still arrive while the phone is locked. There is no push. If iOS ends the app, open it again. The names on screen are still the stage scene's (Fedya, he). The report text uses the backend's person, so for the stage set `DEMO_PERSON_NAME=Fedya` and `DEMO_PERSON_PRONOUN=he` in `backend/.env`.
+
+The staged scene (Arm, Show alert now, Reset) still works with or without a backend.
 
 ## Build
 
