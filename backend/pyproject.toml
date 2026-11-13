@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Python call, media and delivery modules for the check-in application"
 requires-python = ">=3.12"
 dependencies = [
+    "claude-agent-sdk>=0.2.181",
     "fastapi>=0.162.5,<1",
     "httpx>=0.28.1,<1",
     "uvicorn>=0.54.0,<1",
