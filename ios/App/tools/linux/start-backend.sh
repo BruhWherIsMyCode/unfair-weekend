@@ -6,8 +6,22 @@
 # main is fetched into a folder next to this repo (<repo>-call-service) and run from there, up to date on
 # every start. Your own checkout and branch are not touched. --branch runs another branch instead.
 #
+# It also installs the measuring packages (mediapipe, opencv) and the face/hand model files into the backend's
+# environment on every start (fast when cached), runs a self-check, and starts the backend with Claude talking
+# to her. If measuring is not ready, the call falls back to the scripted one (no measuring) and says why.
+# The backend is started with the environment's own Python (not "uv run"), so nothing syncs the packages away.
+#
 # Usage: ./start-backend.sh [--port 8000] [--branch main] [--runner auto|analysis|fake|scripted]
-#                           [--reset-keys]
+#                           [--claude off|subscription|api] [--mirrored] [--baseline-needed N]
+#                           [--label normal|acted] [--reset-keys]
+#   --claude          who runs the call. subscription (default): your logged-in `claude` command, installs
+#                     claude-agent-sdk, no API key used. api: needs ANTHROPIC_API_KEY already set in the
+#                     environment (never stored, asked or printed). off: the fixed-order call, no Claude.
+#                     If Claude cannot be used, a yellow warning says why and the call runs without Claude.
+#   --mirrored        the phone's front camera frames are mirrored (UW_MIRRORED=on).
+#   --baseline-needed how many normal calls make her usual ready (UW_BASELINE_NEEDED, default 5): use 1 or 2
+#                     to try things out.
+#   --label           normal: this run's calls may enter her usual; acted: they never do (DEMO_SESSION_LABEL).
 # Keys: DEMO_KEY is made once. ELEVENLABS_API_KEY (voice, transcription) and SIMLI_API_KEY (avatar clips) are asked
 #       for on the first run (Enter skips) and stored in ~/.local/share/checkin-backend/ (mode 600), never in the repo.
 #       A key set in the environment wins; --reset-keys asks again.
@@ -16,17 +30,31 @@ set -euo pipefail
 BRANCH="main"
 PORT=8000
 RUNNER="auto"
+CLAUDE="subscription"
+MIRRORED=0
+BASELINE_NEEDED=""
+LABEL=""
 RESET_KEYS=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --port) PORT="$2"; shift 2 ;;
         --branch) BRANCH="$2"; shift 2 ;;
         --runner) RUNNER="$2"; shift 2 ;;
+        --claude) CLAUDE="$2"; shift 2 ;;
+        --mirrored) MIRRORED=1; shift ;;
+        --baseline-needed) BASELINE_NEEDED="$2"; shift 2 ;;
+        --label) LABEL="$2"; shift 2 ;;
         --reset-keys) RESET_KEYS=1; shift ;;
-        -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,/^set -euo/{/^set -euo/!p}' "$0"; exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
     esac
 done
+case "$CLAUDE" in off|subscription|api) ;; *) echo "--claude must be off, subscription or api" >&2; exit 2 ;; esac
+case "$LABEL" in ""|normal|acted) ;; *) echo "--label must be normal or acted" >&2; exit 2 ;; esac
+case "$BASELINE_NEEDED" in
+    "") ;;
+    *[!0-9]*|0|00*) echo "--baseline-needed must be a whole number of 1 or more" >&2; exit 2 ;;
+esac
 
 step() { printf '\n\033[36m== %s\033[0m\n' "$1"; }
 warn() { printf '\033[33m%s\033[0m\n' "$1"; }
@@ -68,6 +96,54 @@ fi
 step "Installing backend dependencies (the first run also downloads Python 3.12)"
 cd "$BACKEND"
 uv sync --locked --extra dev || fail "uv sync failed. See the messages above."
+VENV_PY="$BACKEND/.venv/bin/python"
+[ -x "$VENV_PY" ] || fail "The backend environment has no Python at $VENV_PY."
+export PYTHONPATH="$WORK${PYTHONPATH:+:$PYTHONPATH}"   # so `analysis` (next to backend/) can be imported
+
+# ---------------------------------------------------------------- 2b. measuring: packages, models, self-check
+step "Measuring (face and hand): packages, model files, self-check"
+MEASURING_PROBLEM=""
+if [ ! -f "$WORK/analysis/requirements.txt" ]; then
+    MEASURING_PROBLEM="$BRANCH has no analysis/requirements.txt (the measuring code is not in that branch)."
+elif ! uv pip install --python "$VENV_PY" -r "$WORK/analysis/requirements.txt"; then
+    MEASURING_PROBLEM="Installing the measuring packages (mediapipe, opencv) failed."
+elif ! (cd "$WORK" && "$VENV_PY" -m analysis.get_models); then
+    MEASURING_PROBLEM="Downloading the face/hand model files failed."
+elif ! (cd "$WORK" && "$VENV_PY" -m analysis.selfcheck); then
+    MEASURING_PROBLEM="The measuring self-check found a problem (see above)."
+fi
+if [ -n "$MEASURING_PROBLEM" ]; then
+    warn "$MEASURING_PROBLEM"
+    case "$RUNNER" in
+        auto) RUNNER="scripted"; warn "Continuing with the scripted call: it plays the lines but measures nothing." ;;
+        analysis) warn "You asked for --runner analysis: the backend will refuse to start and print the problems." ;;
+    esac
+fi
+
+# ---------------------------------------------------------------- 2c. Claude
+step "Claude ($CLAUDE)"
+case "$CLAUDE" in
+    subscription)
+        if ! command -v claude >/dev/null; then
+            warn "The 'claude' command was not found, so the subscription cannot be used. Calls run without Claude."
+            warn "(Install Claude Code and log in with it, or use --claude api with ANTHROPIC_API_KEY set.)"
+            CLAUDE="off"
+        elif ! uv pip install --python "$VENV_PY" claude-agent-sdk; then
+            warn "Installing claude-agent-sdk failed. Calls run without Claude."
+            CLAUDE="off"
+        fi
+        ;;
+    api)
+        if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            warn "ANTHROPIC_API_KEY is not set in the environment, so the API cannot be used. Calls run without Claude."
+            CLAUDE="off"
+        elif ! uv pip install --python "$VENV_PY" anthropic; then
+            warn "Installing the anthropic package failed. Calls run without Claude."
+            CLAUDE="off"
+        fi
+        ;;
+    off) echo "Claude is off: the call follows the fixed order." ;;
+esac
 
 # ---------------------------------------------------------------- 3. keys
 KEY_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/checkin-backend"
@@ -137,10 +213,10 @@ if [ -n "${ELEVENLABS_API_KEY:-}" ]; then
     echo "Prepared lines are reused; only new lines are generated (the first run takes about 2 minutes)."
     if [ -n "${SIMLI_API_KEY:-}" ]; then
         ELEVENLABS_API_KEY="$ELEVENLABS_API_KEY" SIMLI_API_KEY="$SIMLI_API_KEY" \
-            uv run --locked python -m checkin_backend.prepare --video \
+            "$VENV_PY" -m checkin_backend.prepare --video \
             || warn "Preparation stopped (see above). The backend still starts; lines without a clip play as voice."
     else
-        ELEVENLABS_API_KEY="$ELEVENLABS_API_KEY" uv run --locked python -m checkin_backend.prepare \
+        ELEVENLABS_API_KEY="$ELEVENLABS_API_KEY" "$VENV_PY" -m checkin_backend.prepare \
             || warn "Preparation stopped (see above). The backend still starts."
         echo "No Simli key: no avatar clips, lines play as voice."
     fi
@@ -180,9 +256,34 @@ if [ -z "${ELEVENLABS_API_KEY:-}" ]; then
 fi
 
 # ---------------------------------------------------------------- 6. run
+step "Settings of this run"
+if [ "$CLAUDE" = "off" ]; then echo "  Claude:    off (fixed-order call)"; else echo "  Claude:    $CLAUDE"; fi
+if [ -n "$MEASURING_PROBLEM" ]; then echo "  Measuring: NOT ready ($RUNNER call)"; else echo "  Measuring: ready"; fi
+echo "  Runner:    $RUNNER"
+if [ "$MIRRORED" = 1 ]; then echo "  Camera:    mirrored"; else echo "  Camera:    not mirrored"; fi
+if [ -n "$BASELINE_NEEDED" ]; then
+    echo "  Baseline:  needs $BASELINE_NEEDED normal calls"
+else
+    echo "  Baseline:  needs 5 normal calls (the default)"
+fi
+echo "  Label:     ${LABEL:-live}"
+
 step "Running the backend on port $PORT (Ctrl+C to stop)"
 export DEMO_KEY
 export CALL_RUNNER="$RUNNER"
+if [ "$CLAUDE" = "off" ]; then
+    export CALL_DRIVER="fixed"
+    unset UW_CLAUDE_BACKEND
+else
+    export CALL_DRIVER="claude"
+    export UW_CLAUDE_BACKEND="$CLAUDE"
+fi
+# The API key is only passed on for --claude api, from the environment it was already in (never stored or printed).
+if [ "$CLAUDE" = "api" ]; then export ANTHROPIC_API_KEY; else unset ANTHROPIC_API_KEY; fi
+if [ "$MIRRORED" = 1 ]; then export UW_MIRRORED="on"; else unset UW_MIRRORED; fi
+if [ -n "$BASELINE_NEEDED" ]; then export UW_BASELINE_NEEDED="$BASELINE_NEEDED"; else unset UW_BASELINE_NEEDED; fi
+if [ -n "$LABEL" ]; then export DEMO_SESSION_LABEL="$LABEL"; else unset DEMO_SESSION_LABEL; fi
 if [ -n "${ELEVENLABS_API_KEY:-}" ]; then export ELEVENLABS_API_KEY; else unset ELEVENLABS_API_KEY; fi
 if [ -n "${SIMLI_API_KEY:-}" ]; then export SIMLI_API_KEY; else unset SIMLI_API_KEY; fi
-exec uv run --locked uvicorn checkin_backend.app:create_app --factory --host 0.0.0.0 --port "$PORT"
+cd "$BACKEND"
+exec "$VENV_PY" -u -m uvicorn checkin_backend.app:create_app --factory --host 0.0.0.0 --port "$PORT"
