@@ -127,6 +127,44 @@ public enum CallPhase: Sendable, Equatable {
     case ended(reason: String?)
 }
 
+/// Fine-grained client events for screens that animate (subtitles, timers). See CallScreenReducer.
+public enum CallEvent: Sendable, Equatable {
+    case ringing(callId: String, title: String)
+    case connected
+    case speaking(lineId: String, text: String, durationMs: Int, at: Date)
+    case listening(questionId: String)
+    case captureCommanded(task: String, durationMs: Int)
+    case captureStarted(durationMs: Int, at: Date)
+    case captureFinished
+    case hint(String?)
+    case ended(reason: String?)
+}
+
+extension CallScreenReducer {
+    public mutating func apply(_ event: CallEvent) {
+        switch event {
+        case .ringing(let callId, let title):
+            ringing(callId: callId, title: title)
+        case .connected:
+            connected()
+        case .speaking(let lineId, let text, let durationMs, let at):
+            say(lineId: lineId, text: text, durationMs: durationMs, at: at)
+        case .listening(let questionId):
+            listening(questionId: questionId)
+        case .captureCommanded(let task, let durationMs):
+            captureCommanded(task: task, durationMs: durationMs)
+        case .captureStarted(let durationMs, let at):
+            captureStarted(durationMs: durationMs, at: at)
+        case .captureFinished:
+            captureFinished()
+        case .hint(let hint):
+            self.hint(hint)
+        case .ended(let reason):
+            ended(reason: reason)
+        }
+    }
+}
+
 enum JSON {
     static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()

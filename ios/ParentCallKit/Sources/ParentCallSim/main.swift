@@ -14,6 +14,8 @@ let scale = args.count > 3 ? Double(args[3]) ?? 1.0 : 1.0
 
 final class Box: @unchecked Sendable {
     var client: CallClient?
+    var reducer = CallScreenReducer()
+    let lock = NSLock()
     let done = DispatchSemaphore(value: 0)
 }
 
@@ -33,6 +35,13 @@ let client = CallClient(api: api, deviceId: "dev_sim_parent", personId: args[2],
     default:
         break
     }
+} onEvent: { event in
+    box.lock.lock()
+    box.reducer.apply(event)
+    let screen = box.reducer.screen
+    box.lock.unlock()
+    print("SCREEN stage=\(screen.stage) large=\(screen.selfViewLarge) mode=\(screen.mode) card=\(String(describing: screen.card).prefix(140))")
+    fflush(stdout)
 }
 box.client = client
 

@@ -10,6 +10,7 @@ public actor CallClient {
     public let personId: String
     private let devices: ParentDevices
     private let onPhase: @Sendable (CallPhase) -> Void
+    private let onEvent: @Sendable (CallEvent) -> Void
 
     private var connection: SSEConnection?
     private var listenTask: Task<Void, Never>?
@@ -24,12 +25,14 @@ public actor CallClient {
     private var stopped = false
 
     public init(api: CallAPI, deviceId: String, personId: String, devices: ParentDevices,
-                onPhase: @escaping @Sendable (CallPhase) -> Void) {
+                onPhase: @escaping @Sendable (CallPhase) -> Void,
+                onEvent: @escaping @Sendable (CallEvent) -> Void = { _ in }) {
         self.api = api
         self.deviceId = deviceId
         self.personId = personId
         self.devices = devices
         self.onPhase = onPhase
+        self.onEvent = onEvent
     }
 
     // MARK: lifecycle
@@ -82,6 +85,7 @@ public actor CallClient {
         guard let callId else { return }
         onPhase(.connecting)
         _ = try await api.answer(callId: callId)
+        onEvent(.connected)
         await reportResource(.camera, available: resourceState[.camera] ?? true, commandId: nil, problem: nil)
         await reportResource(.microphone, available: resourceState[.microphone] ?? true, commandId: nil, problem: nil)
         try await post(["type": "client.ready", "command_id": nil, "error": nil])
@@ -101,6 +105,7 @@ public actor CallClient {
         await endLocalWork()
         callId = nil
         onPhase(.ended(reason: "hangup"))
+        onEvent(.ended(reason: "hangup"))
     }
 
     /// The app noticed that the camera or microphone came or went (permission change, interruption, track end).
@@ -125,12 +130,14 @@ public actor CallClient {
             seenCommands = []
             cancelled = []
             onPhase(.ringing(callId: event.callId, callerName: event.callerName))
+            onEvent(.ringing(callId: event.callId, title: event.callerName))
         case "call.ended":
             guard let event = try? JSON.decoder.decode(CallEndedEvent.self, from: data) else { return }
             guard event.callId == callId else { return }
             await endLocalWork()
             callId = nil
             onPhase(.ended(reason: event.reason))
+            onEvent(.ended(reason: event.reason))
         case "command.execute":
             guard let event = try? JSON.decoder.decode(CommandExecuteEvent.self, from: data) else { return }
             guard event.callId == callId else { return }
@@ -151,6 +158,7 @@ public actor CallClient {
         case "task.progress":
             guard let event = try? JSON.decoder.decode(TaskProgressEvent.self, from: data) else { return }
             guard event.callId == callId else { return }
+            onEvent(.hint(event.hint))
             if event.phase == "capturing" {
                 onPhase(.task(name: currentTaskName ?? "", secondsLeft: secondsLeft(elapsedMs: event.elapsedMs),
                               hint: event.hint))
@@ -219,6 +227,7 @@ public actor CallClient {
         onPhase(.speaking(caption: say.text))
         let audio = try await api.speech(path: say.audioPath)
         try Task.checkCancellation()
+        onEvent(.speaking(lineId: say.lineId, text: say.text, durationMs: say.durationMs, at: Date()))
         try await devices.player.play(pcm16k: audio, durationMs: say.durationMs)
         try Task.checkCancellation()
         try await post(["type": "playback.completed", "command_id": say.commandId, "error": nil])
@@ -226,6 +235,7 @@ public actor CallClient {
 
     private func performAnswer(_ capture: CaptureCommand) async throws {
         onPhase(.listening(questionId: capture.purpose.questionId ?? ""))
+        onEvent(.listening(questionId: capture.purpose.questionId ?? ""))
         let (audio, type) = try await devices.recorder.record(maxMs: capture.settings.durationMs,
                                                                stopOnSilenceMs: capture.settings.stopOnSilenceMs)
         try Task.checkCancellation()
@@ -243,6 +253,7 @@ public actor CallClient {
         activeAttempt = attempt
         currentTaskDurationMs = settings.durationMs
         onPhase(.task(name: capture.purpose.task ?? "", secondsLeft: settings.durationMs / 1000, hint: nil))
+        onEvent(.captureCommanded(task: capture.purpose.task ?? "", durationMs: settings.durationMs))
         let video = format == "jpeg"
         if video {
             try await devices.camera.start()
@@ -260,6 +271,7 @@ public actor CallClient {
         }
         try await post(["type": "capture.started", "command_id": attempt, "error": nil])
         let started = Date()
+        onEvent(.captureStarted(durationMs: settings.durationMs, at: started))
         var sequence = 0
         var lastSent = -1
         var lastMs = 0
@@ -301,6 +313,7 @@ public actor CallClient {
             }
         }
         guard let callId else { return }
+        onEvent(.captureFinished)
         try await api.finish(callId: callId, attemptId: attempt, lastSequence: lastSent, capturedUntilMs: lastMs)
         onPhase(.finishing)
     }

@@ -155,7 +155,7 @@ class CallDesk:
         self.hub.send_many(
             self.hub.parents_of(person_id),
             "call.incoming",
-            {"event_id": f"ring_{call.call_id}", "call_id": call.call_id, "caller_name": "Check-in",
+            {"event_id": f"ring_{call.call_id}", "call_id": call.call_id, "caller_name": "Daily check-in",
              "person_name": person.name, "ring_timeout_s": self.settings.ring_timeout_s},
             event_id=f"ring_{call.call_id}",
             still_active=lambda: self.calls.get(call.call_id).state == CallState.RINGING,

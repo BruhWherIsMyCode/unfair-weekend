@@ -12,6 +12,9 @@ import Observation
 @Observable
 public final class CallModel {
     public private(set) var phase: CallPhase = .idle
+    /// What the designed screens render: card, progress dots, subtitles, timer, self-view size.
+    public private(set) var screen = CallScreen()
+    private var reducer = CallScreenReducer()
     public private(set) var lastError: String?
     private var client: CallClient?
     private let api: CallAPI
@@ -30,6 +33,12 @@ public final class CallModel {
         let client = CallClient(api: api, deviceId: deviceId, personId: personId, devices: devices) { [weak self] phase in
             Task { @MainActor in
                 self?.phase = phase
+            }
+        } onEvent: { [weak self] event in
+            Task { @MainActor in
+                guard let self else { return }
+                self.reducer.apply(event)
+                self.screen = self.reducer.screen
             }
         }
         self.client = client
@@ -52,6 +61,12 @@ public final class CallModel {
 
     public func decline() {
         Task { try? await client?.decline() }
+    }
+
+    /// After the "Thank you" screen, go back to waiting for the next call.
+    public func dismissDone() {
+        reducer.reset()
+        screen = reducer.screen
     }
 
     public func hangUp() {
