@@ -17,6 +17,8 @@ Environment (all optional):
     UW_DATA_DIR          folder of the baseline JSON files (default analysis/data)
     UW_BASELINE_NEEDED   whole number >= 1: normal calls until her usual is ready (default config.BASELINE_NEEDED)
     UW_RUNS_DIR          folder of the call record JSON files (default analysis/runs/calls)
+    UW_DEBUG             on | off            debug mode (default off): lines, captions and pictures that show which hand the
+                                             camera sees (analysis/debug_view.py); reports only, measuring is unchanged
     UW_CALL_LOG          off                 no live log lines (default: one plain line per step, prefix [call <id>])
     DATABASE_PATH        path of the shared SQLite file (backend/DATABASE_SCHEMA.md); empty or unset = database off.
                          On: her usual is read from the database (JSON file as fallback), the call is recorded in our
@@ -91,6 +93,11 @@ class Settings:
             raise ValueError("UW_MIRRORED must be on or off, got %r" % mirrored)
         self.mirrored = mirrored == "on"
 
+        debug = get("UW_DEBUG").lower() or "off"
+        if debug not in ("on", "off"):
+            raise ValueError("UW_DEBUG must be on or off, got %r" % debug)
+        self.debug = debug == "on"
+
         needed = get("UW_BASELINE_NEEDED")
         self.baseline_needed: Optional[int] = None
         if needed:
@@ -112,12 +119,13 @@ class Settings:
         self.call_log = call_log != "off"
 
 
-def default_modules(mirrored: bool) -> Dict[str, Any]:
-    """New production stream tasks per call. No sentence module: the call driver skips a check without a module."""
+def default_modules(mirrored: bool, debug: Any = None) -> Dict[str, Any]:
+    """New production stream tasks per call. No sentence module: the call driver skips a check without a module.
+    `debug` is a debug_view.DebugView (UW_DEBUG=on) or None."""
     from analysis.tasks.stream_arms import StreamArms
     from analysis.tasks.stream_smile import StreamSmile
 
-    return {"smile": StreamSmile(mirrored=mirrored), "arms": StreamArms(mirrored=mirrored)}
+    return {"smile": StreamSmile(mirrored=mirrored, debug=debug), "arms": StreamArms(mirrored=mirrored, debug=debug)}
 
 
 def _open_database(db_path: Any, submit: Optional[Callable[[str, Any], None]], link: Any, modules: Dict[str, Any],
@@ -166,8 +174,15 @@ async def run_backend_call(link: Any, modules: Optional[Dict[str, Any]] = None, 
 
     source = make_baseline_source(settings.person_key, settings.data_dir, settings.baseline_needed)
     baselines = source.load_baselines()
+    prefix = "[call %s] " % link.call_id
+    debug_view = None
+    if settings.debug:  # reports only: lines in this terminal, captions, pictures under analysis/runs/debug
+        from analysis.debug_view import DebugView
+
+        debug_view = DebugView(link.call_id, lambda line: out(prefix + line), config.RUNS_DIR / "debug")
+        debug_view.announce()
     if modules is None:
-        modules = default_modules(settings.mirrored)
+        modules = default_modules(settings.mirrored, debug_view)
 
     db_path = database_path if database_path not in (None, "") else settings.database_path
     recorder, frozen, source_line = None, {}, None
@@ -182,8 +197,7 @@ async def run_backend_call(link: Any, modules: Optional[Dict[str, Any]] = None, 
     session = CallSession(link.call_id, person.person_id, person.name, link, modules, baselines,
                           label=person.label, required_tasks=limits.REQUIRED_TASKS,
                           initial_resources=link.initial_resources(), safety_floor=settings.safety_floor,
-                          recorder=recorder)
-    prefix = "[call %s] " % link.call_id
+                          recorder=recorder, debug=debug_view)
     if settings.call_log:
         def show(entry: Dict[str, Any]) -> None:
             line = format_terminal_line(entry, session)
@@ -200,7 +214,8 @@ async def run_backend_call(link: Any, modules: Optional[Dict[str, Any]] = None, 
     link.attach(session)
     session.note("backend_call", mode=settings.mode, backend=settings.claude_backend if settings.mode == "claude" else None,
                  safety_floor=settings.safety_floor, mirrored=settings.mirrored, person_key=settings.person_key,
-                 baseline_needed=settings.baseline_needed, required_tasks=list(session.required_tasks))
+                 baseline_needed=settings.baseline_needed, required_tasks=list(session.required_tasks),
+                 **({"debug": True} if settings.debug else {}))
     if source_line is not None:
         log.info("call %s: %s", link.call_id, source_line)
         session.note("baseline_source", detail=source_line)

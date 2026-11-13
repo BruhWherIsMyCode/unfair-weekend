@@ -38,6 +38,7 @@ class ProductionFrameReader:
     def __init__(self, model_path: Any = None, mirrored: bool = False) -> None:
         self.model_path = model_path or config.MODEL_PATH
         self.mirrored = mirrored
+        self.on_frame: Optional[Callable[..., Any]] = None  # debug mode only: (image, ts, face_obs, reading, mirrored)
         self._ctx: Any = None
         self._extractor: Any = None
 
@@ -49,7 +50,14 @@ class ProductionFrameReader:
                 raise FileNotFoundError("Model file missing. Run:  python -m analysis.get_models")
             self._ctx = FacePointsExtractor(self.model_path)
             self._extractor = self._ctx.__enter__()
-        return frame_reading(self._extractor.process(image, timestamp_ms, mirrored=self.mirrored))
+        obs = self._extractor.process(image, timestamp_ms, mirrored=self.mirrored)
+        reading = frame_reading(obs)
+        if self.on_frame is not None:  # debug mode: only reports what was seen
+            try:
+                self.on_frame(image, timestamp_ms, obs, reading, self.mirrored)
+            except Exception:  # never into the measuring
+                pass
+        return reading
 
     def close(self) -> None:
         if self._ctx is not None:
@@ -139,8 +147,9 @@ class StreamSmile:
 
     def __init__(self, frame_reader: Optional[FrameReader] = None, decode: Optional[Decoder] = None,
                  window_ms: int = WINDOW_MS, period_ms: int = OBSERVATION_PERIOD_MS,
-                 use_executor: bool = True, mirrored: bool = False) -> None:
+                 use_executor: bool = True, mirrored: bool = False, debug: Any = None) -> None:
         self._frame_reader = frame_reader
+        self.debug = debug  # a debug_view.DebugView (UW_DEBUG=on) or None: reports only, never changes a reading
         self.mirrored = mirrored  # for the production reader a run creates itself (a mirrored front camera)
         self._decode = decode
         self.use_executor = use_executor  # False runs the frame work inline (tests, demo)
@@ -168,6 +177,10 @@ class StreamSmile:
         if reader is None:
             owned_reader = ProductionFrameReader(mirrored=self.mirrored)
             reader = owned_reader
+        if self.debug is not None and hasattr(reader, "on_frame"):
+            debug, attempt_id = self.debug, context.attempt_id
+            reader.on_frame = lambda image, ts, obs, reading, mirrored: debug.smile_frame(
+                attempt_id, ts, image, obs, reading, mirrored)
         loop = asyncio.get_running_loop()
         readings: List[Optional[FrameReading]] = []
         sequence = 0
