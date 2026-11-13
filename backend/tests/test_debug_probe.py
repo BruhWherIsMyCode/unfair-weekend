@@ -72,5 +72,25 @@ async def test_debug_without_the_analysis_is_a_plain_503():
     assert wrong.status_code == 400
 
 
+def test_probe_tallies_where_the_hand_was_per_phase():
+    pytest.importorskip("analysis.debug_view", reason="needs numpy")
+
+    class Face:
+        face_found = True
+        points = {"her_left_eye": (300.0, 200.0), "her_right_eye": (200.0, 200.0)}
+
+    class Hand:
+        def __init__(self, x):
+            self.points = [(x, 300.0)] * 21
+
+    probe = FrameProbe()
+    probe.arms_frame("a1", 2000, "left", None, Face(), [Hand(400.0)], False)  # her left: larger x
+    probe.arms_frame("a1", 2200, "left", None, Face(), [Hand(100.0)], False)  # her right
+    probe.arms_frame("a1", 9000, "right", None, Face(), [], False)
+    assert probe.tally()["hold_left"] == {"left": 1, "right": 1, "none": 0, "no_face": 0}
+    assert probe.tally()["hold_right"]["none"] == 1
+    assert probe.latest()["eye_distance_px"] == 100.0 and probe.latest()["roll_deg"] == 0.0
+
+
 def test_plain_makes_numbers_json_safe():
     assert plain({"a": (1.0, float("nan")), "b": [True, None, "x"]}) == {"a": [1.0, None], "b": [True, None, "x"]}
