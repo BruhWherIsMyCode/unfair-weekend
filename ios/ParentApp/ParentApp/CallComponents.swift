@@ -119,12 +119,13 @@ struct TimerRing: View {
 
     var body: some View {
         switch timer {
-        case .waiting(let total):
-            ring(progress: 1, color: Palette.amber) { number(total) }
+        case .hidden:
+            // Same space as the ring, so the text does not reflow when it appears.
+            Color.clear.frame(width: 96, height: 96)
         case .running(let endsAt, let total):
             TimelineView(.animation) { timeline in
                 let remaining = max(0, endsAt.timeIntervalSince(timeline.date))
-                let progress = total > 0 ? min(1, remaining / Double(total)) : 0
+                let progress = total > 0 ? min(1, remaining / total) : 0
                 ring(progress: progress, color: Palette.amber) { number(Int(remaining.rounded(.up))) }
             }
         case .finished:

@@ -28,22 +28,19 @@ final class CallScreenTests: XCTestCase {
         XCTAssertEqual(r.screen.stage, .smile)
         XCTAssertEqual(r.screen.dot(.questions), .done)
         XCTAssertTrue(r.screen.selfViewLarge)
-        r.apply(.captureCommanded(task: "smile", durationMs: 5000))
-        XCTAssertEqual(r.screen.card, .task(step: 1, total: 3, task: "smile", timer: .waiting(totalSeconds: 5), hint: nil))
-        r.apply(.captureStarted(durationMs: 5000, at: t0))
-        XCTAssertEqual(r.screen.card, .task(step: 1, total: 3, task: "smile",
-                                            timer: .running(endsAt: t0.addingTimeInterval(5), totalSeconds: 5), hint: nil))
+        XCTAssertEqual(r.screen.card, .task(step: 1, total: 3, task: "smile", part: .relax, timer: .hidden, hint: nil))
+        r.apply(.captureCommanded(task: "smile", durationMs: 6000))
+        r.apply(.captureStarted(durationMs: 6000, at: t0))
         r.apply(.hint("look_at_camera"))
         r.apply(.captureFinished)
-        XCTAssertEqual(r.screen.card, .task(step: 1, total: 3, task: "smile", timer: .finished, hint: nil))
+        XCTAssertEqual(r.screen.card, .task(step: 1, total: 3, task: "smile", part: .relax, timer: .finished, hint: nil))
 
         r.apply(.speaking(lineId: "repeat_smile", text: "Let's try once more.", durationMs: 1500, at: t0))
-        r.apply(.captureCommanded(task: "smile", durationMs: 5000))
-        XCTAssertEqual(r.screen.card, .task(step: 1, total: 3, task: "smile", timer: .waiting(totalSeconds: 5), hint: nil))
+        XCTAssertEqual(r.screen.card, .task(step: 1, total: 3, task: "smile", part: .relax, timer: .hidden, hint: nil))
 
         r.apply(.speaking(lineId: "task_arms", text: "Raise your left hand.", durationMs: 1500, at: t0))
-        r.apply(.captureCommanded(task: "arms", durationMs: 12000))
-        XCTAssertEqual(r.screen.card, .task(step: 2, total: 3, task: "arms", timer: .waiting(totalSeconds: 12), hint: nil))
+        r.apply(.captureCommanded(task: "arms", durationMs: 15000))
+        XCTAssertEqual(r.screen.card, .task(step: 2, total: 3, task: "arms", part: .leftHand, timer: .hidden, hint: nil))
         XCTAssertEqual(r.screen.dot(.smile), .done)
 
         r.apply(.speaking(lineId: "task_sentence",
@@ -58,6 +55,71 @@ final class CallScreenTests: XCTestCase {
         r.apply(.speaking(lineId: "bye", text: "Thank you, Ona. Our check-in is finished. Goodbye.", durationMs: 3000, at: t0))
         r.apply(.ended(reason: "completed"))
         XCTAssertEqual(r.screen.mode, .done)
+    }
+
+    /// Instruction: no ring. Relaxed: no ring. "Now smile!": the ring counts the rest of the 6 s capture.
+    func testSmileTimerRunsOnlyAfterNowSmile() {
+        var r = inCall()
+        r.apply(.speaking(lineId: "task_smile", text: "First keep your face relaxed.", durationMs: 6000, at: t0))
+        XCTAssertEqual(r.screen.card, .task(step: 1, total: 3, task: "smile", part: .relax, timer: .hidden, hint: nil))
+        r.apply(.captureCommanded(task: "smile", durationMs: 6000))
+        let start = t0.addingTimeInterval(7)
+        r.apply(.captureStarted(durationMs: 6000, at: start))
+        XCTAssertEqual(r.screen.card, .task(step: 1, total: 3, task: "smile", part: .relax, timer: .hidden, hint: nil))
+
+        let cue = start.addingTimeInterval(1.6)
+        r.apply(.speaking(lineId: "smile_now", text: "Now smile!", durationMs: 800, at: cue))
+        XCTAssertTrue(r.screen.selfViewLarge, "the cue must not shrink the self-view")
+        guard case .task(_, _, "smile", .smile, .running(let endsAt, let total), nil) = r.screen.card else {
+            return XCTFail("smile countdown after the cue, got \(String(describing: r.screen.card))")
+        }
+        XCTAssertEqual(endsAt, start.addingTimeInterval(6))
+        XCTAssertEqual(total, 4.4, accuracy: 0.001)
+
+        r.apply(.captureFinished)
+        XCTAssertEqual(r.screen.card, .task(step: 1, total: 3, task: "smile", part: .smile, timer: .finished, hint: nil))
+    }
+
+    /// Left hand counts down to the swap (6.5 s), then the right hand counts down to the end of the 15 s capture.
+    func testArmsTimerCountsEachHand() {
+        var r = inCall()
+        r.apply(.speaking(lineId: "task_arms", text: "Raise your left hand beside your face now.", durationMs: 4000, at: t0))
+        r.apply(.captureCommanded(task: "arms", durationMs: 15000))
+        XCTAssertEqual(r.screen.card, .task(step: 2, total: 3, task: "arms", part: .leftHand, timer: .hidden, hint: nil))
+        let start = t0.addingTimeInterval(5)
+        r.apply(.captureStarted(durationMs: 15000, at: start))
+        XCTAssertEqual(r.screen.card, .task(step: 2, total: 3, task: "arms", part: .leftHand,
+                                            timer: .running(endsAt: start.addingTimeInterval(6.5), total: 6.5), hint: nil))
+        r.apply(.hint("show_both_arms"))
+
+        let swap = start.addingTimeInterval(6.7)
+        r.apply(.speaking(lineId: "swap_hands", text: "Now swap.", durationMs: 3000, at: swap))
+        XCTAssertTrue(r.screen.selfViewLarge)
+        guard case .task(_, _, "arms", .rightHand, .running(let endsAt, let total), nil) = r.screen.card else {
+            return XCTFail("right-hand countdown after the swap, got \(String(describing: r.screen.card))")
+        }
+        XCTAssertEqual(endsAt, start.addingTimeInterval(15))
+        XCTAssertEqual(total, 8.3, accuracy: 0.001)
+
+        r.apply(.captureFinished)
+        guard case .task(_, _, "arms", .rightHand, .finished, nil) = r.screen.card else { return XCTFail("finished") }
+    }
+
+    /// A cue for another task, or outside a task, is an ordinary assistant line.
+    func testCueOutsideItsTaskIsAnAssistantLine() {
+        var r = inCall()
+        r.apply(.speaking(lineId: "smile_now", text: "Now smile!", durationMs: 800, at: t0))
+        guard case .assistant = r.screen.card else { return XCTFail("assistant card") }
+        r.apply(.speaking(lineId: "task_arms", text: "Raise your left hand.", durationMs: 1000, at: t0))
+        r.apply(.speaking(lineId: "smile_now", text: "Now smile!", durationMs: 800, at: t0))
+        guard case .assistant = r.screen.card else { return XCTFail("smile cue during arms is not a task cue") }
+    }
+
+    private func inCall() -> CallScreenReducer {
+        var r = CallScreenReducer()
+        r.apply(.ringing(callId: "c1", title: "Daily check-in"))
+        r.apply(.connected)
+        return r
     }
 
     func testRecoveryLineDuringTaskShowsAssistantAndHangUpEnds() {
