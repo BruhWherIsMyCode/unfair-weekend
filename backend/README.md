@@ -1,6 +1,19 @@
-# Simli + ElevenLabs avatar test
+# Backend architecture, storage and greeting reference
 
-The next-step design is in [ARCHITECTURE_PLAN.md](ARCHITECTURE_PLAN.md): one Python backend, periodic observations during the active task, interruptions/recovery and a fixed example script. [Contract draft and checks](proposals/README.md). This is the agreed architecture direction; the runnable application below is still the Node greeting experiment and has not been ported.
+The [architecture decision](ARCHITECTURE_PLAN.md) places analyzers on the real parent client and keeps task policy, window timers, aggregation, baseline and final results in one Python backend. The [shared database guide](DATABASE_SCHEMA.md) and [initial SQLite migration](storage/migrations/0001_initial.sql) define persistence for the modules that will implement this flow. The old [OpenAPI 0.2 draft](proposals/README.md) is historical; its task sample-upload transport is superseded.
+
+## Shared database
+
+From `backend/`, using Python 3 and SQLite 3.38+:
+
+```bash
+python3 -m storage --database .cache/checkin.sqlite3
+python3 -m unittest discover -s storage/tests -v
+```
+
+Built here: migration tooling, schema constraints and synthetic storage tests. Runtime repositories, observation routes, CallSession, client analyzers, timers and notifications are not implemented by this change. The separate [Python foundation PR #8](https://github.com/BruhWherIsMyCode/unfair-weekend/pull/8) contains health/configuration and an in-memory CallService; this schema does not yet persist its state. [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) gives the transactions each writer must implement.
+
+## Simli + ElevenLabs greeting reference
 
 A local browser prototype: type a short line, generate its voice with ElevenLabs, and send that audio to a live Simli avatar. The browser plays the synchronized video and audio returned by Simli. It does not request camera or microphone access.
 
