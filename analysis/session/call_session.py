@@ -39,6 +39,7 @@ class _Runtime:
         self.pump: Optional["asyncio.Future"] = None
         self.module_task: Optional["asyncio.Future"] = None
         self.cue_task: Optional["asyncio.Future"] = None  # plays the task's mid-task cue lines
+        self.debug_task: Optional["asyncio.Future"] = None  # debug mode: plays the mid-hold caption
         self.module_finished = False
         self.module_result: Any = None
         self.module_error: Optional[str] = None
@@ -49,8 +50,10 @@ class CallSession:
                  baselines: Optional[Dict[str, Dict[str, Any]]] = None, clock: Any = None, label: str = "live",
                  required_tasks: Sequence[str] = limits.REQUIRED_TASKS,
                  initial_resources: Optional[Dict[str, str]] = None,
-                 safety_floor: bool = limits.SAFETY_FLOOR_DEFAULT, recorder: Any = None) -> None:
+                 safety_floor: bool = limits.SAFETY_FLOOR_DEFAULT, recorder: Any = None, debug: Any = None) -> None:
         self.call_id = call_id
+        # Debug mode (UW_DEBUG=on): a debug_view.DebugView or None. It only reports; None = exactly the normal call.
+        self.debug = debug
         # Optional database recorder (analysis/storage). None = exactly the behaviour without a database. Its hooks
         # are fire-and-forget; `_rec` makes sure nothing it does can reach the call.
         self.recorder = recorder
@@ -386,6 +389,8 @@ class CallSession:
             cues = definition.get("cues") or []
             if cues:  # spawned: playing a cue never blocks sample intake or the watchdogs
                 rt.cue_task = asyncio.ensure_future(self._play_cues(attempt, cues))
+            if self.debug is not None and attempt.task == "arms" and getattr(self.adapter, "say_text", None) is not None:
+                rt.debug_task = asyncio.ensure_future(self._play_debug_captions(attempt))
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -417,6 +422,34 @@ class CallSession:
             raise
         except Exception as exc:  # a malformed cue definition is also only logged
             self._log("cue_failed", attempt_id=attempt.attempt_id, error=type(exc).__name__)
+
+    async def _say_debug(self, attempt_id: str, text: str, when: str) -> None:
+        """Debug mode: a short caption through the adapter's say_text, like a cue line (spawned, never blocks sample
+        intake). Not an own line of Claude's (no count), no numbers in it. A failure is only logged."""
+        say_text = getattr(self.adapter, "say_text", None)
+        if say_text is None or self.hung_up:
+            return
+        self._log("debug_caption", attempt_id=attempt_id, when=when, text=text)
+        try:
+            await say_text(text)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._log("debug_caption_failed", attempt_id=attempt_id, error=type(exc).__name__)
+
+    async def _play_debug_captions(self, attempt: Attempt) -> None:
+        """Debug mode: while an arms attempt runs, play the mid-hold caption the debug view queued (at most one per
+        hold phase). The capture is not touched: this is the same playback path as the `swap_hands` cue."""
+        try:
+            while attempt.is_active and not self.hung_up:
+                await self.clock.sleep(limits.WATCHDOG_TICK_S)
+                text = self.debug.take_caption(attempt.attempt_id)
+                if text and attempt.is_active:
+                    await self._say_debug(attempt.attempt_id, text, "mid_hold")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # debug output never stops a call
+            self._log("debug_caption_failed", attempt_id=attempt.attempt_id, error=type(exc).__name__)
 
     async def _pump(self, attempt: Attempt, rt: _Runtime, source: Any) -> None:
         """Move the attempt's samples from the adapter to the module's bounded queue."""
@@ -566,7 +599,7 @@ class CallSession:
     async def _stop_workers(self, rt: _Runtime) -> None:
         """Cancel the driver, pump and module. A module that will not stop keeps the analyzer slot busy."""
         rt.cancel_event.set()
-        helpers = [t for t in (rt.driver, rt.pump, rt.cue_task) if t is not None]
+        helpers = [t for t in (rt.driver, rt.pump, rt.cue_task, rt.debug_task) if t is not None]
         for t in helpers:
             if not t.done():
                 t.cancel()
@@ -663,6 +696,15 @@ class CallSession:
         self.results.append(d)
         self._log("attempt_finished", attempt_id=attempt.attempt_id, outcome=result.outcome, state=terminal,
                   interruption=result.interruption.code if result.interruption else None)
+        if self.debug is not None:  # debug mode: summary and verdict lines, then one caption (arms only)
+            try:
+                caption = self.debug.finish_attempt(attempt.attempt_id)
+                if caption and not self.hung_up:
+                    await self._say_debug(attempt.attempt_id, caption, "end_of_attempt")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._log("debug_failed", attempt_id=attempt.attempt_id, error=type(exc).__name__)
         if self.recorder is not None:
             per_hand = getattr(self.modules.get(attempt.task), "attempt_values", None) if attempt.task == "arms" else None
             try:

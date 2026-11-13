@@ -33,6 +33,10 @@
     How many normal calls make her usual ready (UW_BASELINE_NEEDED; default 5). Use 1 or 2 to try things out.
 .PARAMETER Label
     normal: this run's calls may enter her usual; acted: they never do (DEMO_SESSION_LABEL). Default: live.
+.PARAMETER DebugView
+    Debug view (UW_DEBUG=on): shows which hand the camera sees. One line per second in this window, a short caption on
+    the phone, pictures in analysis\runs\debug\<call>\. Measuring is unchanged. To check the mirroring: raise your LEFT
+    hand; if the debug says RIGHT, restart with -Mirrored.
 .PARAMETER ResetKeys
     Ask for the ElevenLabs and Simli keys again. They are asked for on the first run (Enter skips), stored
     encrypted for this Windows user (DPAPI) in %LOCALAPPDATA%\checkin-backend\provider_keys.txt, never in the
@@ -61,6 +65,7 @@ param(
     [ValidateSet("", "normal", "acted")]
     [string]$Label = "",
     [switch]$AllowPublicNetwork,
+    [switch]$DebugView,
     [switch]$ResetKeys
 )
 
@@ -337,6 +342,7 @@ try {
     if ($Mirrored) { Write-Host "  Camera:    mirrored" } else { Write-Host "  Camera:    not mirrored" }
     if ($BaselineNeeded -ge 1) { Write-Host "  Baseline:  needs $BaselineNeeded normal calls" } else { Write-Host "  Baseline:  needs 5 normal calls (the default)" }
     if ($Label) { Write-Host "  Label:     $Label" } else { Write-Host "  Label:     live" }
+    if ($DebugView) { Write-Host "  Debug:     on (terminal lines, captions, pictures in analysis\runs\debug)" }
 
     Step "Running the backend on port $Port (Ctrl+C to stop)"
     $env:DEMO_KEY = $DemoKey
@@ -352,6 +358,7 @@ try {
     if ($claudeMode -ne "api") { Remove-Item -Path "env:ANTHROPIC_API_KEY" -ErrorAction SilentlyContinue }
     if ($Mirrored) { $env:UW_MIRRORED = "on" } else { Remove-Item -Path "env:UW_MIRRORED" -ErrorAction SilentlyContinue }
     if ($BaselineNeeded -ge 1) { $env:UW_BASELINE_NEEDED = "$BaselineNeeded" } else { Remove-Item -Path "env:UW_BASELINE_NEEDED" -ErrorAction SilentlyContinue }
+    if ($DebugView) { $env:UW_DEBUG = "on" } else { Remove-Item -Path "env:UW_DEBUG" -ErrorAction SilentlyContinue }
     if ($Label) { $env:DEMO_SESSION_LABEL = $Label } else { Remove-Item -Path "env:DEMO_SESSION_LABEL" -ErrorAction SilentlyContinue }
     foreach ($name in $values.Keys) {
         if ($values[$name]) { Set-Item -Path "env:$name" -Value $values[$name] }
