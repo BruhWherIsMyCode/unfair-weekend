@@ -168,7 +168,7 @@ def fixture(name):
 
 def test_definitions_use_the_published_capture_settings():
     assert STREAM_TASKS["smile"].definition()["capture"] == fixture("capture_smile")
-    assert STREAM_TASKS["arms"].definition()["capture"] == fixture("capture_arms")
+    assert STREAM_TASKS["arms"].definition()["capture"] == dict(fixture("capture_arms"), duration_ms=15000)  # v11
     assert STREAM_TASKS["sentence"].definition()["capture"] == fixture("capture_sentence")
     smile = STREAM_TASKS["smile"].definition()
     assert smile["instruction_line"] == "task_smile" and smile["repeat_line"] == "repeat_smile"

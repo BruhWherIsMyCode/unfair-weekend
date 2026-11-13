@@ -29,13 +29,19 @@ BASELINE_NEEDED_DEFAULT = 5  # used for the summary when no baseline is known
 # One 12 s capture window, two halves. (phase, start_ms, end_ms, expected side or None). A sample belongs to a
 # phase when start_ms <= captured_ms < end_ms. Hold phases are measured; settle and swap frames are ignored.
 # Side words are HER left and right. First guesses, editable in this one place.
+# v11 (owner, after the real PC run): 15 s window (the contract maximum), longer holds; the right hold starts while
+# the swap line is still playing, so its raise grace covers the rest of the line.
 ARMS_PHASES = (
     ("settle", 0, 1000, None),
-    ("hold_left", 1000, 5000, "left"),
-    ("swap", 5000, 7000, None),
-    ("settle", 7000, 8000, None),
-    ("hold_right", 8000, 12000, "right"),
+    ("hold_left", 1000, 6500, "left"),
+    ("swap", 6500, 8500, None),
+    ("hold_right", 8500, 15000, "right"),
 )
+# Time she gets at the start of each hold phase to raise the hand: until her hand is first seen in that phase, and
+# for at most this long, a frame without the hand is "pending", not framing_unusable (the 2 s framing rule
+# otherwise interrupted every arms attempt ~3 s in, while she was still raising the hand). The hold is then
+# measured from the first frame her hand was seen.
+ARMS_RAISE_GRACE_MS = 3000
 ARMS_METRIC_ID = "hand_sink_v1"
 ARMS_BASELINE_KEYS = {"left": "arms.hand_left.hand_sink", "right": "arms.hand_right.hand_sink"}
 

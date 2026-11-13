@@ -190,7 +190,7 @@ async def normal_branch() -> None:
 
     arms2 = asyncio.ensure_future(session.run_task("arms"))
     await clock.settle()
-    await stream(adapter, clock, current_attempt(session), 61)  # the whole 12 s window, both hands
+    await stream(adapter, clock, current_attempt(session), 76)  # the whole 15 s window, both hands
     show("arms A2 (made-up hands, both within her usual)", await arms2)
     show("sentence (not implemented in this version, so it ends failed)", await session.run_task("sentence"))
 
@@ -245,7 +245,7 @@ async def drive(session: CallSession, adapter: FakeAdapter, clock: FakeClock, ca
                 session.handle_resource_event(resource_event("evt_camera_lost", "unavailable", 1, "track_ended"))
                 lost_at = clock.now()
             else:
-                await stream(adapter, clock, attempt_id, {"smile": 26, "arms": 61}.get(task, 0))
+                await stream(adapter, clock, attempt_id, {"smile": 26, "arms": 76}.get(task, 0))
             continue
         if lost_at is not None and not restored and clock.now() - lost_at >= 2.0:
             session.handle_resource_event(resource_event("evt_camera_back", "available", 2, None))

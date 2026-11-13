@@ -1,7 +1,7 @@
 """The one-hand arms task on streamed samples, with a fake hand reader and a fake JPEG decoder. Written, not run.
 
-No mediapipe, no cv2, no camera: the numbers are made up. The window is 12 s of samples every 200 ms:
-0-1 settle, 1-5 hold LEFT, 5-7 swap, 7-8 settle, 8-12 hold RIGHT.
+No mediapipe, no cv2, no camera: the numbers are made up. The window is 15 s of samples every 200 ms:
+0-1 settle, 1-6.5 hold LEFT, 6.5-8.5 swap, 8.5-15 hold RIGHT (v11 timing).
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ FIXTURES = json.loads((Path(__file__).resolve().parents[2] / "contract" / "fixtu
 NO_BASELINE = {"snapshot_id": "baseline_none", "ready": False, "sessions": 0, "needed": 5}
 
 
-async def sample_stream(last_ms=12000, step=200):
+async def sample_stream(last_ms=15000, step=200):
     for i, ms in enumerate(range(0, last_ms + 1, step)):
         yield {"sequence": i, "captured_ms": ms, "format": "jpeg", "data_base64": "AAAA"}
 
@@ -121,14 +121,13 @@ def test_unreadable_jpeg_counts_as_a_hand_not_seen():
 
 def test_phase_boundaries():
     assert phase_at(0)[0] == "settle" and phase_at(999)[0] == "settle"
-    assert phase_at(1000)[3] == "left" and phase_at(4999)[3] == "left"
-    assert phase_at(5000)[0] == "swap" and phase_at(6999)[0] == "swap"
-    assert phase_at(7000)[0] == "settle" and phase_at(7999)[3] is None
-    assert phase_at(8000)[3] == "right" and phase_at(11999)[3] == "right"
-    assert phase_at(12000) is None
-    assert hold_windows() == {"left": (1000, 5000), "right": (8000, 12000)}
-    assert cue_at_ms() == 5000
-    assert limits.ARMS_PHASES[0][1] == 0 and limits.ARMS_PHASES[-1][2] == 12000
+    assert phase_at(1000)[3] == "left" and phase_at(6499)[3] == "left"
+    assert phase_at(6500)[0] == "swap" and phase_at(8499)[0] == "swap"
+    assert phase_at(8500)[3] == "right" and phase_at(14999)[3] == "right"
+    assert phase_at(15000) is None
+    assert hold_windows() == {"left": (1000, 6500), "right": (8500, 15000)}
+    assert cue_at_ms() == 6500
+    assert limits.ARMS_PHASES[0][1] == 0 and limits.ARMS_PHASES[-1][2] == 15000
 
 
 def test_frames_in_settle_and_swap_are_not_read_at_all():
@@ -137,7 +136,7 @@ def test_frames_in_settle_and_swap_are_not_read_at_all():
     assert reader.calls, "hold frames must be read"
     for ts, side in reader.calls:
         assert in_hold(ts) and phase_at(ts)[3] == side  # the reader got the side of the phase it was called in
-    assert not [c for c in reader.calls if c[0] < 1000 or 5000 <= c[0] < 8000]
+    assert not [c for c in reader.calls if c[0] < 1000 or 6500 <= c[0] < 8500]
 
 
 def test_observations_flag_framing_only_in_hold_phases():
@@ -145,8 +144,11 @@ def test_observations_flag_framing_only_in_hold_phases():
     capturing = [o for o in obs if o.phase == "capturing"]
     assert capturing
     for o in capturing:
-        if in_hold(o.elapsed_ms):
+        p = phase_at(o.elapsed_ms)
+        if in_hold(o.elapsed_ms) and o.elapsed_ms - p[1] >= limits.ARMS_RAISE_GRACE_MS:
             assert o.signal == "framing_unusable" and o.quality.status == "unusable"
+        elif in_hold(o.elapsed_ms):
+            assert o.signal == "none" and o.quality.status == "pending"  # still raising the hand
         else:
             assert o.signal == "none" and o.quality.status == "pending"  # settle and swap are never flagged
     assert any(not in_hold(o.elapsed_ms) for o in capturing)
@@ -162,7 +164,7 @@ def test_observations_come_about_every_second_and_carry_the_provisional_sink():
     capturing = [o for o in obs if o.phase == "capturing"]
     seconds = [o.elapsed_ms for o in capturing]
     assert seconds[0] == 0 and all(b - a <= 1000 for a, b in zip(seconds, seconds[1:]))
-    at_4s = next(o for o in capturing if o.elapsed_ms == 4000)
+    at_4s = next(o for o in capturing if o.elapsed_ms == 6000)  # v11: the hold is 1-6.5 s, the sink starts mid-hold
     assert at_4s.quality.status == "usable" and at_4s.signal == "none"
     assert at_4s.metrics and at_4s.metrics[0].metric_id == METRIC_ID and abs(at_4s.metrics[0].value - 0.4) < 1e-9
     assert all(o.event_id == "obs_A1_%d" % o.sequence for o in obs)
@@ -196,8 +198,8 @@ def test_baseline_ready_only_when_both_hands_are_ready():
 
 def test_samples_after_the_window_are_not_measured():
     reader = FakeHands()
-    run_arms(reader, stream=sample_stream(last_ms=12600))
-    assert max(ts for ts, _ in reader.calls) < 12000
+    run_arms(reader, stream=sample_stream(last_ms=15600))
+    assert max(ts for ts, _ in reader.calls) <= 15000
 
 
 def test_cancel_signal_ends_the_run_without_a_reading():
@@ -209,7 +211,49 @@ def test_cancel_signal_ends_the_run_without_a_reading():
 def test_definition_has_the_published_capture_settings_and_the_swap_cue():  # noqa: E302
     d = StreamArms().definition()
     fixture = next(f for f in FIXTURES if f["name"] == "capture_arms")["data"]["settings"]
-    assert d["capture"] == fixture and d["capture"]["duration_ms"] == 12000
-    assert d["cues"] == [{"at_ms": 5000, "line_id": "swap_hands"}]
+    # v11: the arms window grew to 15 s (the contract maximum); fixtures.json keeps draft 0.2's 12000
+    assert d["capture"] == dict(fixture, duration_ms=15000)
+    assert d["cues"] == [{"at_ms": 6500, "line_id": "swap_hands"}]
     assert d["metric_id"] == "hand_sink_v1" and d["required_resource"] == "camera" and d["sign"] == "arm"
     assert d["instruction_line"] == "task_arms" and d["repeat_line"] == "repeat_arms"
+
+
+# ---- raise grace (owner's real PC run: every arms attempt was interrupted ~3 s in) ---------------------
+
+def test_a_hand_raised_late_within_the_grace_is_not_flagged_and_still_measured():
+    # the left hand appears 2.4 s into its hold, the right hand 2.8 s into its hold (still within the grace)
+    reader = FakeHands(usable=lambda side, ts: (side == "left" and ts >= 3400) or (side == "right" and ts >= 11300))
+    result, obs, _ = run_arms(reader)
+    assert not [o for o in obs if o.signal == "framing_unusable"]
+    d = result.to_dict()
+    assert d["outcome"] == "completed" and d["quality"]["status"] == "usable" and d["reading"] is not None
+
+
+def test_a_hand_never_raised_is_flagged_once_the_grace_is_over():
+    reader = FakeHands(usable=lambda side, ts: side == "right")
+    _, obs, _ = run_arms(reader)
+    bad = [o.elapsed_ms for o in obs if o.signal == "framing_unusable"]
+    first = 1000 + limits.ARMS_RAISE_GRACE_MS
+    assert bad and first <= min(bad) < first + 200  # the first sample at or after the grace
+    assert all(first <= ms < 6500 for ms in bad)
+
+
+def test_losing_the_hand_after_it_was_seen_is_flagged_at_once_even_inside_the_grace():
+    reader = FakeHands(usable=lambda side, ts: not (1400 <= ts < 2000))
+    _, obs, _ = run_arms(reader)
+    assert [o.elapsed_ms for o in obs if o.signal == "framing_unusable"] == [1400]
+
+
+def test_the_grace_is_a_constructor_setting():
+    reader = FakeHands(usable=lambda side, ts: False)
+
+    async def scenario():
+        context = TaskContext("call_t", "A1", "arms", ARMS_BASELINE, asyncio.Event())
+        observations = []
+        task = StreamArms(reader, identity_decode, use_executor=False, raise_grace_ms=0)
+        await task.run(context, sample_stream(), observations.append)
+        return observations
+
+    obs = asyncio.run(scenario())
+    assert min(o.elapsed_ms for o in obs if o.signal == "framing_unusable") == 1000
+

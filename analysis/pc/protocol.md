@@ -89,11 +89,11 @@ For `arms`, `data` is `{"usable", "reason", "face_ok", "wrong_side", "timestamp_
 `start_capture`
 ```json
 {"type": "start_capture", "call_id": "call_...", "seq": 4, "attempt_id": "A2", "task": "arms",
- "settings": {"media_kind": "video", "duration_ms": 12000, "prepare_ms": 2000, "stop_on_silence_ms": null,
+ "settings": {"media_kind": "video", "duration_ms": 15000, "prepare_ms": 2000, "stop_on_silence_ms": null,
               "format": "jpeg", "sample_period_ms": 200},
- "cues": [{"at_ms": 5000, "line_id": "swap_hands"}],
- "phases": [["settle", 0, 1000, null], ["hold_left", 1000, 5000, "left"], ["swap", 5000, 7000, null],
-            ["settle", 7000, 8000, null], ["hold_right", 8000, 12000, "right"]]}
+ "cues": [{"at_ms": 6500, "line_id": "swap_hands"}],
+ "phases": [["settle", 0, 1000, null], ["hold_left", 1000, 6500, "left"], ["swap", 6500, 8500, null],
+            ["hold_right", 8500, 15000, "right"]]}
 ```
 `phases` is present for `arms` only: `[name, start_ms, end_ms, expected side or null]`; the client works out the
 expected hand of each frame from `captured_ms`. The client measures locally and sends `reading` messages; cue lines

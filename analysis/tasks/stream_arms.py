@@ -1,12 +1,14 @@
 """The arms task on streamed JPEG samples: one free hand at a time (v6).
 
 The person holds the phone in ONE hand (owner's decision), so she raises the other hand beside her face, then
-swaps. One `arms` task, one 12 s capture window, two halves (limits.ARMS_PHASES, editable there):
+swaps. One `arms` task, one 15 s capture window, two halves (limits.ARMS_PHASES, editable there):
 
-    0-1 s settle, 1-5 s hold LEFT hand (her left; the phone is in her right hand),
-    5-7 s swap (frames ignored), 7-8 s settle, 8-12 s hold RIGHT hand.
+    0-1 s settle, 1-6.5 s hold LEFT hand (her left; the phone is in her right hand),
+    6.5-8.5 s swap (frames ignored), 8.5-15 s hold RIGHT hand.
 
-The task definition carries a cue: the session plays the `swap_hands` line 5 s into the capture.
+The task definition carries a cue: the session plays the `swap_hands` line when the swap phase starts (6.5 s).
+Raise grace (limits.ARMS_RAISE_GRACE_MS): until her hand is first seen in a hold, and for at most that long, a
+frame without it is not judged; each hold is measured from the first frame her hand was seen.
 
 Per frame in a hold phase: decode (analysis/tasks/jpeg.py) -> frame_reader(image, ts_ms, expected_side) ->
 HandFrameReading. The production reader wraps HandFrameReader + hand_metric.hand_frame_reading (the same
@@ -106,6 +108,12 @@ def provisional_sink(frames: Sequence[HandFrameReading], hold_start_ms: int) -> 
     return float(median([f.height for f in usable[-5:]]) - median(start))
 
 
+def first_seen_ms(frames: Sequence[Optional[HandFrameReading]], start: int, end: int) -> int:
+    """When her hand was first seen in the hold [start, end]; the hold start when it never was."""
+    seen = [f.timestamp_ms for f in frames if f is not None and f.usable and start <= f.timestamp_ms <= end]
+    return int(min(seen)) if seen else int(start)
+
+
 def _baseline_info(baseline: Dict[str, Any], hand_baselines: Dict[str, Dict[str, Any]], ready: bool) -> BaselineInfo:
     hands = [b for b in hand_baselines.values() if isinstance(b, dict)]
     sessions = baseline.get("sessions")
@@ -134,6 +142,7 @@ def final_result(context: TaskContext, frames_by_side: Dict[str, List[Optional[H
     missing: List[str] = []
     for side in ("left", "right"):
         start, end = holds[side]
+        start = first_seen_ms(frames_by_side.get(side, []), start, end)  # measured from when her hand came up
         clip = hand_clip_reading(frames_by_side.get(side, []), float(start), float(end))
         sink = clip.hand_sink
         if clip.quality != "usable" or sink is None or not math.isfinite(sink):
@@ -163,8 +172,10 @@ class StreamArms:
 
     def __init__(self, frame_reader: Optional[FrameReader] = None, decode: Optional[Decoder] = None,
                  phases: Sequence[Phase] = limits.ARMS_PHASES, period_ms: int = OBSERVATION_PERIOD_MS,
-                 use_executor: bool = True, mirrored: bool = False) -> None:
+                 use_executor: bool = True, mirrored: bool = False,
+                 raise_grace_ms: int = limits.ARMS_RAISE_GRACE_MS) -> None:
         self._frame_reader = frame_reader
+        self.raise_grace_ms = int(raise_grace_ms)  # per hold phase: time to raise the hand before framing counts
         self.mirrored = mirrored  # for the production reader a run creates itself (a mirrored front camera)
         self._decode = decode
         self.phases = tuple(phases)
@@ -210,6 +221,7 @@ class StreamArms:
         next_emit_ms = 0
         last_ts = -1
         elapsed = 0
+        seen = {"left": False, "right": False}  # her hand seen at least once in its hold phase
 
         def observe(ms: int, quality: Quality, metrics: List[Metric], signal: str, phase: str = "capturing") -> None:
             nonlocal sequence
@@ -239,8 +251,14 @@ class StreamArms:
                     frames[side].append(reading)
                 elapsed = ms
 
-                if reading is None:
-                    new_status = "pending"  # settle or swap: nothing is judged, framing is never flagged
+                in_grace = False
+                if reading is not None and side is not None:
+                    if reading.usable:
+                        seen[side] = True
+                    elif not seen[side] and ms - phase[1] < self.raise_grace_ms:
+                        in_grace = True  # she is still raising the hand: not judged yet
+                if reading is None or in_grace:
+                    new_status = "pending"  # settle, swap or raise grace: nothing is judged, framing not flagged
                 else:
                     new_status = "usable" if reading.usable else "unusable"
                 if new_status != status or ms >= next_emit_ms:
@@ -250,7 +268,7 @@ class StreamArms:
                         observe(ms, Quality("pending", []), [], "none")
                     elif new_status == "usable":
                         metrics: List[Metric] = []
-                        sink = provisional_sink(frames[side], holds[side][0])
+                        sink = provisional_sink(frames[side], first_seen_ms(frames[side], *holds[side]))
                         if sink is not None:
                             metrics = [Metric(METRIC_ID, UNIT, sink)]
                         observe(ms, Quality("usable", []), metrics, "none")

@@ -142,7 +142,7 @@ class CallRig:
                     self.session.handle_resource_event(camera_event("evt_lost", "unavailable", 1))
                     self._lost_at = self.clock.now()
                 else:
-                    await self.stream(attempt_id, {"smile": 26, "arms": 61}.get(task, 0))
+                    await self.stream(attempt_id, {"smile": 26, "arms": 76}.get(task, 0))
                 continue
             if (self._lost_at is not None and not self._restored and self.restore_camera
                     and self.clock.now() - self._lost_at >= 2.0):
