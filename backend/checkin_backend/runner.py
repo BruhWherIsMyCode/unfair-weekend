@@ -10,6 +10,7 @@ a reading and always reports the session as incomplete.
 
 import asyncio
 import importlib.util
+import os
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -61,17 +62,21 @@ async def run_analysis_call(link: ClientLink, modules: str, database_path: str |
     """Agent 3's session over this link. All call settings are read by analysis.backend_entry (CALL_DRIVER, ...).
     `database_path` (DATABASE_PATH) turns on Agent 3's recording in the shared database; None leaves it off."""
     ensure_analysis_path()
-    from analysis.backend_entry import run_backend_call
+    from analysis.backend_entry import Settings, default_modules, run_backend_call
 
     # One writer for the shared database: when the call service's Store is on, Agent 3's recorder hands its jobs
     # to the same writer thread (its calls row is then always committed before ours; summaries stay the Store's).
     store = getattr(link, "store", None)
     submit = store._submit if (database_path and store is not None and getattr(store, "enabled", False)) else None
-    chosen = None
     if modules == "fake":
         from .fake_tasks import fake_modules
 
         chosen = fake_modules()
+    else:
+        from .native_tasks import protect_native_modules
+
+        settings = Settings(os.environ, link.person.person_id)
+        chosen = protect_native_modules(default_modules(settings.mirrored))
     return await run_backend_call(link, modules=chosen, database_path=database_path, submit=submit)
 
 
