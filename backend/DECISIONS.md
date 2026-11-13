@@ -18,6 +18,20 @@ The merged [Python foundation PR #8](https://github.com/BruhWherIsMyCode/unfair-
 
 ### Voice/video integration, 13 Nov
 
+#### Rendering readiness correction, issue #15
+
+The parent-client owner's real API trial identified a wrong assumption in the initial adapter: `POST /static/audio` returns before its MP4 is ready. The immediate GET failed on the expected rendering-time 404, and the downloader also rejected Simli's CDN redirect. The observed ETA field is spelled `mp4_availablility_eta_seconds` by the provider; it is not currently listed in the static-response OpenAPI properties.
+
+The corrected adapter waits ETA + 1 second (at most 60 seconds), retries only download-time 404/429 with 3-second × 1.5 backoff capped at 15 seconds, and respects longer numeric/date `Retry-After` values. Polling is bounded by 20 attempts and a five-minute overall download/readiness deadline after the generation request. The paid generation POST is never retried within this loop. A single 307 may switch download to HTTPS on `simlimicrocdn.blob.core.windows.net` under `/mp4/`; further retries stay there and another redirect is rejected. No account key is sent to either download host. Existing size/container validation and private atomic caching remain in place. Cancellation stops pending waits and leaves no partial ready asset.
+
+A regression test failed with the original `Simli video returned HTTP 404`, then passed for `404 → 429 → 404 → 307 → MP4`. Additional tests cover direct responses, retry-after dates/invalid hints, bounded ETA/attempts/deadline, CDN readiness, disallowed/second redirects, and shutdown. Automated tests use mocked providers and synthetic containers.
+
+One real greeting trial used the existing ignored provider configuration in the main working copy, without copying or logging credentials. ElevenLabs produced 2.508 seconds of speech; Simli preparation and download produced a 287,000-byte MP4 in 7.95 seconds total, with a direct HTTP 200 download after waiting. FFprobe reported H.264 768×768 at 25 fps and AAC 16 kHz mono, duration 2.64 seconds. FFmpeg decoded the whole audio/video without errors. The real trial did not exercise throttling or a CDN redirect; those paths are covered by mocks and the client's reported evidence in [issue #15](https://github.com/BruhWherIsMyCode/unfair-weekend/issues/15). Live STT, subjective voice/lip-sync quality and an iPhone call remain untested by Agent 2.
+
+Both providers offer streaming: ElevenLabs HTTP TTS `/stream`, Simli WebSocket input and WebRTC output; static Simli generation also returns HLS. The Python call path still uses prepared assets, keeping completion tied to the client's media player. A continuous-media client and its line-completion protocol would be a separate native/contract integration.
+
+#### Initial integration scope
+
 The human authorized reuse of `backend/` from PR #9 on `agent-2/backend` before canonical contracts have landed, and selected English. Only backend files were taken; the SQLite schema and current architecture decision were retained. The parent's native client is still owned separately.
 
 The service now runs registration/SSE, call commands, answer upload/transcription and an in-memory family feed. ElevenLabs generates PCM16 little-endian, 16 kHz mono; Scribe v2 transcribes ordinary answers in English. Speech generation is bounded, coalesced and cached privately on disk. Cached audio is read before credentials are checked, so prepared speech remains available when the voice provider is off. Uncached audio without a key remains an explicitly unvoiced demo.
