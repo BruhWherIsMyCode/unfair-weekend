@@ -9,11 +9,11 @@ from typing import Any
 
 from .media import jpeg_size
 
-WINDOW_MS = {"smile": 5000, "arms": 15000, "sentence": 12000}
+WINDOW_MS = {"smile": 6000, "arms": 15000, "sentence": 12000}
 SIGN = {"smile": "face", "arms": "arm", "sentence": "speech"}
 RESOURCE = {"smile": "camera", "arms": "camera", "sentence": "microphone"}
 CAPTURE = {
-    "smile": {"media_kind": "video", "duration_ms": 5000, "prepare_ms": 0, "stop_on_silence_ms": None,
+    "smile": {"media_kind": "video", "duration_ms": 6000, "prepare_ms": 0, "stop_on_silence_ms": None,
               "format": "jpeg", "sample_period_ms": 200},
     "arms": {"media_kind": "video", "duration_ms": 15000, "prepare_ms": 2000, "stop_on_silence_ms": None,
              "format": "jpeg", "sample_period_ms": 200},

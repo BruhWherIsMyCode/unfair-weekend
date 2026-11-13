@@ -1,6 +1,6 @@
 # Shared contract
 
-Published by Agent 3 from backend/proposals draft 0.2.0 on 13 Nov 2026. Updated to 0.3 on 13 Nov 2026 (section below).
+Published by Agent 3 from backend/proposals draft 0.2.0 on 13 Nov 2026. Updated to 0.3 and 0.4 on 13 Nov 2026 (sections below). In 0.4 `fixtures.json` differs from the draft in one fixture (`capture_smile`, 6000 ms).
 
 Files: `mvp.openapi.yaml`, `script.en.json`, `fixtures.json`. `fixtures.json` is still a copy of `backend/proposals/`. `script.en.json` is now intentionally newer than the draft (one-hand phone script, see 0.3). `mvp.openapi.yaml` is the published 0.2 text; the copy in `backend/proposals/` was relabelled "Historical 0.2" by Agent 2 and no longer matches byte for byte.
 
@@ -16,6 +16,16 @@ What is now APPLIED, in the contract and in the code on the phone path (the iPho
 6. **Baseline hygiene.** A call adds nothing to her usual when it is labelled `acted`, when a change was confirmed, when the status is `concern_raised`, or when ANY usable final reading in the call was outside her usual (confirmed or not).
 
 **Issue #10 (where is the measuring done).** For the weekend the phone sends pictures (JPEG, 640x480, every 200 ms) and the server measures them with Agent 3's stream tasks. Measuring on the client exists as the PC client protocol (`analysis/pc/protocol.md`: the client measures every frame and sends `reading`, the server runs the same task modules on the readings) and is the later iPhone path; nothing in the phone boundary has to change for it except the sample `format`.
+
+## Published 0.4 (13 Nov 2026)
+
+What changed after the owner's first real phone calls. Texts of the lines are in `contract/script.en.json` (owner-written).
+
+1. **Smile: 6 s with a relaxed phase and a cue.** The smile capture is `duration_ms: 6000` (the contract maximum stays 15000). Phases: `relax` 0-1.5 s, then the call plays the cue line `smile_now` 1.5 s into the capture (a `cues` entry of the task definition, the same mechanism as `swap_hands`), then `smile` 1.5-6 s. The relaxed reference of the reading is the median smile strength of the relax-phase frames (at least 3 usable; otherwise the older weakest-20 % rule), the peak is the strongest 20 % of the smile-phase frames. A smile that was already on the face before the cue, or none at all, gives no reading (`already_smiling`, `no_smile_seen`); too few face frames give `face_not_in_view`.
+2. **One repeat for a not-measured attempt.** An attempt that ends without a usable reading (unusable, could_not_perform, interrupted, failed) is repeated at most once; the second not-measured attempt of a task skips the task. The confirmation repeat after a usable reading outside her usual is unchanged; three attempts per task in total.
+3. **`show_your_hand`.** The `hint` of `task.progress` for the arms task is now `show_your_hand` (was `show_both_arms`). Both values stay in the enum: `show_both_arms` is only for old clients, a client should show the same text for both ("Show your hand").
+4. **`say` with `line_id: agent_remark`.** When the call agent (Claude) says something in its own words, the backend sends `kind: say` with `line_id: agent_remark` and the spoken sentence in `text` (at most 200 characters, no digits, at most 25 words, checked by the call code). `audio_path` and the optional `video_path` work as for any other line; the audio is generated on the fly, so a video clip exists only if one was already prepared. A client treats it like any other `say`.
+5. **New call-agent tools.** `say_own(text)` plays one own sentence; `ask_followup(question_id, text)` plays one own question and listens (`{"heard", "transcript"}`; one per question). Both are refused (nothing played) for text with a digit or `%`, over 25 words or 200 characters, a banned word, during an attempt, after the call ended, more than 10 own lines in a call, and in the last 30 s. `run_task` results carry `retry_hint` (null, or one of `face_not_in_view`, `already_smiling`, `no_smile_seen`, `hand_not_seen`, `hand_too_late`, `camera_lost`, `too_dark`, `other`) and `retry_hint_text` (a plain English phrase) when a not-measured attempt should be repeated. The fixed-order driver never uses these tools.
 
 ## Earlier deltas (status)
 

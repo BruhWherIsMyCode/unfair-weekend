@@ -262,6 +262,7 @@ async def drive(session: CallSession, adapter: FakeAdapter, clock: FakeClock, ca
 def report(session: CallSession, adapter: FakeAdapter, final: Dict[str, Any]) -> None:
     show_log(session)
     show("lines played", adapter.said)
+    show("own words played (say_own / ask_followup)", adapter.own_said)
     show("final SessionResult", final)
     show("baseline update (live label, per hand)", session.baseline_update())
     for item in adapter.published:
@@ -282,6 +283,11 @@ def scripted_claude_steps() -> List[Any]:
     steps: List[Any] = [tool_use_response("say", {"line_id": "greet"})]
     for question, value in (("q_medicine", "yes"), ("q_feeling", "I feel fine."), ("q_unusual", "Nothing unusual.")):
         steps.append(tool_use_response("ask", {"question_id": question}))
+        if question == "q_medicine":  # v11: one short reaction of its own after the first answer
+            steps.append(tool_use_response("say_own", {"text": "Good, thank you for telling me."}))
+        if question == "q_feeling":  # v11: one clarifying question, then the answer is recorded
+            steps.append(tool_use_response("ask_followup", {"question_id": question,
+                                                            "text": "What is the best part of your day so far?"}))
         steps.append(tool_use_response("record_answer", {"question_id": question, "value": value}))
     steps.append(tool_use_response("run_task", {"task": "smile"}))
     steps.append(Hang())  # the next request never answers: the agent times out and the fixed order takes over

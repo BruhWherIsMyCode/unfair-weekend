@@ -344,6 +344,7 @@ class DemoAgent:
         self.transcripts: Dict[str, str] = {}
         self.seen_numbers: List[Dict[str, Any]] = []
         self.alerted = False
+        self.reacted = False
 
     @staticmethod
     def _last_result(messages: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -385,6 +386,12 @@ class DemoAgent:
                 self.alerted = True
                 self.queue.insert(0, lambda: tool_use_response(
                     "alert_family", {"reason": "said_unwell", "note": "She said she feels numb on one side."}))
+            if last["question_id"] == "q_feeling":  # v11: one clarifying question on the feeling answer
+                self.queue.insert(0, lambda: tool_use_response(
+                    "ask_followup", {"question_id": "q_feeling", "text": "Can you tell me a little more about that?"}))
+            elif not self.reacted:  # v11: one short reaction of its own after the first answer
+                self.reacted = True
+                self.queue.insert(0, lambda: tool_use_response("say_own", {"text": "Thank you, that helps."}))
         elif tool == "run_task":
             if last.get("reading"):
                 self.seen_numbers.append({"task": last["task"], **last["reading"]})

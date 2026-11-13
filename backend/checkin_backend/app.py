@@ -231,6 +231,8 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
                people: Directory | None = None, clips: ClipGateway | None = None,
                live: LiveAvatarGateway | None = None) -> FastAPI:
     settings = settings if settings is not None else Settings.from_environment()
+    if settings.call_runner == "analysis":
+        choose_driver("analysis")  # refuses now, with the problems block, when measuring is not ready (not mid-call)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

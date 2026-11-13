@@ -217,15 +217,15 @@ struct CardContent: View {
     static func title(_ task: String) -> String {
         switch task {
         case "smile": return "Smile wide"
-        case "arms": return "Raise both arms"
+        case "arms": return "Raise one hand"
         default: return "Follow the voice"
         }
     }
 
     static func instruction(_ task: String) -> String {
         switch task {
-        case "smile": return "Look at the screen"
-        case "arms": return "Keep them up"
+        case "smile": return "Relax, then smile when asked"
+        case "arms": return "Left hand first, then swap"
         default: return "Look at the screen"
         }
     }
@@ -234,7 +234,8 @@ struct CardContent: View {
     static func hintText(_ hint: String?) -> String? {
         switch hint {
         case "look_at_camera": return "Look at the screen"
-        case "show_both_arms": return "Show both arms"
+        case "show_your_hand": return "Show your hand"
+        case "show_both_arms": return "Show your hand"
         case "check_camera": return "Check your camera"
         default: return nil
         }

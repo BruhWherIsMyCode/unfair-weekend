@@ -20,7 +20,7 @@ import threading
 from typing import Any, Callable, Dict, List, Optional
 
 from analysis import config
-from analysis.session import limits
+from analysis.session import limits, rules
 from analysis.storage import definitions, repo
 from analysis.storage.util import NotReady, StorageError, now_ms as _wall_ms, stored_id
 from analysis.storage.writer import Writer
@@ -198,7 +198,7 @@ class SessionRecorder:
             records = session.records_for(task)
             if records:
                 budgets[task] = {"attempts": len(records), "usable": sum(1 for r in records if r.usable),
-                                 "attempts_left": max(0, limits.MAX_ATTEMPTS_PER_TASK - len(records))}
+                                 "attempts_left": rules.attempts_left(records)}
         answers = session.answers
         return {"person_id": session.person_id, "label": session.label,
                 "required_tasks": list(session.required_tasks),

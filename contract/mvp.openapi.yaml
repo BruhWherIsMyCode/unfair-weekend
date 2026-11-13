@@ -16,7 +16,7 @@ x-task-definitions:
     sign: face
     instruction: task_smile
     repeat: repeat_smile
-    capture: {media_kind: video, duration_ms: 5000, prepare_ms: 0, stop_on_silence_ms: null, format: jpeg,
+    capture: {media_kind: video, duration_ms: 6000, prepare_ms: 0, stop_on_silence_ms: null, format: jpeg,
       sample_period_ms: 200}
     required_resource: camera
     observation_period_ms: 1000
@@ -210,6 +210,9 @@ components:
       - repeat_smile
       - repeat_arms
       - repeat_sentence
+      - swap_hands
+      - smile_now
+      - agent_remark
       - camera_unavailable
       - microphone_unavailable
       - bye
@@ -310,7 +313,7 @@ components:
         command_id: {$ref: '#/components/schemas/Id'}
         kind: {const: say}
         line_id: {$ref: '#/components/schemas/SpokenLine'}
-        text: {type: string, maxLength: 400, description: Rendered fixed script caption}
+        text: {type: string, maxLength: 400, description: 'Rendered fixed script caption; for line_id agent_remark the text of the assistant''s own words (at most 200 characters)'}
         audio_path: {type: string, pattern: '^/v1/calls/[A-Za-z0-9_-]+/speech/[A-Za-z0-9_-]+$'}
         duration_ms: {type: integer, minimum: 1, maximum: 30000}
     ClientCommandEvent:
@@ -743,7 +746,7 @@ components:
         elapsed_ms: {type: integer, minimum: 0, maximum: 15000}
         phase: {type: string, enum: [capturing, finalizing, stopped]}
         input_quality: {type: string, enum: [pending, usable, unusable]}
-        hint: {type: [string, 'null'], enum: [null, look_at_camera, show_both_arms, check_camera, check_microphone]}
+        hint: {type: [string, 'null'], enum: [null, look_at_camera, show_both_arms, show_your_hand, check_camera, check_microphone]}
       description: Neutral parent UI projection only. Never includes metric values, outside flags or a health
         verdict.
 x-interrupt-policy:

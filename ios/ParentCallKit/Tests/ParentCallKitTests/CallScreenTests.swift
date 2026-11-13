@@ -41,7 +41,7 @@ final class CallScreenTests: XCTestCase {
         r.apply(.captureCommanded(task: "smile", durationMs: 5000))
         XCTAssertEqual(r.screen.card, .task(step: 1, total: 3, task: "smile", timer: .waiting(totalSeconds: 5), hint: nil))
 
-        r.apply(.speaking(lineId: "task_arms", text: "Raise both arms.", durationMs: 1500, at: t0))
+        r.apply(.speaking(lineId: "task_arms", text: "Raise your left hand.", durationMs: 1500, at: t0))
         r.apply(.captureCommanded(task: "arms", durationMs: 12000))
         XCTAssertEqual(r.screen.card, .task(step: 2, total: 3, task: "arms", timer: .waiting(totalSeconds: 12), hint: nil))
         XCTAssertEqual(r.screen.dot(.smile), .done)

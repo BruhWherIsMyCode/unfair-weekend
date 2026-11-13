@@ -108,12 +108,24 @@ def test_no_interrupt_after_input_closed_even_without_new_samples():
 
 # ---- budget ------------------------------------------------------------------------------------
 
-def test_budget_allows_three_attempts_and_refuses_the_fourth():
+def test_a_not_measured_attempt_is_repeated_once_and_the_second_skips_the_task():
+    """v11: one repeat for a not-measured attempt (was: three technical retries)."""
     assert rules.attempt_budget([]) is None
-    assert rules.attempt_budget([rec(usable=False, outcome="interrupted"), rec(usable=False, outcome="failed")]) is None
-    three = [rec(usable=False, outcome="interrupted"), rec(usable=False, outcome="failed"),
-             rec(usable=False, outcome="interrupted")]
-    assert rules.attempt_budget(three) == "attempt_budget_exhausted"
+    one = [rec(usable=False, outcome="interrupted")]
+    assert rules.attempt_budget(one) is None and rules.attempts_left(one) == 1
+    two = [rec(usable=False, outcome="interrupted"), rec(usable=False, outcome="failed")]
+    assert rules.attempt_budget(two) == "attempt_budget_exhausted" and rules.attempts_left(two) == 0
+    for outcome in ("could_not_perform", "completed"):  # unusable and could_not_perform count the same way
+        assert rules.attempt_budget([rec(usable=False, outcome=outcome)] * 2) == "attempt_budget_exhausted"
+
+
+def test_the_confirmation_repeat_after_a_usable_reading_is_unchanged_and_three_is_the_cap():
+    assert rules.attempt_budget([rec(0.2)]) is None and rules.attempts_left([rec(0.2)]) == 2
+    mixed = [rec(0.2), rec(usable=False, outcome="interrupted")]  # usable + one not measured: one more allowed
+    assert rules.attempt_budget(mixed) is None and rules.attempts_left(mixed) == 1
+    assert rules.attempt_budget(mixed + [rec(0.2)]) == "attempt_budget_exhausted"  # three in total is the cap
+    assert rules.attempt_budget(mixed + [rec(usable=False, outcome="failed")]) == "attempt_budget_exhausted"
+    assert rules.attempt_budget([rec(0.2), rec(0.2)]) == "usable_readings_complete"
 
 
 def test_budget_stops_after_two_usable_readings():

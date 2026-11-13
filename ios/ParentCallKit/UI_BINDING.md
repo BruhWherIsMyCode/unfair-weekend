@@ -30,8 +30,8 @@ Keep looks from the design, take behaviour from this file.
 |---|---|---|
 | `.assistant(subtitle)` | 4 Avatar explains | label "Assistant", word-by-word subtitles |
 | `.question(n, 3, subtitle, listening)` | 5 Question | "Question n of 3", subtitles; Listening indicator on the right only when `listening == true` |
-| `.task(step, 3, "smile", timer, hint)` | 6 Smile | "Step 1 of 3", "Smile wide", "Look at the screen" |
-| `.task(step, 3, "arms", timer, hint)` | 7 Arms | "Step 2 of 3", "Raise both arms", "Keep them up" |
+| `.task(step, 3, "smile", timer, hint)` | 6 Smile | "Step 1 of 3", "Smile wide", "Relax, then smile when asked" |
+| `.task(step, 3, "arms", timer, hint)` | 7 Arms | "Step 2 of 3", "Raise one hand", "Left hand first, then swap" |
 | `.sentence(3, 3, sentence, listening)` | 8 Sentence | "Step 3 of 3", `"\(sentence)"` in quotes 30 pt, "Say it out loud"; Listening when `listening` |
 | `nil` | right after answer | card not shown yet (entrance animation starts on first non-nil) |
 
@@ -50,10 +50,11 @@ Fixed task texts belong to the UI. The sentence text comes from the backend: the
 - **Timer ring** (`timer`):
   - `.waiting(total)`: the instruction is still playing, so show a full ring with `total`, not moving.
   - `.running(endsAt, total)`: count down from `ceil(endsAt - now)`. Progress = remaining / total, and the
-    number goes 5 → 0 or 12 → 0. The design says 10 for arms; the backend window is 12 s.
+    number goes 6 → 0 or 15 → 0 (smile and arms; the defaults when the capture command has no duration). The design says 10 for arms; the backend window is 15 s.
   - `.finished`: the ring turns green and the number becomes a check mark.
 - **Hint**: optional neutral line under the task text. `look_at_camera` → "Look at the screen",
-  `show_both_arms` → "Show both arms", `check_camera` → "Check your camera".
+  `show_your_hand` → "Show your hand" (`show_both_arms`, sent by old backends, shows the same text),
+  `check_camera` → "Check your camera".
 - **Recovery** (camera lost mid-task): the backend speaks `camera_unavailable`. The card becomes `.assistant`
   with that line, the progress dot stays on the task, and a retry comes back as a new `.task`. Nothing special is needed.
 - **Repeats**: `repeat_smile` / `repeat_arms` produce a fresh `.task(... .waiting)` for the same step. The

@@ -1,7 +1,7 @@
 """Pure decision rules of the call session. No I/O, no clock reads: callers pass the times in.
 
 - decide_interrupt: should the active attempt stop, and why (plan section 5).
-- attempt_budget: three attempts per task, at most two usable.
+- attempt_budget: three attempts per task, at most two usable, at most two not measured (one repeat).
 - evaluate_sign / session_status: deterministic confirmation and session status (plan "Attempt and session rules").
 - baseline_values_to_store: which finished attempts may enter the baseline.
 """
@@ -126,12 +126,25 @@ class FinalRecord:
 
 
 def attempt_budget(records: Sequence[FinalRecord]) -> Optional[str]:
-    """None when another attempt of this task is allowed, else the reason (a slug)."""
+    """None when another attempt of this task is allowed, else the reason (a slug).
+
+    Three attempts in total, at most two usable, and at most two NOT-measured ones (unusable, could_not_perform,
+    interrupted, failed): one repeat for a not-measured attempt, then the task is skipped."""
     if len(records) >= limits.MAX_ATTEMPTS_PER_TASK:
         return "attempt_budget_exhausted"
     if sum(1 for r in records if r.usable) >= limits.MAX_USABLE_PER_TASK:
         return "usable_readings_complete"
+    if sum(1 for r in records if not r.usable) >= limits.MAX_NOT_MEASURED_PER_TASK:
+        return "attempt_budget_exhausted"
     return None
+
+
+def attempts_left(records: Sequence[FinalRecord]) -> int:
+    """How many more attempts of this task the budget allows (0 when attempt_budget gives a reason)."""
+    if attempt_budget(records) is not None:
+        return 0
+    not_measured = sum(1 for r in records if not r.usable)
+    return max(0, min(limits.MAX_ATTEMPTS_PER_TASK - len(records), limits.MAX_NOT_MEASURED_PER_TASK - not_measured))
 
 
 # ---- confirmation and status ----------------------------------------------------------------

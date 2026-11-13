@@ -127,7 +127,7 @@ def test_too_few_usable_frames_is_unusable_with_reasons():
     d = result.to_dict()
     assert d["outcome"] == "completed" and d["quality"]["status"] == "unusable" and d["reading"] is None
     assert d["performance"] == "uncertain"
-    assert d["quality"]["reasons"] == ["too_few_usable_frames", "face_not_found"]
+    assert d["quality"]["reasons"] == ["face_not_in_view", "face_not_found"]  # v11: the reason is face_not_in_view
     assert all(o.signal == "framing_unusable" for o in obs if o.phase == "capturing")
 
 

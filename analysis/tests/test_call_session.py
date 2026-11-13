@@ -197,10 +197,11 @@ def test_routine_observations_do_not_resolve_the_task_and_send_neutral_progress_
 
 # ---- budget and resources -------------------------------------------------------------------------
 
-def test_fourth_attempt_is_refused_without_touching_the_client():
+def test_third_not_measured_attempt_is_refused_without_touching_the_client():
+    """v11: a not-measured attempt is repeated once; the second one skips the task."""
     async def scenario():
         rig = Rig()
-        for _ in range(3):
+        for _ in range(2):
             await rig.start()
             rig.module.finish(failed_result(rig))
             await rig.clock.settle()
@@ -209,7 +210,7 @@ def test_fourth_attempt_is_refused_without_touching_the_client():
         refused = await rig.session.run_task("smile")
         assert refused["outcome"] == "failed" and refused["quality"]["reasons"] == ["attempt_budget_exhausted"]
         assert refused["attempt_id"].startswith("refused_")
-        assert len(rig.session.attempts) == 3
+        assert len(rig.session.attempts) == 2
         assert len([c for c in rig.adapter.calls if c[0] == "start_capture"]) == starts_before
         assert rig.kinds("task_refused")[-1]["reason"] == "attempt_budget_exhausted"
 

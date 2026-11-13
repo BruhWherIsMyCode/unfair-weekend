@@ -110,6 +110,44 @@ def format_log_line(entry: Dict[str, Any], session: Any) -> Optional[str]:
     return "%6.1fs %-26s %s" % (entry["t"], shown[kind], json.dumps(rest, sort_keys=True) if rest else "")
 
 
+def format_terminal_line(entry: Dict[str, Any], session: Any) -> Optional[str]:
+    """One plain line per step for the terminal of the phone path (v11). Unlike format_log_line it never shows a
+    transcript, a number of a reading or a key: lines said (id, or `own: <text>` for the agent's own words), whether an
+    answer was heard (yes/no), the end of every attempt (task, attempt id, outcome, reasons, retry_hint), the switch to
+    the fixed order with its reason, and the final status. Every other entry is formatted as in format_log_line."""
+    kind = entry["kind"]
+    stamp = "%6.1fs " % entry["t"]
+    if kind == "line_said":
+        return stamp + "said: %s" % entry.get("line")
+    if kind == "own_line":
+        return stamp + "said: own: %s" % entry.get("text")
+    if kind == "answer_heard":
+        return stamp + "answer heard (%s): %s%s" % (entry.get("question"), "yes" if entry.get("heard") else "no",
+                                                    " (follow-up)" if entry.get("followup") else "")
+    if kind == "attempt_finished":
+        last = session.results[-1] if session.results else {}
+        quality = last.get("quality") or {}
+        interruption = last.get("interruption") or {}
+        measured = (last.get("outcome") == "completed" and quality.get("status") == "usable"
+                    and last.get("reading") is not None)
+        line = "attempt %s of %s ended: %s" % (entry.get("attempt_id"), last.get("task"), last.get("outcome"))
+        if interruption:
+            line += " | interrupted: %s" % interruption.get("code")
+        reasons = ",".join(quality.get("reasons") or [])
+        if reasons:
+            line += " | reasons: %s" % reasons
+        if not measured and last:
+            from analysis.session.agent_tools import retry_hint_for
+
+            line += " | retry_hint: %s" % retry_hint_for(str(last.get("task")), last)
+        return stamp + line
+    if kind == "agent_fallback":
+        return stamp + "claude gave way to the fixed order: %s" % entry.get("reason")
+    if kind == "call_finished":
+        return stamp + "call finished, status: %s" % entry.get("status")
+    return format_log_line(entry, session)
+
+
 def build_record(call_id: str, person: str, label: str, claude: str, safety_floor: bool, summary: Dict[str, Any],
                  family_text: str, session_log: Any, started_wall: float) -> Dict[str, Any]:
     return {"call_id": call_id, "person": person, "label": label, "claude": claude,

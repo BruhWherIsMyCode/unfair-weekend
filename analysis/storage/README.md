@@ -135,6 +135,9 @@ exists ONLY in the JSON file is ignored as soon as the database has a snapshot o
 1. **`concern_raised`**: our `SessionResult.status` has it (v7, the agent's `alert_family`); `session_summaries.status` and
    `family_messages.kind` do not. We store `incomplete` and keep the real status in `summary_json.session_status`.
 2. **`alert_family` is not in `tool_calls.tool_name`**: no tool row is written; the model turn keeps it (note omitted).
+   The same holds for the v11 tools **`say_own`** and **`ask_followup`** (the agent's own words): no tool row (`repo.DB_TOOLS`
+   does not list them), the model turn keeps them with the text of the agent's own sentence (the agent's words, never hers).
+   The follow-up answer is not stored as a separate answer row; the recorded answer is what `record_answer` stores.
 3. **Arms has two ranges (one per hand), a snapshot has one.** Arms snapshots are stored not ready with null bounds, arms
    results with a value and NO comparison; both hands' values are in the `attempt.finalized` event payload (`values`), and the
    next call's arms usual is rebuilt from the members' payloads. A ready arms usual in the database therefore appears as `ready=0`.

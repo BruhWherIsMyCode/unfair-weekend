@@ -3,7 +3,12 @@
 Every guard lives here, so no driver can skip it. The handlers call CallSession and the adapter; they never touch
 readings, confirmation or the family message (those stay in CallSession code).
 
-Tools (exact names): say, ask, record_answer, run_task, recover_resource, finish_call, alert_family.
+Tools (exact names): say, ask, record_answer, run_task, recover_resource, finish_call, alert_family, and (v11,
+her own words for the agent) say_own, ask_followup. The two need the adapter capability `say_text`; without it, or
+for a text that breaks a guard (empty, over 25 words / 200 characters, a digit or %, a banned word), or while an
+attempt runs, after the call ended, past OWN_LINES_MAX, past one follow-up per question, for a question that is
+already recorded, or in the last FINISH_GUARD_S seconds, they are refused and nothing is played. The fixed-order
+driver never uses them.
 A refused step returns {"error": "not allowed: <plain reason>", "allowed": [<tool names allowed now>]} and changes
 nothing. After hang-up every tool returns {"error": "call ended"} and nothing reaches the client.
 
@@ -17,16 +22,91 @@ Pure Python + asyncio. No network, no mediapipe.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from analysis.session import limits, rules
 from analysis.tasks.stream_base import NOT_IMPLEMENTED
 
-TOOL_NAMES = ("say", "ask", "record_answer", "run_task", "recover_resource", "finish_call", "alert_family")
+TOOL_NAMES = ("say", "ask", "record_answer", "run_task", "recover_resource", "finish_call", "alert_family",
+              "say_own", "ask_followup")
+OWN_TOOLS = ("say_own", "ask_followup")
 VIDEO_TASKS = ("smile", "arms")
 STOP_REASON = "she_asked_to_stop"
 SCRIPT_PATH = Path(__file__).resolve().parents[2] / "contract" / "script.en.json"
+
+
+def _banned_pattern() -> "re.Pattern[str]":
+    forms = set()
+    for word in limits.OWN_LINE_BANNED_WORDS:
+        stem = word[:-1] if word.endswith("e") else word
+        forms.update({word, word + "s", word + "es", word + "d", word + "ed", word + "ion", word + "ions",
+                      stem + "ion", stem + "ions", stem + "ing"})
+    forms.update({"emergencies", "diagnosis", "safety", "safely"})
+    alternatives = "|".join(sorted((re.escape(f) for f in forms), key=len, reverse=True))
+    return re.compile(r"(?<![\w-])(?:%s)(?![\w-])" % alternatives, re.IGNORECASE)
+
+
+_BANNED = _banned_pattern()
+
+
+def own_text_problem(text: Any) -> Optional[str]:
+    """Why a text may not be spoken as the agent's own words (a plain reason), or None when it is fine."""
+    if not isinstance(text, str) or not text.strip():
+        return "the text is empty"
+    if len(text) > limits.OWN_LINE_MAX_CHARS:
+        return "the text is longer than %d characters" % limits.OWN_LINE_MAX_CHARS
+    if len(text.split()) > limits.OWN_LINE_MAX_WORDS:
+        return "the text is longer than %d words" % limits.OWN_LINE_MAX_WORDS
+    if re.search(r"[\d%]", text):
+        return "the text must not contain digits or a percent sign"
+    found = _BANNED.search(text)
+    if found:
+        return "the word %r must not be used" % found.group(0).lower()
+    return None
+
+
+# retry_hint slug -> plain phrase Claude can rephrase
+RETRY_HINT_TEXT = {
+    "face_not_in_view": "her face was not in view",
+    "already_smiling": "she was already smiling before the cue",
+    "no_smile_seen": "no smile was seen",
+    "hand_not_seen": "her hand was not seen",
+    "hand_too_late": "her hand came up too late",
+    "camera_lost": "the picture was lost",
+    "too_dark": "it was too dark to see her",
+    "other": "it did not work out that time",
+}
+_LOST_CODES = ("camera_unavailable", "microphone_unavailable", "no_samples", "capture_failed", "analysis_stalled",
+               "camera_lost", "image_could_not_be_decoded", "cancelled", "timeout", "call_ended")
+
+
+def retry_hint_for(task: str, result: Dict[str, Any]) -> str:
+    """One slug of limits.RETRY_HINTS for a not-measured attempt, from its quality reasons and interruption."""
+    quality = result.get("quality") or {}
+    reasons = [str(r) for r in (quality.get("reasons") or [])]
+    interruption = result.get("interruption") or {}
+    if interruption.get("code"):
+        reasons.append(str(interruption["code"]))
+    default_slug = "hand_not_seen" if task == "arms" else "face_not_in_view"
+    for r in reasons:
+        if r in limits.RETRY_HINTS and r != "other":
+            return r
+    for r in reasons:
+        if "dark" in r or "light" in r:
+            return "too_dark"
+        if "too_late" in r:
+            return "hand_too_late"
+        if "hand" in r and "not_seen" in r or "hand_not_found" in r or "no_hand" in r:
+            return "hand_not_seen"
+        if r in ("framing_unusable", "too_few_usable_frames", "task_unperformable"):
+            return default_slug if r != "task_unperformable" or task == "arms" else "no_smile_seen"
+        if r.startswith("face_") or r.startswith("head_") or r == "eyes_at_the_same_spot":
+            return "face_not_in_view"
+        if r in _LOST_CODES:
+            return "camera_lost"
+    return "other"
 
 
 def load_script(path: Optional[Path] = None) -> Dict[str, str]:
@@ -48,6 +128,11 @@ class ToolHandlers:
         self.recorded: Dict[str, bool] = {q: False for q in limits.QUESTIONS}
         self.not_implemented: set = set()
         self.alerts = 0  # alert_family calls accepted in this call
+        self.own_lines = 0  # say_own + ask_followup accepted in this call
+        self.followups: Dict[str, int] = {q: 0 for q in limits.QUESTIONS}
+        self.followup_heard: Dict[str, bool] = {q: False for q in limits.QUESTIONS}
+        self.followup_transcripts: Dict[str, str] = {q: "" for q in limits.QUESTIONS}
+        self.finishing = False  # finish_call is running
 
     # ---- state views --------------------------------------------------------------------------------
 
@@ -111,10 +196,7 @@ class ToolHandlers:
         return self._resource_state(task) != "available" and not self.session.recovery_pending(resource)
 
     def attempts_left(self, task: str) -> int:
-        records = self.session.records_for(task)
-        if rules.attempt_budget(records) is not None:
-            return 0
-        return max(0, limits.MAX_ATTEMPTS_PER_TASK - len(records))
+        return rules.attempts_left(self.session.records_for(task))
 
     def task_open(self, task: str) -> bool:
         """A required task that still has budget, an available resource and no settled result."""
@@ -175,7 +257,36 @@ class ToolHandlers:
             out.append("finish_call")
         if self.alerts < limits.ALERT_MAX_PER_CALL:
             out.append("alert_family")
+        if self._own_refusal() is None:
+            out.append("say_own")
+            if any(self._followup_refusal(q) is None for q in limits.QUESTIONS):
+                out.append("ask_followup")
         return out
+
+    # ---- own words (v11) -------------------------------------------------------------------------------
+
+    def _own_refusal(self) -> Optional[str]:
+        """Why NO own line is possible right now (independent of the text), or None."""
+        if getattr(self.adapter, "say_text", None) is None:
+            return "your own words are not available on this connection"
+        if self.ended or self.finishing:
+            return "the call is ending"
+        if self.session.active_attempt_id is not None:
+            return "a check is running"
+        if self.own_lines >= limits.OWN_LINES_MAX:
+            return "you already used %d own lines in this call" % limits.OWN_LINES_MAX
+        if self.session.time_left_s() < limits.FINISH_GUARD_S:
+            return "the call is almost over"
+        return None
+
+    def _followup_refusal(self, q: str) -> Optional[str]:
+        if self.asks[q] == 0:
+            return "ask this question first"
+        if self.recorded[q]:
+            return "her answer to this question is already recorded"
+        if self.followups[q] >= limits.FOLLOWUPS_PER_QUESTION:
+            return "this question already had its follow-up"
+        return None
 
     def plain_state(self) -> Dict[str, Any]:
         """The current state in plain facts (no readings), for a stale answer."""
@@ -194,7 +305,9 @@ class ToolHandlers:
                         "recovery_pending": self.session.recovery_pending(limits.TASK_RESOURCE[t])}
         return {"ended": self.ended, "greeted": self.greeted,
                 "questions": {q: {"asks": self.asks[q], "heard": self.heard[q], "recorded": self.recorded[q],
-                                  "transcript": self.transcripts[q]} for q in limits.QUESTIONS},
+                                  "transcript": self.transcripts[q], "followups": self.followups[q],
+                                  "followup_transcript": self.followup_transcripts[q]}
+                              for q in limits.QUESTIONS},
                 "tasks": tasks}
 
     # ---- tool definitions for the Anthropic Messages API -------------------------------------------------
@@ -239,6 +352,22 @@ class ToolHandlers:
                  "reason": {"type": "string", "enum": list(limits.ALERT_REASONS)},
                  "note": {"type": "string", "maxLength": limits.ALERT_NOTE_MAX_CHARS}},
                  "required": ["reason", "note"], "additionalProperties": False}},
+            {"name": "say_own", "description": "Say one or two short sentences of your own to her: react to what she "
+             "just said or to what just happened, or tell her in a few words why a check is repeated (use the "
+             "result's retry_hint). At most %d words, no digits, none of these words: %s. At most %d own lines in the "
+             "call (say_own and ask_followup together); not while a check runs."
+             % (limits.OWN_LINE_MAX_WORDS, ", ".join(limits.OWN_LINE_BANNED_WORDS), limits.OWN_LINES_MAX),
+             "input_schema": {"type": "object", "properties": {"text": {"type": "string",
+                                                                       "maxLength": limits.OWN_LINE_MAX_CHARS}},
+                              "required": ["text"], "additionalProperties": False}},
+            {"name": "ask_followup", "description": "Ask her ONE short clarifying question about her answer to a "
+             "question you asked, and listen. At most one follow-up per question, only before you record that "
+             "answer. Same limits on the text as say_own. Returns heard (true/false) and transcript (what she said, "
+             "or null).",
+             "input_schema": {"type": "object", "properties": {
+                 "question_id": {"type": "string", "enum": list(limits.QUESTIONS)},
+                 "text": {"type": "string", "maxLength": limits.OWN_LINE_MAX_CHARS}},
+                 "required": ["question_id", "text"], "additionalProperties": False}},
         ]
 
     # ---- validation and guards --------------------------------------------------------------------------
@@ -251,9 +380,15 @@ class ToolHandlers:
             return "input must be an object"
         allowed_keys = {"say": {"line_id"}, "ask": {"question_id"}, "record_answer": {"question_id", "value"},
                         "run_task": {"task"}, "recover_resource": {"resource"}, "finish_call": {"reason"},
-                        "alert_family": {"reason", "note"}}[name]
+                        "alert_family": {"reason", "note"}, "say_own": {"text"},
+                        "ask_followup": {"question_id", "text"}}[name]
         if set(args) - allowed_keys:
             return "unexpected fields"
+        if name in OWN_TOOLS:
+            if not isinstance(args.get("text"), str):
+                return "text must be a string"
+            if name == "ask_followup" and args.get("question_id") not in limits.QUESTIONS:
+                return "question_id must be one of %s" % ", ".join(limits.QUESTIONS)
         if name == "say" and args.get("line_id") not in limits.SAYABLE_LINES:
             return "line_id must be greet or setup_phone"
         if name in ("ask", "record_answer") and args.get("question_id") not in limits.QUESTIONS:
@@ -307,6 +442,11 @@ class ToolHandlers:
             if self.alerts >= limits.ALERT_MAX_PER_CALL:
                 return "the family was already alerted %d times in this call" % limits.ALERT_MAX_PER_CALL
             return None
+        if name in OWN_TOOLS:
+            reason = self._own_refusal()
+            if reason is None and name == "ask_followup":
+                reason = self._followup_refusal(args["question_id"])
+            return reason or own_text_problem(args["text"])
         return None
 
     # ---- execution ----------------------------------------------------------------------------------------
@@ -348,12 +488,54 @@ class ToolHandlers:
             pass
 
     async def _play(self, line_id: str) -> bool:
+        self.session.note("line_said", line=line_id)
         try:
             await self.adapter.say(line_id)
             return True
         except Exception as exc:
             self.session.note("say_failed", line=line_id, error=type(exc).__name__)
             return False
+
+    async def _play_own(self, text: str, tool: str, question: Optional[str] = None) -> bool:
+        """Play the agent's own words through the adapter's optional say_text; counted as one own line."""
+        self.own_lines += 1
+        fields: Dict[str, Any] = {"tool": tool, "text": text}
+        if question is not None:
+            fields["question"] = question
+        self.session.note("own_line", **fields)
+        try:
+            await self.adapter.say_text(text)
+            return True
+        except Exception as exc:
+            self.session.note("say_failed", line="agent_remark", error=type(exc).__name__)
+            return False
+
+    async def _do_say_own(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        played = await self._play_own(args["text"].strip(), "say_own")
+        if self.session.hung_up:
+            return {"error": "call ended"}
+        return {"said": "own", "played": played}
+
+    async def _do_ask_followup(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        q = args["question_id"]
+        self.followups[q] += 1
+        text: Optional[str] = None
+        if await self._play_own(args["text"].strip(), "ask_followup", q):
+            if self.session.hung_up:
+                return {"error": "call ended"}
+            try:
+                text = await self.adapter.listen(q, limits.LISTEN_TIMEOUT_S)
+            except Exception as exc:
+                self.session.note("listen_failed", question=q, error=type(exc).__name__)
+        if self.session.hung_up:
+            return {"error": "call ended"}
+        heard = isinstance(text, str) and text.strip() != ""
+        self.followup_heard[q] = heard
+        if heard:
+            self.followup_transcripts[q] = text.strip()
+        self.session.note("answer_heard", question=q, heard=heard, followup=True)
+        return {"heard": heard,
+                "transcript": self.followup_transcripts[q][:limits.TRANSCRIPT_TO_CLAUDE_CHARS] if heard else None}
 
     async def _do_say(self, args: Dict[str, Any]) -> Dict[str, Any]:
         line = args["line_id"]
@@ -382,6 +564,7 @@ class ToolHandlers:
             self._rec("answer_heard", q, "interrupted", None)
             return {"error": "call ended"}
         heard = isinstance(text, str) and text.strip() != ""
+        self.session.note("answer_heard", question=q, heard=heard)
         if heard:
             self.heard[q] = True
             self.transcripts[q] = text.strip()
@@ -404,7 +587,8 @@ class ToolHandlers:
             self.session.note("task_not_implemented", task=task, reason=reason)
             return {"task": task, "outcome": "failed", "quality": "unusable", "reasons": [reason],
                     "interruption": None, "attempts_left": 0, "needs_another_reading": False, "skip": True,
-                    "resources": self.resource_states(), "reading": None, "baseline_ready": False}
+                    "resources": self.resource_states(), "reading": None, "baseline_ready": False,
+                    "retry_hint": None, "retry_hint_text": None}
         if task in VIDEO_TASKS and not self.setup_played:
             await self._play("setup_phone")
             self.setup_played = True
@@ -444,6 +628,12 @@ class ToolHandlers:
                "attempts_left": self.attempts_left(task), "needs_another_reading": self.needs_another(task),
                "skip": self.skip(task), "resources": self.resource_states(),
                "reading": self._reading_facts(result.get("reading"), ready), "baseline_ready": ready}
+        # retry_hint: only for a repeat of a NOT-measured attempt (a confirmation repeat after a usable reading has none)
+        measured = (result["outcome"] == "completed" and result["quality"]["status"] == "usable"
+                    and result.get("reading") is not None)
+        hint = retry_hint_for(task, result) if (out["needs_another_reading"] and not measured) else None
+        out["retry_hint"] = hint
+        out["retry_hint_text"] = RETRY_HINT_TEXT[hint] if hint else None
         if task == "sentence":  # v8: the speech numbers (Claude cannot hear; the code turned the word timings into numbers)
             details = getattr(self._module("sentence"), "attempt_details", None)
             out["speech"] = details(result.get("attempt_id")) if callable(details) else None
@@ -472,6 +662,7 @@ class ToolHandlers:
         """Say goodbye (inside session.finish), publish the final summary, mark the call finished.
 
         Used by finish_call after its guard, and by the fixed-order driver as the last step of a call."""
+        self.finishing = True
         await self.session.finish()
         self.finished = True
         return {"finished": True}

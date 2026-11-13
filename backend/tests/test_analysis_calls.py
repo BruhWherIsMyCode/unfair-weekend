@@ -112,7 +112,7 @@ async def test_a_normal_call_says_swap_hands_during_the_arms_capture_is_as_usual
     assert status["summary"]["status"] == "as_usual"
     assert status["message"]["kind"] == "as_usual"
     assert [m["phase"] for m in family] == ["final"]
-    order = ["greet", "q_medicine", "q_feeling", "q_unusual", "setup_phone", "task_smile", "task_arms", "swap_hands", "bye"]
+    order = ["greet", "q_medicine", "q_feeling", "q_unusual", "setup_phone", "task_smile", "smile_now", "task_arms", "swap_hands", "bye"]
     positions = [sim.said.index(line) for line in order]
     assert positions == sorted(positions), sim.said
     assert "task_sentence" not in sim.said  # the sentence is not measured on the phone path

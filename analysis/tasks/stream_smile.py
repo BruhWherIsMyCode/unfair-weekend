@@ -12,18 +12,20 @@ from __future__ import annotations
 
 import asyncio
 import math
-from typing import Any, AsyncIterator, Callable, Dict, List, Optional
+from statistics import median
+from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Tuple
 
 from analysis import baseline as baseline_mod
 from analysis import config
 from analysis.face_metric import FrameReading, clip_reading, frame_reading
+from analysis.session import limits
 from analysis.session.models import (Metric, Quality, Reading, TaskContext, TaskObservation, TaskResult)
 from analysis.tasks import stream_base
 
 METRIC_ID = "corner_height_v1"  # versioned name of the primary reading (config PRIMARY corner_height)
 UNIT = "eye_distance"  # distance below the eye line, in units of the eye-to-eye distance
 PRIMARY = "corner_height"
-WINDOW_MS = 5000
+WINDOW_MS = 6000  # v11: 0-1.5 s relax, the session plays `smile_now` at 1.5 s, 1.5-6 s smile (limits.SMILE_PHASES)
 OBSERVATION_PERIOD_MS = 1000
 
 FrameReader = Callable[[Any, int], Optional[FrameReading]]
@@ -62,22 +64,63 @@ def _default_decoder() -> Decoder:
     return decode_jpeg
 
 
+def phase_reading(frame_readings: List[Optional[FrameReading]],
+                  relax_end_ms: int = limits.SMILE_CUE_MS) -> Tuple[str, Optional[float], Optional[str]]:
+    """Frame readings -> (status, corner_height, reason). A pure function on made-up or real frame readings.
+
+    status is "usable" (corner_height is the value), "not_measured" (reason is already_smiling or no_smile_seen)
+    or "unusable" (reason is face_not_in_view).
+
+    With at least SMILE_MIN_PHASE_FRAMES usable frames in the relax phase (before `relax_end_ms`) and in the smile
+    phase, the relaxed reference is the median smile strength of the relax frames and the peak is the median of the
+    strongest 20 % (at least 3) of the smile-phase frames. Otherwise the old rule applies (weakest 20 % against
+    strongest 20 % of all usable frames, face_metric.clip_reading). The mouth-corner height is the median over the
+    peak frames in both cases. Not enough rise: relaxed at or above SMILE_ALREADY_SMILING = already_smiling, else
+    no_smile_seen."""
+    frames = [f for f in frame_readings if f is not None]
+    usable = [f for f in frames if f.usable and f.smile_strength is not None and f.corner_height is not None]
+    if len(usable) < config.MIN_USABLE_FRAMES:
+        return "unusable", None, "face_not_in_view"
+    relax = [f for f in usable if f.timestamp_ms < relax_end_ms]
+    smile = [f for f in usable if f.timestamp_ms >= relax_end_ms]
+    if len(relax) >= limits.SMILE_MIN_PHASE_FRAMES and len(smile) >= limits.SMILE_MIN_PHASE_FRAMES:
+        relaxed = float(median([f.smile_strength for f in relax]))
+        n_peak = min(len(smile), max(config.MIN_PEAK_FRAMES, int(round(len(smile) * config.PEAK_FRACTION))))
+        peak_frames = sorted(smile, key=lambda f: f.smile_strength)[len(smile) - n_peak:]
+        peak = float(median([f.smile_strength for f in peak_frames]))
+        height = float(median([f.corner_height for f in peak_frames]))
+    else:
+        clip = clip_reading(frames)
+        if clip.quality == "usable":
+            return "usable", clip.readings().get(PRIMARY), None
+        if clip.peak_strength is None or clip.relaxed_strength is None:
+            return "unusable", None, "face_not_in_view"
+        relaxed, peak, height = clip.relaxed_strength, clip.peak_strength, None
+    if peak - relaxed < config.MIN_SMILE_RISE:
+        return "not_measured", None, ("already_smiling" if relaxed >= limits.SMILE_ALREADY_SMILING
+                                       else "no_smile_seen")
+    return "usable", height, None
+
+
 def final_result(context: TaskContext, frame_readings: List[Optional[FrameReading]]) -> TaskResult:
     """The pure final step: frame readings -> one schema-valid TaskResult against the frozen baseline."""
     binfo = stream_base.baseline_info(context.baseline)
-    clip = clip_reading(frame_readings)
+    status, value, why = phase_reading(frame_readings)
 
-    if clip.quality != "usable":
-        if clip.peak_strength is not None:  # frames were fine but no smile happened
-            return TaskResult("smile", context.attempt_id, "could_not_perform", Quality("usable", []),
-                              "not_observed", binfo, None, None)
-        reasons = ["too_few_usable_frames"]
-        for text in clip.reasons[1:]:
-            reasons.append(stream_base.slug(text.split(":", 1)[-1]))
+    if status == "not_measured":  # frames were fine but no clear rise from the relaxed face happened
+        return TaskResult("smile", context.attempt_id, "could_not_perform", Quality("usable", [why]),
+                          "not_observed", binfo, None, None)
+    if status == "unusable":
+        reasons = [why]
+        counts: Dict[str, int] = {}
+        for f in frame_readings:
+            if f is not None and not f.usable and f.reason:
+                counts[f.reason] = counts.get(f.reason, 0) + 1
+        if counts:  # the most common frame problem, as a detail for the log
+            reasons.append(stream_base.slug(max(counts, key=lambda k: counts[k])))
         return TaskResult("smile", context.attempt_id, "completed", Quality("unusable", list(dict.fromkeys(reasons))),
                           "uncertain", binfo, None, None)
 
-    value = clip.readings().get(PRIMARY)
     if value is None or not math.isfinite(value):
         return TaskResult("smile", context.attempt_id, "completed", Quality("unusable", ["reading_unavailable"]),
                           "uncertain", binfo, None, None)
@@ -105,7 +148,9 @@ class StreamSmile:
         self.period_ms = period_ms
 
     def definition(self) -> Dict[str, Any]:
-        return stream_base.build_definition("smile", METRIC_ID, UNIT)
+        d = stream_base.build_definition("smile", METRIC_ID, UNIT)
+        d["cues"] = [{"at_ms": limits.SMILE_CUE_MS, "line_id": limits.SMILE_CUE_LINE}]  # same mechanism as arms
+        return d
 
     def _measure(self, reader: FrameReader, decode: Decoder, sample: Dict[str, Any], ts_ms: int
                  ) -> Optional[FrameReading]:

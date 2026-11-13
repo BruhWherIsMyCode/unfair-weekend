@@ -30,7 +30,8 @@ _END = object()
 _CAMERA_REASONS = {"camera_blocked": "track_ended", "camera_lost": "device_missing",
                    "permission_denied": "permission_denied", "track_ended": "track_ended",
                    "device_missing": "device_missing"}
-_PROGRESS_TEXT = {"look_at_camera": "Please look at the camera.", "show_both_arms": "Please keep your hand beside your face."}
+_PROGRESS_TEXT = {"look_at_camera": "Please look at the camera.", "show_both_arms": "Please keep your hand beside your face.",
+                  "show_your_hand": "Please keep your hand beside your face."}
 _ANSWER_GRACE_S = 2.0
 
 
@@ -119,11 +120,18 @@ class RemoteAdapter:
     # ---- CallAdapter -----------------------------------------------------------------------------------
 
     async def say(self, line_id: str) -> None:
+        await self._say(line_id, line_text(line_id, self.script, self.person_name), self.line_audio.get(line_id))
+
+    async def say_text(self, text: str) -> None:
+        """The call agent's own words (v11): the protocol's `say` already carries the text, so the client shows or
+        speaks it like a line. line_id `agent_remark`; no prepared voice, so the client's own speech (or its timer)."""
+        await self._say("agent_remark", str(text), None)
+
+    async def _say(self, line_id: str, text: str, audio: Optional[str]) -> None:
         future = asyncio.get_running_loop().create_future()
         self._said.setdefault(line_id, []).append(future)
         try:
-            fields: Dict[str, Any] = {"line_id": line_id, "text": line_text(line_id, self.script, self.person_name)}
-            audio = self.line_audio.get(line_id)
+            fields: Dict[str, Any] = {"line_id": line_id, "text": text}
             if audio:
                 fields["audio_pcm16k_b64"] = audio  # ElevenLabs voice (v2); text-only lines carry no audio
             if not await self._send("say", **fields):

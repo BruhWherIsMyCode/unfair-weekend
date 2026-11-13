@@ -154,7 +154,11 @@ def test_a_normal_call_with_a_ready_usual_is_as_usual_and_adds_her_values(tmp_pa
     assert record["summary"]["status"] == "as_usual" and record["person"] == PERSON
     assert record["family_text"].endswith("looked as usual.")
     assert lines and all(line.startswith("[call call_t1] ") for line in lines)
-    assert any("task smile" in line for line in lines) and any("family message" in line for line in lines)
+    # v11: the terminal shows one plain line per step: no numbers of readings, no transcripts, no keys
+    assert any("attempt A1 of smile ended: completed" in line for line in lines)
+    assert any("family message" in line for line in lines)
+    assert any("call finished, status: as_usual" in line for line in lines)
+    assert not any("value " in line for line in lines)
 
 
 def test_the_baseline_person_and_data_dir_come_from_the_environment(tmp_path):

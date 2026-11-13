@@ -21,7 +21,7 @@ READY_TIMEOUT_S = 15.0
 TASKS = ("smile", "arms", "sentence")
 QUESTIONS = ("q_medicine", "q_feeling", "q_unusual")
 CAPTURE_SETTINGS = {
-    "smile": {"media_kind": "video", "duration_ms": 5000, "prepare_ms": 0, "stop_on_silence_ms": None,
+    "smile": {"media_kind": "video", "duration_ms": 6000, "prepare_ms": 0, "stop_on_silence_ms": None,
               "format": "jpeg", "sample_period_ms": 200},
     "arms": {"media_kind": "video", "duration_ms": 15000, "prepare_ms": 2000, "stop_on_silence_ms": None,
              "format": "jpeg", "sample_period_ms": 200},
@@ -144,9 +144,40 @@ async def run_scripted_call(link: ClientLink) -> dict[str, Any]:
     return summary
 
 
-def choose_driver(kind: str, database_path: str | None = None) -> Callable[[ClientLink], Awaitable[dict[str, Any]]]:
-    if kind == "auto":
-        kind = "analysis" if analysis_available() else "scripted"
+def measuring_problems() -> list[str]:
+    """Plain problems that stop Agent 3's real measuring (`analysis.selfcheck.check()`); empty = measuring is ready."""
+    if not analysis_available():
+        return ["Agent 3's analysis package was not found (it lives next to backend/ in the repo)."]
+    from analysis import selfcheck
+
+    return selfcheck.check()
+
+
+def problems_block(problems: list[str], consequence: str) -> str:
+    bar = "=" * 72
+    lines = ["", bar, "MEASURING IS NOT READY", *(f"  - {problem}" for problem in problems), f"  -> {consequence}", bar]
+    return "\n".join(lines)
+
+
+def _print_block(block: str) -> None:
+    print(block, flush=True)
+
+
+def choose_driver(
+    kind: str, database_path: str | None = None, report: Callable[[str], Any] = _print_block
+) -> Callable[[ClientLink], Awaitable[dict[str, Any]]]:
+    """`auto` uses the analysis only when its self-check finds no problem; otherwise it prints the problems in one
+    block at start-up and runs the scripted call. `analysis` with problems refuses to start (never mid-call)."""
+    if kind in ("auto", "analysis"):
+        problems = measuring_problems()
+        if problems and kind == "analysis":
+            raise RuntimeError(problems_block(problems, "CALL_RUNNER=analysis cannot start. Fix the above, or use "
+                                                        "CALL_RUNNER=scripted."))
+        if problems:
+            report(problems_block(problems, "Using the scripted call: it plays the lines but measures nothing."))
+            kind = "scripted"
+        else:
+            kind = "analysis"
     if kind == "scripted":
         return run_scripted_call
     if kind in ("analysis", "fake"):

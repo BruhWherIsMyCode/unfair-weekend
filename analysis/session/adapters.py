@@ -38,6 +38,16 @@ class CallAdapter(Protocol):
         """Optional neutral task.progress projection for the parent screen."""
 
 
+@runtime_checkable
+class OwnWordsAdapter(Protocol):
+    """OPTIONAL capability of a CallAdapter (v11), detected with getattr(adapter, "say_text", None): the call agent's
+    own words. An adapter without it makes the tools say_own and ask_followup refuse (nothing is played)."""
+
+    async def say_text(self, text: str) -> None:
+        """Speak `text` (already checked by the call code: short, no digits, no banned words) on the client as a
+        `say` with line_id `agent_remark`; return when playback has ended."""
+
+
 _THING = {"face": ("smile", "looks"), "arm": ("arm", "looks"), "speech": ("speech", "sounds")}
 CONCERN_WORDS = {"said_unwell": "she said she does not feel well", "asked_for_help": "she asked for help",
                  "confused_answers": "her answers were confused",
@@ -65,7 +75,7 @@ def render_family_text(summary: Dict[str, Any], name: str) -> str:
 class FakeAdapter:
     """Records every call. Tests push samples and trigger client events by hand."""
 
-    CLIENT_CALLS = ("say", "start_capture", "cancel_capture", "listen")  # calls that go to the parent client
+    CLIENT_CALLS = ("say", "say_text", "start_capture", "cancel_capture", "listen")  # calls that go to the parent client
     SILENT = None  # a scripted answer meaning "she said nothing"
 
     def __init__(self, person_name: str = "Ona", message_id: str = "msg_demo",
@@ -82,6 +92,7 @@ class FakeAdapter:
         self.session: Any = None  # set to the CallSession so the fake client can acknowledge
         self.calls: List[Tuple[str, tuple]] = []
         self.said: List[str] = []
+        self.own_said: List[str] = []  # the texts played through say_text (v11)
         self.say_gate: Optional[asyncio.Event] = None  # when set, say() waits for it (a long playback)
         self.fail_say = False
         self.progress: List[Dict[str, Any]] = []
@@ -101,6 +112,14 @@ class FakeAdapter:
         if self.say_gate is not None:
             await self.say_gate.wait()
         self.said.append(line_id)
+
+    async def say_text(self, text: str) -> None:
+        self.calls.append(("say_text", (text,)))
+        if self.fail_say:
+            raise RuntimeError("fake playback failed")
+        if self.say_gate is not None:
+            await self.say_gate.wait()
+        self.own_said.append(text)
 
     async def start_capture(self, attempt_id: str, task: str, settings: Dict[str, Any]) -> None:
         self.calls.append(("start_capture", (attempt_id, task)))
