@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0555A7BBAE60FA7BE2E4D760 /* ProfileUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0601B807B9647E609DA9A86A /* ProfileUITests.swift */; };
 		0844B6B3FD5D13EAFF263695 /* ClipPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 005DC6C661B7AE4D9D0BDAD9 /* ClipPlayerView.swift */; };
 		14111B909AF316D6632B725C /* OnasCallsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5F42E56DF8A8490887EE92E /* OnasCallsApp.swift */; };
 		20C5A8E2A56849CD2F310CBD /* DemoStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15A0C958FC3511AB1EF98322 /* DemoStore.swift */; };
@@ -20,6 +21,9 @@
 		9BD61645BE4DA8A2C7CED993 /* BackendAlertUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCEC485466D27B1E65949653 /* BackendAlertUITests.swift */; };
 		9D65CE1C685218BBB3B74D68 /* AlertView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC65367579C33DBC0B21E3E /* AlertView.swift */; };
 		AA063FC240006893B95B559F /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD6CC211DB8B80FDE8279751 /* HomeView.swift */; };
+		ACE26EA3A822657A7E1EFA95 /* Profile.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9582FDBB89E12F081E5AEC5 /* Profile.swift */; };
+		C7CDF2D31E72C51DBBE29765 /* ClipExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F1FD5F8863EC42B49FDB99B /* ClipExport.swift */; };
+		E0366BE921BCD31871C975E8 /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A766EA8B13C1BC3CFE338B4E /* ProfileView.swift */; };
 		E743910076E96BA7EE59CA75 /* CallingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84CE7D84D29074F41D623928 /* CallingView.swift */; };
 		F492AE2ABA9701BFB327A487 /* alert.caf in Resources */ = {isa = PBXBuildFile; fileRef = D5C823DFEE6456CC07938C4A /* alert.caf */; };
 		FDED91BFA9ECE18F5960A70F /* FrameClipView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDEEE600E625D6C174320C71 /* FrameClipView.swift */; };
@@ -38,6 +42,7 @@
 /* Begin PBXFileReference section */
 		005DC6C661B7AE4D9D0BDAD9 /* ClipPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipPlayerView.swift; sourceTree = "<group>"; };
 		01097FAAE7F76BA8FAB14DD2 /* KeepAlive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeepAlive.swift; sourceTree = "<group>"; };
+		0601B807B9647E609DA9A86A /* ProfileUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileUITests.swift; sourceTree = "<group>"; };
 		0956D2403ADED0215ADC7769 /* StageSceneUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StageSceneUITests.swift; sourceTree = "<group>"; };
 		15A0C958FC3511AB1EF98322 /* DemoStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoStore.swift; sourceTree = "<group>"; };
 		18D0F807360229F29BB09BB1 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
@@ -45,6 +50,8 @@
 		6AEC84C220D57D5A89ABC97D /* FamilyFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyFeed.swift; sourceTree = "<group>"; };
 		82751CEF12E29E3C2D7E7676 /* DemoPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoPanelView.swift; sourceTree = "<group>"; };
 		84CE7D84D29074F41D623928 /* CallingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallingView.swift; sourceTree = "<group>"; };
+		8F1FD5F8863EC42B49FDB99B /* ClipExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipExport.swift; sourceTree = "<group>"; };
+		A766EA8B13C1BC3CFE338B4E /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
 		AD6CC211DB8B80FDE8279751 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		B31E615B21A9A1321DFB265B /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		B5F42E56DF8A8490887EE92E /* OnasCallsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnasCallsApp.swift; sourceTree = "<group>"; };
@@ -55,6 +62,7 @@
 		D9ABD0C10AE8F524E1E7C58B /* OnasCalls.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = OnasCalls.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		DEC65367579C33DBC0B21E3E /* AlertView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertView.swift; sourceTree = "<group>"; };
 		F5349068464E03DFAB4F164A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		F9582FDBB89E12F081E5AEC5 /* Profile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Profile.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -62,6 +70,7 @@
 			isa = PBXGroup;
 			children = (
 				CCEC485466D27B1E65949653 /* BackendAlertUITests.swift */,
+				0601B807B9647E609DA9A86A /* ProfileUITests.swift */,
 				0956D2403ADED0215ADC7769 /* StageSceneUITests.swift */,
 			);
 			path = OnasCallsUITests;
@@ -108,6 +117,7 @@
 				DEC65367579C33DBC0B21E3E /* AlertView.swift */,
 				F5349068464E03DFAB4F164A /* Assets.xcassets */,
 				84CE7D84D29074F41D623928 /* CallingView.swift */,
+				8F1FD5F8863EC42B49FDB99B /* ClipExport.swift */,
 				005DC6C661B7AE4D9D0BDAD9 /* ClipPlayerView.swift */,
 				82751CEF12E29E3C2D7E7676 /* DemoPanelView.swift */,
 				15A0C958FC3511AB1EF98322 /* DemoStore.swift */,
@@ -117,6 +127,8 @@
 				01097FAAE7F76BA8FAB14DD2 /* KeepAlive.swift */,
 				B31E615B21A9A1321DFB265B /* Localizable.xcstrings */,
 				B5F42E56DF8A8490887EE92E /* OnasCallsApp.swift */,
+				F9582FDBB89E12F081E5AEC5 /* Profile.swift */,
+				A766EA8B13C1BC3CFE338B4E /* ProfileView.swift */,
 				18D0F807360229F29BB09BB1 /* Theme.swift */,
 				7A0C79C2ED104145837B0F9A /* Resources */,
 			);
@@ -242,6 +254,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				9BD61645BE4DA8A2C7CED993 /* BackendAlertUITests.swift in Sources */,
+				0555A7BBAE60FA7BE2E4D760 /* ProfileUITests.swift in Sources */,
 				363FCEC468A0737B69D60D15 /* StageSceneUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -252,6 +265,7 @@
 			files = (
 				9D65CE1C685218BBB3B74D68 /* AlertView.swift in Sources */,
 				E743910076E96BA7EE59CA75 /* CallingView.swift in Sources */,
+				C7CDF2D31E72C51DBBE29765 /* ClipExport.swift in Sources */,
 				0844B6B3FD5D13EAFF263695 /* ClipPlayerView.swift in Sources */,
 				6FE7446F7C8F4C6BB587CD4E /* DemoPanelView.swift in Sources */,
 				20C5A8E2A56849CD2F310CBD /* DemoStore.swift in Sources */,
@@ -260,6 +274,8 @@
 				AA063FC240006893B95B559F /* HomeView.swift in Sources */,
 				5E7D6E88277817A8DE902B56 /* KeepAlive.swift in Sources */,
 				14111B909AF316D6632B725C /* OnasCallsApp.swift in Sources */,
+				ACE26EA3A822657A7E1EFA95 /* Profile.swift in Sources */,
+				E0366BE921BCD31871C975E8 /* ProfileView.swift in Sources */,
 				524181078FC32EF8ACDD0F4D /* Theme.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

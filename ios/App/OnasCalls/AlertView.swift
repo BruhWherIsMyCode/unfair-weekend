@@ -31,7 +31,7 @@ struct AlertView: View {
                     .padding(.horizontal, 20)
                     VStack(alignment: .leading, spacing: 8) {
                         NotUsualLabel()
-                        Text("Call Fedya now")
+                        Text(verbatim: store.callNow)
                             .font(.system(size: 30, weight: .bold))
                             .tracking(-0.7)
                             .foregroundStyle(Palette.amberInk)
@@ -54,10 +54,11 @@ struct AlertView: View {
 
     private var backBar: some View {
         HStack {
-            Button(action: store.backToFamily) {
+            Button(action: store.backFromAlert) {
                 HStack(spacing: 4) {
                     Image(systemName: "chevron.left").font(.system(size: 20, weight: .semibold))
-                    Text("Family").font(.system(size: 17)).tracking(-0.4)
+                    Text(verbatim: store.alertBack == .profile ? store.name : String(localized: "Family"))
+                        .font(.system(size: 17)).tracking(-0.4)
                 }
                 .foregroundStyle(Palette.back)
                 .frame(height: 44)
@@ -71,9 +72,9 @@ struct AlertView: View {
 
     private var who: some View {
         HStack(spacing: 14) {
-            Avatar(size: 48, label: "Fedya", photo: LocalAssets.fedyaPhoto)
+            Avatar(size: 48, label: store.name, photo: store.photo)
             VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: "Fedya").font(.system(size: 22, weight: .bold)).tracking(-0.5)
+                Text(verbatim: store.name).font(.system(size: 22, weight: .bold)).tracking(-0.5)
                 Text(store.liveMessage == nil ? "Check-in at \(Clock.time(store.alertTime)), 1 min 40 s"
                                               : "Check-in at \(Clock.time(store.alertTime))")
                     .font(.system(size: 15))
@@ -89,8 +90,8 @@ struct AlertView: View {
                 // The backend writes the family text; shown as is.
                 Text(verbatim: message.text)
             } else {
-                Text("Fedya seemed different from his usual during today's check-in.")
-                Text("He says he took his medicine and feels a bit tired.")
+                Text(verbatim: store.pronoun.seemedDifferent(store.name))
+                Text(verbatim: store.pronoun.tiredLine)
                     .foregroundStyle(Palette.secondary)
             }
         }
@@ -109,7 +110,7 @@ struct AlertView: View {
             Button(action: store.callFedya) {
                 HStack(spacing: 10) {
                     PhoneGlyph().fill(.white).frame(width: 22, height: 22)
-                    Text("Call Fedya")
+                    Text("Call \(store.name)")
                 }
                 .font(.system(size: 21, weight: .semibold))
                 .tracking(-0.4)
@@ -130,7 +131,7 @@ struct AlertView: View {
                         .background(Palette.red, in: RoundedRectangle(cornerRadius: 18))
                 }
                 Button(action: store.heIsFine) {
-                    Text("He's fine")
+                    Text(verbatim: store.pronoun.isFine)
                         .foregroundStyle(Palette.ink)
                         .frame(maxWidth: .infinity)
                         .frame(height: 54)
@@ -140,7 +141,7 @@ struct AlertView: View {
             .font(.system(size: 17, weight: .semibold))
             .tracking(-0.4)
             .buttonStyle(PressStyle())
-            Text("If he seems unwell, call 112.")
+            Text(verbatim: store.pronoun.unwellLine)
                 .font(.system(size: 15))
                 .foregroundStyle(Palette.secondary)
                 .padding(.top, 4)

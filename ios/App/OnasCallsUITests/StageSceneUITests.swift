@@ -21,7 +21,8 @@ final class StageSceneUITests: XCTestCase {
 
         // Home (alert)
         XCTAssertTrue(app.staticTexts["Call Fedya now"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Everyone else"].exists)
+        XCTAssertFalse(app.staticTexts["Ona"].exists)
+        XCTAssertFalse(app.staticTexts["Aldona"].exists)
         snap("3-home-alert")
 
         // Amber card -> Alert
@@ -31,10 +32,13 @@ final class StageSceneUITests: XCTestCase {
         sleep(3) // let the clip counter run
         snap("4-alert")
 
-        // Back to Family, white row -> Alert
+        // Back to Family, white row -> profile -> its alert banner -> Alert
         app.buttons.containing(predicate("Family")).firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["Everyone else"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Call Fedya now"].waitForExistence(timeout: 3))
         app.buttons.containing(predicate("Dad, last call")).firstMatch.tap()
+        XCTAssertTrue(app.buttons["profile.edit"].waitForExistence(timeout: 3))
+        snap("profile-alert")
+        app.buttons.containing(predicate("Open today's report")).firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Report"].waitForExistence(timeout: 3))
 
         // Call 112: fake screen, 4 s, back to Alert. Never dials.
@@ -58,14 +62,19 @@ final class StageSceneUITests: XCTestCase {
         app.staticTexts["calling…"].tap()
         XCTAssertTrue(app.staticTexts["Call Fedya again"].waitForExistence(timeout: 3))
 
-        // Fedya row -> Alert -> He's fine -> Home (as usual)
+        // Fedya row -> profile -> banner -> Alert -> He's fine -> Home (as usual)
         app.buttons.containing(predicate("you called at")).firstMatch.tap()
+        app.buttons.containing(predicate("Call Fedya again")).firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Report"].waitForExistence(timeout: 3))
         app.buttons["He's fine"].tap()
         XCTAssertTrue(app.staticTexts.containing(predicate("Dad, last call")).firstMatch.waitForExistence(timeout: 3))
         XCTAssertFalse(app.staticTexts["Call Fedya now"].exists)
-        XCTAssertFalse(app.staticTexts["Everyone else"].exists)
         snap("7-as-usual")
+
+        // The call stays in the profile's history with what the family did
+        app.buttons.containing(predicate("Dad, last call")).firstMatch.tap()
+        XCTAssertTrue(app.staticTexts.containing(predicate("You said he was fine")).firstMatch.waitForExistence(timeout: 3))
+        app.buttons.containing(predicate("Family")).firstMatch.tap()
 
         openPanel()
         snap("panel")
@@ -90,7 +99,6 @@ final class StageSceneUITests: XCTestCase {
 
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))
         XCTAssertTrue(app.staticTexts["Call Fedya now"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Everyone else"].exists)
 
         openPanel()
         app.buttons["Reset"].tap()

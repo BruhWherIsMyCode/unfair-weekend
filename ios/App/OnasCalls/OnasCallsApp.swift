@@ -58,6 +58,9 @@ struct RootView: View {
             case .alert:
                 AlertView()
                     .transition(.move(edge: .trailing))
+            case .profile:
+                ProfileView()
+                    .transition(.move(edge: .trailing))
             }
             if store.overlay != .none {
                 CallingView()

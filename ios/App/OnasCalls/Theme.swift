@@ -76,7 +76,7 @@ struct Stripes: View {
     }
 }
 
-/// Round avatar: Fedya's photo from LocalAssets if present, otherwise the design's striped placeholder.
+/// Round avatar: the profile photo (or LocalAssets' fedya.jpg) if present, otherwise the design's striped placeholder.
 struct Avatar: View {
     var size: CGFloat
     var label: String = ""
@@ -106,12 +106,13 @@ struct Dot: View {
     var body: some View { Circle().fill(color).frame(width: 8, height: 8) }
 }
 
-/// "● NOT HIS USUAL"
+/// "● NOT HIS USUAL" (or HER, from the profile)
 struct NotUsualLabel: View {
+    @Environment(DemoStore.self) private var store
     var body: some View {
         HStack(spacing: 8) {
             Dot(color: Palette.amberDot)
-            Text("NOT HIS USUAL")
+            Text(verbatim: store.pronoun.notUsualCaps)
                 .font(.system(size: 13, weight: .bold))
                 .tracking(0.6)
                 .foregroundStyle(Palette.amberLabel)

@@ -13,16 +13,14 @@ struct HomeView: View {
                 switch store.phase {
                 case .alert, .calling:
                     fedyaGroup { AlertCard() } row: {
-                        FedyaRow(subtitle: String(localized: "Dad, last call \(Clock.time(store.alertTime))"))
+                        FedyaRow(subtitle: store.profile.lastCall(Clock.time(store.alertTime)))
                     }
-                    everyoneElse(title: String(localized: "Everyone else"), includeFedya: false)
                 case .declined:
                     fedyaGroup { DeclinedCard() } row: {
-                        FedyaRow(subtitle: String(localized: "Dad, you called at \(Clock.time(store.calledAt ?? .now))"))
+                        FedyaRow(subtitle: store.profile.youCalled(Clock.time(store.calledAt ?? .now)))
                     }
-                    everyoneElse(title: String(localized: "Everyone else"), includeFedya: false)
                 case .asUsual:
-                    everyoneElse(title: nil, includeFedya: true)
+                    asUsualCard
                 }
             }
             .padding(.bottom, 32)
@@ -53,11 +51,11 @@ struct HomeView: View {
         .padding(.top, 44) // design: 44pt between the status bar and the date
     }
 
-    /// Amber card on top, Fedya's white row under it, both outlined.
+    /// Amber card on top, Fedya's white row under it, both outlined. The row opens the profile.
     private func fedyaGroup<Card: View, Row: View>(@ViewBuilder card: () -> Card, @ViewBuilder row: () -> Row) -> some View {
         VStack(spacing: 0) {
             card()
-            Button(action: store.openAlert) {
+            Button(action: store.openProfile) {
                 row()
                     .background(Color.white)
                     .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 22, bottomTrailingRadius: 22))
@@ -69,26 +67,16 @@ struct HomeView: View {
         .padding(.horizontal, 20)
     }
 
-    @ViewBuilder
-    private func everyoneElse(title: String?, includeFedya: Bool) -> some View {
-        if let title {
-            Text(verbatim: title)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Palette.secondary)
-                .padding(EdgeInsets(top: 28, leading: 24, bottom: 10, trailing: 24))
+    /// Everyone as usual: Fedya's row alone. Opens the profile.
+    private var asUsualCard: some View {
+        Button(action: store.openProfile) {
+            PersonRow(name: store.name, subtitle: store.profile.lastCall(store.usualTime),
+                      time: store.usualTime, avatarLabel: store.name, photo: store.photo)
+                .padding(.leading, 20)
+                .background(Color.white, in: RoundedRectangle(cornerRadius: 22))
+                .contentShape(Rectangle())
         }
-        VStack(spacing: 0) {
-            if includeFedya {
-                PersonRow(name: "Fedya", subtitle: String(localized: "Dad, last call \(store.usualTime)"),
-                          time: store.usualTime, avatarLabel: "Fedya", photo: LocalAssets.fedyaPhoto)
-                Rectangle().fill(Palette.divider).frame(height: 0.5)
-            }
-            PersonRow(name: "Ona", subtitle: String(localized: "Mum. “Going to the market.”"), time: "09:02")
-            Rectangle().fill(Palette.divider).frame(height: 0.5)
-            PersonRow(name: "Aldona", subtitle: String(localized: "Aunt. “Watching the news.”"), time: "09:15")
-        }
-        .padding(.leading, 20)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 22))
+        .buttonStyle(PressStyle())
         .padding(.horizontal, 20)
     }
 }
@@ -107,7 +95,7 @@ private struct AlertCard: View {
                         .font(.system(size: 15).monospacedDigit())
                         .foregroundStyle(Palette.amberTime)
                 }
-                Text("Call Fedya now")
+                Text(verbatim: store.callNow)
                     .font(.system(size: 30, weight: .bold))
                     .tracking(-0.7)
                 HStack(spacing: 14) {
@@ -158,13 +146,13 @@ private struct DeclinedCard: View {
                     .font(.system(size: 15))
                     .foregroundStyle(Palette.amberTime)
             }
-            Text("Call Fedya again")
+            Text("Call \(store.name) again")
                 .font(.system(size: 30, weight: .bold))
                 .tracking(-0.7)
             Button(action: store.callFedya) {
                 HStack(spacing: 10) {
                     PhoneGlyph().fill(.white).frame(width: 20, height: 20)
-                    Text("Call Fedya")
+                    Text("Call \(store.name)")
                 }
                 .font(.system(size: 19, weight: .semibold))
                 .tracking(-0.4)
@@ -175,7 +163,7 @@ private struct DeclinedCard: View {
             }
             .buttonStyle(PressStyle())
             .padding(.top, 4)
-            Text("If he seems unwell, call 112.")
+            Text(verbatim: store.pronoun.unwellLine)
                 .font(.system(size: 15))
                 .frame(maxWidth: .infinity)
         }
@@ -188,17 +176,21 @@ private struct DeclinedCard: View {
     }
 }
 
-/// Fedya's white row under the card (no status pill).
+/// Fedya's white row under the card (no status pill). Opens the profile.
 private struct FedyaRow: View {
+    @Environment(DemoStore.self) private var store
     var subtitle: String
     var body: some View {
         HStack(spacing: 14) {
-            Avatar(size: 52, label: "Fedya", photo: LocalAssets.fedyaPhoto)
+            Avatar(size: 52, label: store.name, photo: store.photo)
             VStack(alignment: .leading, spacing: 3) {
-                Text(verbatim: "Fedya").font(.system(size: 20, weight: .semibold)).tracking(-0.4)
+                Text(verbatim: store.name).font(.system(size: 20, weight: .semibold)).tracking(-0.4)
                 Text(verbatim: subtitle).font(.system(size: 15)).foregroundStyle(Palette.secondary)
             }
             Spacer(minLength: 0)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Palette.faint)
         }
         .foregroundStyle(Palette.ink)
         .padding(.horizontal, 20)
@@ -207,7 +199,7 @@ private struct FedyaRow: View {
     }
 }
 
-/// A row in "Everyone else". Not tappable.
+/// Fedya's row in the calm state, with the green pill.
 private struct PersonRow: View {
     var name: String
     var subtitle: String

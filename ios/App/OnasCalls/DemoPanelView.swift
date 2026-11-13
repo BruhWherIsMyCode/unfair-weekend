@@ -15,12 +15,12 @@ struct DemoPanelView: View {
                         .keyboardType(.phonePad)
                         .textContentType(.telephoneNumber)
                 } header: {
-                    Text("Fedya's phone number")
+                    Text("\(store.name)'s phone number")
                 } footer: {
-                    if store.fedyaDigits.isEmpty {
-                        Text("No number set: Call Fedya shows the fake call screen.")
+                    if !DemoStore.isDialable(store.fedyaDigits) {
+                        Text("No full number set: Call \(store.name) shows the fake call screen.")
                     } else {
-                        Text("Call Fedya dials \(store.fedyaDigits). The only number the app ever dials.")
+                        Text("Call \(store.name) dials \(store.fedyaDigits). The only number the app ever dials.")
                     }
                 }
 
@@ -36,7 +36,7 @@ struct DemoPanelView: View {
                 Section {
                     Toggle("Fake call screen", isOn: $store.fakeCallScreen)
                 } footer: {
-                    Text("For no signal on stage. Call Fedya shows the calling screen for 4 s, then Declined. Nothing is dialled.")
+                    Text("For no signal on stage. Call \(store.name) shows the calling screen for 4 s, then Declined. Nothing is dialled.")
                 }
 
                 Section {
@@ -52,6 +52,12 @@ struct DemoPanelView: View {
                     Button("Reset", role: .destructive) { store.reset() }
                 } footer: {
                     Text("Arm: notification after the delay, app in the alert state. Lock the phone after arming.")
+                }
+
+                Section {
+                    Button("Reset call history", role: .destructive) { store.resetHistory() }
+                } footer: {
+                    Text("Back to the sample week of calls. Removes notes and clips kept on this phone. Reset also removes a staged alert from the history.")
                 }
 
                 Section("Status") {

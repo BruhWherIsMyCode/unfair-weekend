@@ -28,6 +28,10 @@ struct FrameClipView: View {
                 Stripes(colors: Palette.clipStripes, band: 8)
             }
         }
+        // Size first, so the label sits inside the clip and not above a taller scaled-to-fill frame.
+        .frame(maxWidth: .infinity)
+        .frame(height: height)
+        .clipped()
         .overlay(alignment: .topLeading) {
             Text(clip == nil ? "clip loading or not kept" : "clip, both tries")
                 .font(.system(size: 11, design: .monospaced))

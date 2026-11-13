@@ -10,7 +10,7 @@ In the demo panel, under **Check-in backend**, set the backend address (`http://
 - **Could not finish, or no answer:** a plain notification with the backend's text.
 - **As usual, or still learning:** nothing.
 
-Demo workaround, not for the App Store: after connecting, a silent audio loop (the `audio` background mode) keeps the app running in the background, so alerts still arrive while the phone is locked. There is no push. If iOS ends the app, open it again. The names on screen are still the stage scene's (Fedya, he). The report text uses the backend's person, so for the stage set `DEMO_PERSON_NAME=Fedya` and `DEMO_PERSON_PRONOUN=he` in `backend/.env`.
+Demo workaround, not for the App Store: after connecting, a silent audio loop (the `audio` background mode) keeps the app running in the background, so alerts still arrive while the phone is locked. There is no push. If iOS ends the app, open it again. The names on screen are the profile's (Fedya, he by default). The report text uses the backend's person, so for the stage set `DEMO_PERSON_NAME=Fedya` and `DEMO_PERSON_PRONOUN=he` in `backend/.env`.
 
 The staged scene (Arm, Show alert now, Reset) still works with or without a backend.
 
@@ -52,9 +52,20 @@ ios/App/LocalAssets/fedya.jpg
 
 Without them the app shows the design's striped placeholders.
 
+## Profile
+
+Tap the person's row on Family. The profile shows their name, relation and number, the alert waiting (if any), the family's notes and every check-in call, newest first.
+
+- **Edit** changes the name, relation ("Dad"), he/she, phone number, photo (picked from Photos) and notes. Nothing changes until **Save**. The whole app uses the new name and pronoun; the backend's report text keeps its own.
+- **Calls:** every staged alert and every backend message (as usual and still learning too) goes into the history. A call opens its report, what the family did ("You called at", "You said he was fine"), a note to add, and Delete. **Edit history** or a swipe deletes calls.
+- **Clip:** a call with a clip shows it with **Save to Photos** and **Share** (Files, AirDrop, Messages). A real alert's frames are stored on the phone as soon as they arrive, so the clip stays after the backend forgets it (30 min), and are encoded to an .mp4 when the call is opened. The staged scene's call uses `clip.mp4` if it is present.
+- First launch fills the history with a sample week of calm calls. **Reset** in the demo panel removes the staged alert it reset from the history; **Reset call history** goes back to the sample week.
+
+Stored in the app's Application Support folder (history, notes, clip frames, photo) and UserDefaults (profile). Nothing leaves the phone except what the family shares.
+
 ## Demo panel
 
-Hold the "Family" title for 2 seconds. Fedya's number (the only number the app dials), alert delay, **Arm**, **Show alert now**, **Fake call screen**, **Reset**. Settings are kept between launches.
+Hold the "Family" title for 2 seconds. Fedya's number (the only number the app dials; the same field as on the profile, and never a number shorter than 6 digits, so never 112), alert delay, **Arm**, **Show alert now**, **Fake call screen**, **Reset**. Settings are kept between launches.
 
 ## Stage notes
 
