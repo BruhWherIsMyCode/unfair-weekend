@@ -89,11 +89,10 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
             sessionQueue.async {
                 do {
                     try self.configure()
-                    // The frames for the analysis must be upright: set again at every capture start.
-                    self.uprightFrames()
                     self.lock.withLock {
                         self.latest = nil
                         self.capturing = true
+                        self.stats = FrameStats()
                     }
                     if !self.session.isRunning {
                         self.session.startRunning()
@@ -156,7 +155,6 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
                 self.session.addConnection(connection)
                 self.previewConnection = connection
             }
-            self.uprightFrames()
         }
     }
 
@@ -195,22 +193,24 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
             self.output = output
         }
         configured = true
-        uprightFrames()
     }
 
-    /// Portrait: 90 degrees makes the buffers 480 x 640 and upright for the front camera, not mirrored. Like the
-    /// preview's, the output's connection may not exist yet while the session is first configured, or may be
-    /// rebuilt when a connection is added; then the frames stayed landscape (the analysis saw her turned 90 degrees).
-    /// So this runs after configuring, after attaching a preview and at every capture start. sessionQueue only.
-    private func uprightFrames() {
-        guard let connection = output?.connection(with: .video) else { return }
-        if connection.isVideoRotationAngleSupported(90), connection.videoRotationAngle != 90 {
-            connection.videoRotationAngle = 90
-        }
-        if connection.isVideoMirroringSupported {
-            connection.automaticallyAdjustsVideoMirroring = false
-            connection.isVideoMirrored = false
-        }
+    /// What the camera delivered during the current capture, for the camera debug screen.
+    struct FrameStats: Equatable, Sendable {
+        var rawWidth = 0
+        var rawHeight = 0
+        var mirrored = false
+        var angle: Double = 0
+        /// Landscape buffers turned upright (by the one turn that matches their mirroring).
+        var fixed = 0
+        /// Portrait buffers (the connection's rotation took): only un-mirrored if needed. Not seen on the iPhone yet.
+        var asIs = 0
+    }
+
+    private var stats = FrameStats()
+
+    func frameStats() -> FrameStats {
+        lock.withLock { stats }
     }
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer,
@@ -219,10 +219,25 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
         let wanted = lock.withLock { capturing && now - lastEncode >= minEncodeInterval }
         guard wanted, let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         var image = CIImage(cvPixelBuffer: pixels)
-        if image.extent.width > image.extent.height {
-            // Still landscape (the rotation did not take): turn it 90 degrees clockwise, the same turn as the
-            // connection's 90-degree angle that keeps the preview upright.
-            image = image.oriented(.right)
+        // The analysis expects the upright, un-mirrored picture (UW_MIRRORED off). On the iPhone the frame connection
+        // ignores its 90-degree rotation, so buffers arrive landscape, and whether they are mirrored depends on the
+        // connection's mirroring (the camera default is mirrored). The turn that makes them upright depends on that,
+        // so it is chosen per frame from the connection that delivered it. Checked on an iPhone 18 Pro Max with the
+        // camera debug screen: un-mirrored buffers need counter-clockwise then a mirror (clockwise gave her upside
+        // down); mirrored buffers then need a plain clockwise turn (the counter-clockwise + mirror gave upside down).
+        let landscape = image.extent.width > image.extent.height
+        let mirrored = connection.isVideoMirrored
+        if landscape {
+            image = mirrored ? image.oriented(.right) : image.oriented(.left).oriented(.upMirrored)
+        } else if mirrored {
+            image = image.oriented(.upMirrored)
+        }
+        lock.withLock {
+            stats.rawWidth = CVPixelBufferGetWidth(pixels)
+            stats.rawHeight = CVPixelBufferGetHeight(pixels)
+            stats.mirrored = mirrored
+            stats.angle = connection.videoRotationAngle
+            if landscape { stats.fixed += 1 } else { stats.asIs += 1 }
         }
         guard let space = CGColorSpace(name: CGColorSpace.sRGB),
               let jpeg = context.jpegRepresentation(

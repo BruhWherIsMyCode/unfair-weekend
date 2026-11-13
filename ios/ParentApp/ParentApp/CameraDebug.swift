@@ -49,6 +49,10 @@ final class CameraDebugModel {
     private(set) var error: String?
     private(set) var framesSent = 0
     private(set) var framesAnalysed = 0
+    /// Arms: per phase, how many analysed frames had the hand on her left, her right, no hand, or no face.
+    private(set) var tally: [String: [String: Int]] = [:]
+    /// What the phone's camera delivered during this run (raw size, mirroring, angle, how frames were fixed).
+    private(set) var cameraStats: SelfViewCamera.FrameStats?
     private(set) var cues: [(atMs: Int, lineId: String)] = []
 
     private let settings: AppSettings
@@ -143,6 +147,7 @@ final class CameraDebugModel {
                         sent[oldest] = nil
                     }
                     apply(snapshot)
+                    cameraStats = preview.frameStats()
                 }
                 let next = started.addingTimeInterval(Double(sequence * run.capture.samplePeriodMs) / 1000)
                 let wait = next.timeIntervalSinceNow
@@ -166,6 +171,9 @@ final class CameraDebugModel {
 
     private func apply(_ snapshot: DebugSnapshot) {
         framesAnalysed = snapshot.framesAnalysed
+        if let newTally = snapshot.tally {
+            tally = newTally
+        }
         if let newFrame = snapshot.frame, newFrame != frame {
             frame = newFrame
             if let jpeg = sent[newFrame.ms] {
@@ -198,6 +206,7 @@ struct DebugRunStarted: Decodable {
 
 struct DebugSnapshot: Decodable {
     let framesAnalysed: Int
+    let tally: [String: [String: Int]]?
     let frame: DebugFrame?
     let observations: [JSONValue]
     let result: JSONValue?
@@ -224,6 +233,8 @@ struct DebugFrame: Decodable, Equatable {
     let face: Bool
     let faceSmall: Bool?
     let midlineX: Double?
+    let eyeDistancePx: Double?
+    let rollDeg: Double?
     let eyePoints: [[Double]]?
     let mouthPoints: [[Double]]?
     let hands: [Hand]?

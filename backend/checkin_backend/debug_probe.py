@@ -55,10 +55,16 @@ class FrameProbe:
         self._lock = threading.Lock()
         self._latest: dict[str, Any] | None = None
         self.frames = 0
+        # Arms: per phase, how many frames had the hand on her left, her right, no hand, or no face.
+        self._tally: dict[str, dict[str, int]] = {}
 
     def latest(self) -> dict[str, Any] | None:
         with self._lock:
             return self._latest
+
+    def tally(self) -> dict[str, dict[str, int]]:
+        with self._lock:
+            return {phase: dict(counts) for phase, counts in self._tally.items()}
 
     def _keep(self, frame: dict[str, Any]) -> None:
         with self._lock:
@@ -72,15 +78,21 @@ class FrameProbe:
 
     def arms_frame(self, attempt_id: str, ms: int, expected_side: str, image: Any, face_obs: Any,
                    hands: Any, mirrored: bool) -> None:
-        from analysis.debug_view import hand_side_facts
+        from analysis.debug_view import CATEGORIES, arms_phase_of, frame_category, hand_side_facts
 
         facts = hand_side_facts(face_obs, hands, expected_side, mirrored)
         width, height = self._size(image)
+        with self._lock:
+            counts = self._tally.setdefault(arms_phase_of(ms), {c: 0 for c in CATEGORIES})
+            counts[frame_category(facts)] += 1
+        eyes = facts["eye_points"]
+        roll = (math.degrees(math.atan2(eyes[1][1] - eyes[0][1], eyes[1][0] - eyes[0][0]))
+                if len(eyes) == 2 else None)
         self._keep(plain({
             "task": "arms", "ms": ms, "expected": expected_side, "mirrored": bool(mirrored),
             "width": width, "height": height,
             "face": facts["face"], "face_small": facts["face_small"], "midline_x": facts["midline_x"],
-            "eye_points": facts["eye_points"],
+            "eye_distance_px": facts["unit"], "roll_deg": roll, "eye_points": eyes,
             "hands": [{k: h.get(k) for k in ("side", "eye_widths", "if_mirrored_flipped", "centre", "box")}
                       for h in facts["hands"]],
         }))
@@ -156,6 +168,7 @@ class DebugRun:
 
     def snapshot(self, since: int = 0) -> dict[str, Any]:
         return {"run_id": self.run_id, "task": self.task, "frames_analysed": self.probe.frames,
+                "tally": self.probe.tally(),
                 "frame": self.probe.latest(), "observations": self.observations[since:],
                 "observation_count": len(self.observations), "result": self.result, "error": self.error,
                 "done": self._job.done()}

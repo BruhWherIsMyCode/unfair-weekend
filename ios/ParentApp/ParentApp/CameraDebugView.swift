@@ -26,6 +26,7 @@ struct CameraDebugView: View {
                     }
                     timeline
                     facts
+                    tally
                     observations
                     result
                 }
@@ -100,6 +101,13 @@ struct CameraDebugView: View {
                     row("Frame", "\(Int(w)) × \(Int(h))" + (w > h ? " landscape: turned sideways!" : " portrait"),
                         ok: h >= w)
                 }
+                if let eyes = frame.eyeDistancePx {
+                    row("Face size", String(format: "%.0f px between the eyes (the analysis needs 40)", eyes),
+                        ok: eyes >= 40)
+                }
+                if let roll = frame.rollDeg {
+                    row("Head tilt", String(format: "%.0f°", roll), ok: abs(roll) < 20)
+                }
                 row("Face", frame.face ? (frame.faceSmall == true ? "found, too small: come closer" : "found")
                                        : "not found", ok: frame.face && frame.faceSmall != true)
                 if frame.task == "arms" {
@@ -123,6 +131,31 @@ struct CameraDebugView: View {
                     row("Corner height", Self.number(reading["corner_height"]), ok: nil)
                     row("Head yaw / pitch / roll", ["yaw_deg", "pitch_deg", "roll_deg"]
                         .map { Self.number(reading[$0], digits: 0) + "°" }.joined(separator: " / "), ok: nil)
+                }
+            }
+        }
+    }
+
+    /// Where the hand was in each hold: the left/right question in numbers, for the whole run.
+    @ViewBuilder
+    private var tally: some View {
+        let phases = [("hold_left", "left"), ("hold_right", "right")].filter { model.tally[$0.0] != nil }
+        if !phases.isEmpty || model.cameraStats != nil {
+            section("This run") {
+                ForEach(phases, id: \.0) { phase, wanted in
+                    let counts = model.tally[phase] ?? [:]
+                    let total = max(1, counts.values.reduce(0, +))
+                    let right = counts[wanted] ?? 0
+                    let wrong = counts[wanted == "left" ? "right" : "left"] ?? 0
+                    row(wanted == "left" ? "Left hold" : "Right hold",
+                        "her \(wanted.uppercased()) \(right) · other side \(wrong) · no hand \(counts["none"] ?? 0)"
+                        + " · no face \(counts["no_face"] ?? 0)",
+                        ok: right * 2 > total && wrong == 0)
+                }
+                if let camera = model.cameraStats {
+                    row("Camera", "raw \(camera.rawWidth) × \(camera.rawHeight), mirrored \(camera.mirrored ? "on" : "off"),"
+                        + " angle \(Int(camera.angle))° · turned+mirrored \(camera.fixed) · as is \(camera.asIs)",
+                        ok: camera.asIs == 0)
                 }
             }
         }
