@@ -151,3 +151,47 @@ def test_an_unreadable_database_falls_back_to_the_json_file(tmp_path, caplog):
     assert summary["status"] == "learning"  # the call itself is unchanged
     assert any("cannot be read" in r.getMessage() or "recording is off" in r.getMessage() for r in caplog.records)
     assert BaselineStore(PERSON, tmp_path / "data", 2).load_baselines()["smile"]["sessions"] == 1  # json still learns
+
+
+
+class ReplayLink(Link):
+    """Like the backend's ClientLink: resource events that arrived before the session existed are replayed in attach."""
+
+    def __init__(self, label="live"):
+        super().__init__(label)
+        self.queued = [
+            {"event_id": "q_cam1", "type": "resource.changed", "command_id": None, "resource": "camera",
+             "state": "unavailable", "sequence": 1, "reason": "track_ended"},
+            {"event_id": "q_cam2", "type": "resource.changed", "command_id": None, "resource": "camera",
+             "state": "available", "sequence": 2, "reason": None},
+            {"event_id": "q_mic1", "type": "resource.changed", "command_id": None, "resource": "microphone",
+             "state": "available", "sequence": 1, "reason": None}]
+
+    def attach(self, session):
+        super().attach(session)
+        queued, self.queued = self.queued, []
+        for event in queued:
+            session.handle_resource_event(event)
+
+
+def test_resource_events_queued_before_attach_are_recorded_without_stale_writes(world, caplog):
+    """Issue #24: attach replays queued camera/microphone events; recording must already have begun, so the context
+    revisions they produce are written in order (no StaleWrite) and the events are in the journal."""
+    tmp_path, path = world
+    add_call(path, "call_q1")
+    link = ReplayLink()
+    link.call_id = "call_q1"
+    caplog.set_level("WARNING")
+    summary = asyncio.run(backend_entry.run_backend_call(link, modules(), env=env_for(tmp_path, path),
+                                                         out=lambda line: None))
+    end_call(path, "call_q1")
+    settle(shared_writer(path))
+    assert summary["status"] in ("learning", "as_usual")
+    problems = [r.getMessage() for r in caplog.records if "not saved" in r.getMessage() or "recording is off" in
+                r.getMessage() or "StaleWrite" in r.getMessage()]
+    assert problems == []
+    events = rows(path, "SELECT event_id FROM call_events WHERE call_id = 'call_q1' AND event_type = 'resource.changed'")
+    assert {e["event_id"] for e in events} >= {"q_cam1", "q_cam2", "q_mic1"} or len(events) >= 3
+    session = rows(path, "SELECT context_revision, snapshot_json FROM call_sessions WHERE call_id = 'call_q1'")[0]
+    assert json.loads(session["snapshot_json"])["resources"]["camera"]["state"] == "available"
+    assert session["context_revision"] >= 3

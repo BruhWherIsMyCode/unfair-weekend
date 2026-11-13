@@ -191,6 +191,12 @@ async def run_backend_call(link: Any, modules: Optional[Dict[str, Any]] = None, 
                 out(prefix + line)
 
         session.log = LiveLog(show)
+    if recorder is not None:  # BEFORE attach: attach replays queued resource events, whose recording needs the
+        try:                  # call_sessions row (else revisions 1, 2 fail as StaleWrite; issue #24)
+            recorder.begin(session, frozen)
+        except Exception as exc:
+            log.warning("database recording is off for call %s (%s)", link.call_id, type(exc).__name__)
+            session.recorder = None
     link.attach(session)
     session.note("backend_call", mode=settings.mode, backend=settings.claude_backend if settings.mode == "claude" else None,
                  safety_floor=settings.safety_floor, mirrored=settings.mirrored, person_key=settings.person_key,
@@ -200,12 +206,6 @@ async def run_backend_call(link: Any, modules: Optional[Dict[str, Any]] = None, 
         session.note("baseline_source", detail=source_line)
         if settings.call_log:
             out(prefix + source_line)
-    if recorder is not None:
-        try:
-            recorder.begin(session, frozen)
-        except Exception as exc:
-            log.warning("database recording is off for call %s (%s)", link.call_id, type(exc).__name__)
-            session.recorder = None
 
     try:
         summary = await run_call(session, link, settings.mode, backend=settings.claude_backend)
