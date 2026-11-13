@@ -14,6 +14,21 @@ public protocol AvatarClipPlayer: Sendable {
     func stop() async
 }
 
+/// A Simli live avatar for the whole call: the phone streams each line's PCM to Simli, and Simli sends the talking
+/// avatar back (video and the line's own voice). The app shows its video as the avatar while it is connected.
+public protocol LiveAvatarPlayer: Sendable {
+    /// Connects with a session the backend minted. Returns once the avatar's video track has arrived; throws if it
+    /// cannot connect.
+    func connect(_ session: LiveAvatarSession) async throws
+    /// Streams one line (signed 16-bit little-endian mono PCM, 16 kHz). Returns when Simli reports the avatar has
+    /// spoken it and gone silent. Throws when the avatar never starts speaking or the session fails.
+    func speak(pcm16k: Data, durationMs: Int) async throws
+    /// Silences the current line and keeps the session.
+    func stop() async
+    /// Ends the session; the app goes back to the clip player or its placeholder.
+    func disconnect() async
+}
+
 /// Records one spoken answer. Returns the audio and its content type (audio/wav, audio/mp4 or audio/webm).
 public protocol AnswerRecorder: Sendable {
     func record(maxMs: Int, stopOnSilenceMs: Int?) async throws -> (Data, String)
@@ -43,13 +58,16 @@ public struct ParentDevices: Sendable {
     public let microphone: MicrophoneSource
     /// Optional: without it, every line plays as PCM even when the backend offers a clip.
     public let clips: AvatarClipPlayer?
+    /// Optional: tried first for every line when the backend offers a live session; clips and PCM are the fallback.
+    public let live: LiveAvatarPlayer?
 
     public init(player: SpeechPlayer, recorder: AnswerRecorder, camera: CameraSource, microphone: MicrophoneSource,
-                clips: AvatarClipPlayer? = nil) {
+                clips: AvatarClipPlayer? = nil, live: LiveAvatarPlayer? = nil) {
         self.player = player
         self.recorder = recorder
         self.camera = camera
         self.microphone = microphone
         self.clips = clips
+        self.live = live
     }
 }

@@ -24,6 +24,18 @@ public actor CallClient {
     private var eventCounter = 0
     private var stopped = false
 
+    private enum LiveState {
+        case off
+        case connecting(Date)
+        case ready
+    }
+
+    private var liveState: LiveState = .off
+    private var liveTask: Task<Void, Never>?
+    private var liveGeneration = 0
+    /// How long the first line waits for the live avatar before it plays as a clip instead.
+    static let liveConnectWait: TimeInterval = 10
+
     public init(api: CallAPI, deviceId: String, personId: String, devices: ParentDevices,
                 onPhase: @escaping @Sendable (CallPhase) -> Void,
                 onEvent: @escaping @Sendable (CallEvent) -> Void = { _ in }) {
@@ -85,6 +97,7 @@ public actor CallClient {
         guard let callId else { return }
         onPhase(.connecting)
         _ = try await api.answer(callId: callId)
+        startLiveAvatar(callId: callId)
         onEvent(.connected)
         await reportResource(.camera, available: resourceState[.camera] ?? true, commandId: nil, problem: nil)
         await reportResource(.microphone, available: resourceState[.microphone] ?? true, commandId: nil, problem: nil)
@@ -183,6 +196,7 @@ public actor CallClient {
         }
         await devices.player.stop()
         await devices.clips?.stop()
+        await devices.live?.stop()
         await devices.recorder.stop()
         await devices.camera.stop()
         await devices.microphone.stop()
@@ -226,6 +240,24 @@ public actor CallClient {
 
     private func performSay(_ say: SayCommand) async throws {
         onPhase(.speaking(caption: say.text))
+        if let live = await liveAvatar() {
+            let audio = try await api.speech(path: say.audioPath)
+            try Task.checkCancellation()
+            onEvent(.speaking(lineId: say.lineId, text: say.text, durationMs: say.durationMs, at: Date()))
+            do {
+                try await live.speak(pcm16k: audio, durationMs: say.durationMs)
+                try Task.checkCancellation()
+                try await post(["type": "playback.completed", "command_id": say.commandId, "error": nil])
+                return
+            } catch {
+                await live.stop()
+                if error is CancellationError || Task.isCancelled {
+                    throw CancellationError()
+                }
+                // The live session broke: this line and the rest of the call play as clips or voice.
+                await dropLiveAvatar()
+            }
+        }
         if let videoPath = say.videoPath, let clips = devices.clips {
             if try await playClip(say, path: videoPath, with: clips) {
                 try await post(["type": "playback.completed", "command_id": say.commandId, "error": nil])
@@ -238,6 +270,70 @@ public actor CallClient {
         try await devices.player.play(pcm16k: audio, durationMs: say.durationMs)
         try Task.checkCancellation()
         try await post(["type": "playback.completed", "command_id": say.commandId, "error": nil])
+    }
+
+    // MARK: live avatar
+
+    /// Asks the backend for a Simli session and connects in the background while the greeting is prepared.
+    private func startLiveAvatar(callId: String) {
+        guard let live = devices.live else { return }
+        liveTask?.cancel()
+        liveGeneration += 1
+        let generation = liveGeneration
+        liveState = .connecting(Date())
+        liveTask = Task { [api, weak self] () -> Void in
+            var connected = false
+            do {
+                let session = try await api.liveAvatar(callId: callId)
+                try Task.checkCancellation()
+                try await live.connect(session)
+                connected = !Task.isCancelled
+            } catch {
+                connected = false
+            }
+            await self?.liveConnectFinished(connected, generation: generation)
+        }
+    }
+
+    private func liveConnectFinished(_ connected: Bool, generation: Int) async {
+        guard generation == liveGeneration else { return }
+        liveTask = nil
+        if connected {
+            liveState = .ready
+        } else {
+            liveState = .off
+            await devices.live?.disconnect()
+        }
+    }
+
+    /// The live avatar if it is connected, waiting briefly while it is still connecting.
+    private func liveAvatar() async -> LiveAvatarPlayer? {
+        guard let live = devices.live else { return nil }
+        while true {
+            switch liveState {
+            case .off:
+                return nil
+            case .ready:
+                return live
+            case .connecting(let since):
+                if Date().timeIntervalSince(since) > Self.liveConnectWait {
+                    // Still connecting: this line plays as a clip; a later line may still go live.
+                    return nil
+                }
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                if Task.isCancelled {
+                    return nil
+                }
+            }
+        }
+    }
+
+    private func dropLiveAvatar() async {
+        liveGeneration += 1
+        liveTask?.cancel()
+        liveTask = nil
+        liveState = .off
+        await devices.live?.disconnect()
     }
 
     /// Plays the line's prepared clip. True only when it played to its end. False when the clip could not be
@@ -377,6 +473,7 @@ public actor CallClient {
             task.cancel()
         }
         running = [:]
+        await dropLiveAvatar()
         await devices.player.stop()
         await devices.clips?.stop()
         await devices.recorder.stop()

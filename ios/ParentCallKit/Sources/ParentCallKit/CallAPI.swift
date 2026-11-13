@@ -105,6 +105,12 @@ public struct CallAPI: Sendable {
         return try await send(req).0
     }
 
+    /// A Simli live session for this answered call. 503 means live is off or unavailable: use clips and voice.
+    func liveAvatar(callId: String) async throws -> LiveAvatarSession {
+        let data = try await postJSON("/v1/calls/\(callId)/avatar/live", [:])
+        return try JSON.decoder.decode(LiveAvatarSession.self, from: data)
+    }
+
     func uploadAnswer(callId: String, commandId: String, audio: Data, contentType: String) async throws {
         var req = request("/v1/calls/\(callId)/captures/\(commandId)", method: "POST")
         req.setValue(contentType, forHTTPHeaderField: "Content-Type")
