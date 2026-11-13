@@ -60,8 +60,26 @@ targets:
             if [ -f "$SRC/$f" ]; then cp -f "$SRC/$f" "$DST/$f"; echo "LocalAssets: copied $f"
             else rm -f "$DST/$f"; fi
           done
+  ParentAppUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: ParentAppUITests
+    dependencies:
+      - target: ParentApp
+    configFiles:
+      Debug: Config/App.xcconfig
+      Release: Config/App.xcconfig
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: $(PARENT_BUNDLE_ID).uitests
+        TARGETED_DEVICE_FAMILY: "1"
 schemes:
   ParentApp:
     build:
       targets:
         ParentApp: all
+    test:
+      targets:
+        - ParentAppUITests

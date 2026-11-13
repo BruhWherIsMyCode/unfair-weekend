@@ -203,7 +203,9 @@ struct CameraPreview: UIViewRepresentable {
         let view = PreviewView()
         view.previewLayer.session = session
         view.previewLayer.videoGravity = .resizeAspectFill
-        view.backgroundColor = .black
+        // Clear until frames arrive, so the design's striped placeholder shows through.
+        view.backgroundColor = .clear
+        view.previewLayer.backgroundColor = UIColor.clear.cgColor
         return view
     }
 

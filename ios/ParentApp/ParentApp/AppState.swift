@@ -67,9 +67,15 @@ final class AppState {
         if permissions.camera {
             camera.prepare()
         }
+        #if targetEnvironment(simulator)
+        // The Simulator has no front camera, and its voice-chat audio unit aborts on start
+        // (AURemoteIO RPC timeout). Fake devices there, so the screens can still be walked through.
+        devices = FakeDevices.make()
+        #else
         let phone = PhoneDevices.make()
         devices = ParentDevices(player: phone.player, recorder: phone.recorder, camera: camera,
                                 microphone: phone.microphone)
+        #endif
         camera.setAvailabilityHandler { [weak self] available, problem in
             Task { @MainActor in
                 self?.model?.resourceChanged(.camera, available: available, problem: problem)
