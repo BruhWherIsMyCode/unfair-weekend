@@ -13,7 +13,7 @@
 #
 # Usage: ./start-backend.sh [--port 8000] [--branch main] [--runner auto|analysis|fake|scripted]
 #                           [--claude off|subscription|api] [--mirrored] [--baseline-needed N]
-#                           [--label normal|acted] [--reset-keys]
+#                           [--label normal|acted] [--debug] [--reset-keys]
 #   --claude          who runs the call. subscription (default): your logged-in `claude` command, installs
 #                     claude-agent-sdk, no API key used. api: needs ANTHROPIC_API_KEY already set in the
 #                     environment (never stored, asked or printed). off: the fixed-order call, no Claude.
@@ -22,6 +22,9 @@
 #   --baseline-needed how many normal calls make her usual ready (UW_BASELINE_NEEDED, default 5): use 1 or 2
 #                     to try things out.
 #   --label           normal: this run's calls may enter her usual; acted: they never do (DEMO_SESSION_LABEL).
+#   --debug           debug view (UW_DEBUG=on): shows which hand the camera sees. One line per second in this terminal,
+#                     a short caption on the phone, pictures in analysis/runs/debug/<call>/. Measuring is unchanged.
+#                     To check the mirroring: raise your LEFT hand; if the debug says RIGHT, restart with --mirrored.
 # Keys: DEMO_KEY is made once. ELEVENLABS_API_KEY (voice, transcription) and SIMLI_API_KEY (avatar clips) are asked
 #       for on the first run (Enter skips) and stored in ~/.local/share/checkin-backend/ (mode 600), never in the repo.
 #       A key set in the environment wins; --reset-keys asks again.
@@ -34,6 +37,7 @@ CLAUDE="subscription"
 MIRRORED=0
 BASELINE_NEEDED=""
 LABEL=""
+DEBUG_VIEW=0
 RESET_KEYS=0
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -44,6 +48,7 @@ while [ $# -gt 0 ]; do
         --mirrored) MIRRORED=1; shift ;;
         --baseline-needed) BASELINE_NEEDED="$2"; shift 2 ;;
         --label) LABEL="$2"; shift 2 ;;
+        --debug) DEBUG_VIEW=1; shift ;;
         --reset-keys) RESET_KEYS=1; shift ;;
         -h|--help) sed -n '2,/^set -euo/{/^set -euo/!p}' "$0"; exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
@@ -267,6 +272,7 @@ else
     echo "  Baseline:  needs 5 normal calls (the default)"
 fi
 echo "  Label:     ${LABEL:-live}"
+if [ "$DEBUG_VIEW" = 1 ]; then echo "  Debug:     on (terminal lines, captions, pictures in analysis/runs/debug)"; fi
 
 step "Running the backend on port $PORT (Ctrl+C to stop)"
 export DEMO_KEY
@@ -282,6 +288,7 @@ fi
 if [ "$CLAUDE" = "api" ]; then export ANTHROPIC_API_KEY; else unset ANTHROPIC_API_KEY; fi
 if [ "$MIRRORED" = 1 ]; then export UW_MIRRORED="on"; else unset UW_MIRRORED; fi
 if [ -n "$BASELINE_NEEDED" ]; then export UW_BASELINE_NEEDED="$BASELINE_NEEDED"; else unset UW_BASELINE_NEEDED; fi
+if [ "$DEBUG_VIEW" = 1 ]; then export UW_DEBUG="on"; else unset UW_DEBUG; fi
 if [ -n "$LABEL" ]; then export DEMO_SESSION_LABEL="$LABEL"; else unset DEMO_SESSION_LABEL; fi
 if [ -n "${ELEVENLABS_API_KEY:-}" ]; then export ELEVENLABS_API_KEY; else unset ELEVENLABS_API_KEY; fi
 if [ -n "${SIMLI_API_KEY:-}" ]; then export SIMLI_API_KEY; else unset SIMLI_API_KEY; fi
