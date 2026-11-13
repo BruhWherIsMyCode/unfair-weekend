@@ -4,6 +4,11 @@ The [architecture decision](ARCHITECTURE_PLAN.md) places analyzers on the real p
 
 ## Shared database
 
+[Open the interactive database guide](guides/database-guide.html) in a browser
+for Russian explanations of all tables, their relationships, three call
+scenarios and observation history. It is one self-contained HTML file; the
+teaching model does not write to an actual database.
+
 From `backend/`, using Python 3 and SQLite 3.38+:
 
 ```bash

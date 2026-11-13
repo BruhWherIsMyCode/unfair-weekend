@@ -5,6 +5,17 @@ Version: migration `0001_initial.sql`, 13 Nov 2026. **Executable source:**
 ownership and behavior; do not create another handwritten ORM schema that can
 silently diverge from the migration.
 
+[Interactive HTML guide in Russian](guides/database-guide.html): table explorer,
+call walkthroughs and a teaching model of observation history vs current state.
+Open the file directly in a browser; its schema data is embedded and generated
+from the actual migrations. Scenarios simulate future writers, without a live
+database connection. Refresh/verify the embedded snapshot from the repo root:
+
+```bash
+python3 backend/scripts/update_database_guide.py
+python3 backend/scripts/update_database_guide.py --check
+```
+
 The [architecture decision](ARCHITECTURE_PLAN.md) places analyzers on the real
 parent client and all attempt policy, clocks, aggregation and final results on
 the Python backend. This database stores durable state and history for that
