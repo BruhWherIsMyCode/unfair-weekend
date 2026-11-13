@@ -12,11 +12,11 @@ struct CallingView: View {
         ZStack {
             Palette.callBg.ignoresSafeArea()
             VStack(spacing: 20) {
-                Avatar(size: 132, label: is112 ? "" : "Fedya",
-                       photo: is112 ? nil : LocalAssets.fedyaPhoto,
+                Avatar(size: 132, label: is112 ? "" : store.name,
+                       photo: is112 ? nil : store.photo,
                        stripes: Palette.callAvatarStripes, textColor: Palette.callAvatarText, fontSize: 11)
                 VStack(spacing: 6) {
-                    Text(verbatim: is112 ? "112" : "Fedya")
+                    Text(verbatim: is112 ? "112" : store.name)
                         .font(.system(size: 34, weight: .semibold))
                         .tracking(-0.6)
                     Text("calling…")

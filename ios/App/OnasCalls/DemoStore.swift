@@ -10,12 +10,14 @@ import UserNotifications
 @Observable
 final class DemoStore {
     enum Phase: String { case asUsual, alert, calling, declined }
-    enum Screen { case home, alert }
+    enum Screen { case home, alert, profile }
     enum Overlay { case none, fakeFedyaCall, fake112 }
 
     // Scene
     private(set) var phase: Phase = .asUsual
     var screen: Screen = .home
+    /// Where "back" on the alert screen goes: Family or the profile it was opened from.
+    private(set) var alertBack: Screen = .home
     private(set) var overlay: Overlay = .none
     private(set) var alertTime = Date()
     private(set) var calledAt: Date?
@@ -38,6 +40,15 @@ final class DemoStore {
     private(set) var clip: AlertClip?
     let feed = FamilyFeed()
 
+    // Profile
+    var profile = PersonProfile() { didSet { ProfileStorage.save(profile) } }
+    /// A photo picked on the profile screen.
+    private(set) var customPhoto: UIImage?
+    var photo: UIImage? { customPhoto ?? LocalAssets.fedyaPhoto }
+    let history = CallHistory()
+    /// The history entry of the alert on screen (staged or real).
+    private(set) var currentRecordId: String?
+
     @ObservationIgnored private let defaults = UserDefaults.standard
     @ObservationIgnored private let keepAlive = KeepAlive()
     @ObservationIgnored private var seenMessages: Set<String> = []
@@ -50,10 +61,14 @@ final class DemoStore {
         static let phase = "scene.phase", alertTime = "scene.alertTime"
         static let calledAt = "scene.calledAt", declinedAt = "scene.declinedAt", armedFor = "scene.armedFor"
         static let liveMessage = "scene.liveMessage", seen = "scene.seenMessages"
+        static let currentRecord = "scene.currentRecord"
     }
     static let notificationId = "onas.fedya.alert"
 
     init() {
+        profile = ProfileStorage.load()
+        customPhoto = ProfileStorage.loadPhoto()
+        currentRecordId = defaults.string(forKey: Key.currentRecord)
         phoneNumber = defaults.string(forKey: Key.phone) ?? ""
         delaySeconds = defaults.object(forKey: Key.delay) as? Int ?? 60
         fakeCallScreen = defaults.bool(forKey: Key.fakeCall)
@@ -66,6 +81,15 @@ final class DemoStore {
         if phase == .calling { phase = .alert }
         liveMessage = defaults.data(forKey: Key.liveMessage).flatMap { try? JSONDecoder().decode(FamilyMessage.self, from: $0) }
         seenMessages = Set(defaults.stringArray(forKey: Key.seen) ?? [])
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        if args.contains("-uitest.resetProfile") {
+            profile = PersonProfile()
+            customPhoto = nil
+            ProfileStorage.savePhoto(nil)
+        }
+        if args.contains("-uitest.framesClip") { history.addTestFramesClip() }
+        #endif
         callMonitor.onChange = { [weak self] in self?.callsChanged() }
         feed.onMessage = { [weak self] message in self?.receive(message) }
     }
@@ -90,11 +114,14 @@ final class DemoStore {
             seenMessages.insert(message.messageId)
             defaults.set(Array(seenMessages.suffix(200)), forKey: Key.seen)
         }
+        history.upsert(CallRecord(id: message.messageId, date: Self.parse(message.createdAt) ?? Date(),
+                                  outcome: .init(kind: message.kind), text: message.text, live: true))
         if message.isAlert {
             if isNew {
                 resetScene()
                 enterAlert(at: Date())
-                notify(title: String(localized: "Call Fedya now."), body: message.text, loud: true)
+                currentRecordId = message.messageId
+                notify(title: callNow + ".", body: message.text, loud: true)
             }
             if isNew || liveMessage?.messageId == message.messageId {
                 liveMessage = message
@@ -109,8 +136,11 @@ final class DemoStore {
     private func loadClipIfNeeded() {
         guard let path = liveMessage?.clipUrl, clip?.url != path else { return }
         Task { [weak self] in
-            guard let self, let loaded = await self.feed.fetchClip(path), self.liveMessage?.clipUrl == path else { return }
+            guard let self, let loaded = await self.feed.fetchClip(path), let message = self.liveMessage,
+                  message.clipUrl == path else { return }
             self.clip = loaded
+            // Kept on this phone: the backend forgets it after 30 min.
+            self.history.saveClip(loaded, for: message.messageId)
         }
     }
 
@@ -125,7 +155,19 @@ final class DemoStore {
         UNUserNotificationCenter.current().add(request)
     }
 
+    private static func parse(_ iso: String) -> Date? {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = f.date(from: iso) { return d }
+        f.formatOptions = [.withInternetDateTime]
+        return f.date(from: iso)
+    }
+
     // MARK: Derived text
+
+    var name: String { profile.shownName }
+    var pronoun: Pronoun { profile.pronoun }
+    var callNow: String { String(localized: "Call \(name) now") }
 
     var fedyaDigits: String {
         let trimmed = phoneNumber.trimmingCharacters(in: .whitespaces)
@@ -133,8 +175,8 @@ final class DemoStore {
         return trimmed.hasPrefix("+") ? "+" + digits : digits
     }
 
-    /// Fedya's time in the "As usual" list: his last check-in.
-    var usualTime: String { Clock.time(alertTime) }
+    /// Fedya's time in the "As usual" row: the last check-in in the history.
+    var usualTime: String { Clock.time(history.records.first?.date ?? alertTime) }
 
     // MARK: Demo panel
 
@@ -144,11 +186,12 @@ final class DemoStore {
         let fire = Date().addingTimeInterval(TimeInterval(delaySeconds))
         enterAlert(at: fire)
         armedFor = fire
+        recordStaged(at: fire)
         save()
 
         let content = UNMutableNotificationContent()
-        content.title = String(localized: "Call Fedya now.")
-        content.body = String(localized: "He seems different from his usual.")
+        content.title = callNow + "."
+        content.body = pronoun.seemsDifferent
         content.sound = UNNotificationSound(named: UNNotificationSoundName("alert.caf"))
         // Needs the Time Sensitive capability; without it iOS treats this as .active.
         content.interruptionLevel = .timeSensitive
@@ -161,6 +204,22 @@ final class DemoStore {
     func showAlertNow() {
         resetScene()
         enterAlert(at: Date())
+        recordStaged(at: Date())
+        save()
+    }
+
+    /// The staged alert goes into the history too, with the staged report and clip.
+    private func recordStaged(at date: Date) {
+        let id = "staged-" + UUID().uuidString
+        let text = [pronoun.seemedDifferent(name), pronoun.tiredLine, pronoun.unwellLine].joined(separator: " ")
+        history.upsert(CallRecord(id: id, date: date, outcome: .notUsual, text: text, clip: .staged))
+        currentRecordId = id
+    }
+
+    /// Demo panel: back to the sample week of calls.
+    func resetHistory() {
+        history.resetToSample()
+        currentRecordId = nil
         save()
     }
 
@@ -175,6 +234,11 @@ final class DemoStore {
         center.removePendingNotificationRequests(withIdentifiers: [Self.notificationId])
         center.removeDeliveredNotifications(withIdentifiers: [Self.notificationId])
         fakeTimer?.cancel()
+        // A rehearsal leaves no trace: the staged alert being reset leaves the history.
+        if let id = currentRecordId, let record = history.record(id), !record.live {
+            history.delete([id])
+        }
+        currentRecordId = nil
         phase = .asUsual
         screen = .home
         overlay = .none
@@ -194,8 +258,25 @@ final class DemoStore {
 
     // MARK: Scene actions
 
-    func openAlert() { screen = .alert }
+    func openAlert() {
+        alertBack = screen == .profile ? .profile : .home
+        screen = .alert
+    }
+    func backFromAlert() { screen = alertBack }
     func backToFamily() { screen = .home }
+    func openProfile() { screen = .profile }
+
+    // MARK: Profile
+
+    func saveProfile(_ new: PersonProfile, phone: String, photo: UIImage?, photoChanged: Bool) {
+        profile = new
+        phoneNumber = phone
+        if photoChanged {
+            let fitted = photo?.fitted(to: 800)
+            ProfileStorage.savePhoto(fitted)
+            customPhoto = fitted
+        }
+    }
 
     /// The user tapped the notification: land on Home in its current state.
     func openedFromNotification() {
@@ -204,6 +285,8 @@ final class DemoStore {
     }
 
     func heIsFine() {
+        history.update(currentRecordId) { $0.markedFineAt = Date() }
+        currentRecordId = nil
         fakeTimer?.cancel()
         liveMessage = nil
         clip = nil
@@ -218,8 +301,9 @@ final class DemoStore {
     func callFedya() {
         calledAt = Date()
         declinedAt = nil
+        history.update(currentRecordId) { $0.calledAt = Date() }
         let digits = fedyaDigits
-        guard !fakeCallScreen, !digits.isEmpty, let url = URL(string: "tel:" + digits) else {
+        guard !fakeCallScreen, Self.isDialable(digits), let url = URL(string: "tel:" + digits) else {
             startFakeFedyaCall()
             return
         }
@@ -231,6 +315,9 @@ final class DemoStore {
             if !ok { Task { @MainActor in self?.startFakeFedyaCall() } }
         }
     }
+
+    /// A personal number, never a short or emergency code (112, 911, 999…): at least 6 digits.
+    static func isDialable(_ digits: String) -> Bool { digits.filter(\.isNumber).count >= 6 }
 
     /// "Call 112": never dials. Shows the calling screen marked as a demo, then back to the alert.
     func fakeCall112() {
@@ -329,6 +416,7 @@ final class DemoStore {
         defaults.set(declinedAt, forKey: Key.declinedAt)
         defaults.set(armedFor, forKey: Key.armedFor)
         defaults.set(liveMessage.flatMap { try? JSONEncoder().encode($0) }, forKey: Key.liveMessage)
+        defaults.set(currentRecordId, forKey: Key.currentRecord)
     }
 }
 

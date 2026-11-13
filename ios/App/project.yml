@@ -40,6 +40,7 @@ targets:
         UIRequiresFullScreen: true
         UIApplicationSupportsIndirectInputEvents: true
         NSLocalNetworkUsageDescription: "HeartLine receives check-in alerts from the check-in service on this network."
+        NSPhotoLibraryAddUsageDescription: "HeartLine saves a check-in clip to Photos when you tap Save to Photos."
         NSAppTransportSecurity:
           # The demo backend runs on a laptop on the same network, over plain HTTP.
           NSAllowsLocalNetworking: true

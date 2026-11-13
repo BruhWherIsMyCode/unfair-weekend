@@ -27,6 +27,8 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>HeartLine receives check-in alerts from the check-in service on this network.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>HeartLine saves a check-in clip to Photos when you tap Save to Photos.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIBackgroundModes</key>

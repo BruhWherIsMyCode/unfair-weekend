@@ -39,7 +39,7 @@ targets:
     info:
       path: Config/Info.plist
       properties:
-        CFBundleDisplayName: "HeartLine"
+        CFBundleDisplayName: "HeartCall"
         CFBundleDevelopmentRegion: en
         UILaunchScreen:
           UIColorName: LaunchBackground
