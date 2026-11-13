@@ -95,7 +95,7 @@ def test_wrong_protocol_version_is_refused(tmp_path):
         server = make_server(tmp_path)
         s, c = link.MemoryTransport.pair()
         task = asyncio.ensure_future(server.handle_connection(s))
-        await c.send(dict(HELLO, protocol=2))
+        await c.send(dict(HELLO, protocol=99))  # v8: protocols 1 and 2 are both accepted
         assert (await asyncio.wait_for(c.recv(), 2))["code"] == "protocol"
         await asyncio.wait_for(task, 2)
 

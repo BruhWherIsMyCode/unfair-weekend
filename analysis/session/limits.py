@@ -61,6 +61,21 @@ ALERT_REASONS = ("said_unwell", "asked_for_help", "confused_answers", "reading_f
 ALERT_NOTE_MAX_CHARS = 200
 ALERT_MAX_PER_CALL = 2
 
+# ---- v8: speech on the PC version ---------------------------------------------------------------
+REQUIRED_TASKS_WITH_SPEECH = ("smile", "arms", "sentence")  # chosen per call when the client reports speech
+STT_TIMEOUT_S = 15.0  # one ElevenLabs speech-to-text request
+TTS_TIMEOUT_S = 15.0  # one ElevenLabs text-to-speech request
+STT_TOKEN_WAIT_S = 5.0  # the client waits this long for the server's single-use token
+STT_TOKENS_PER_CALL = 10  # the server mints at most this many tokens per call (one in flight at a time)
+SPEECH_SILENCE_S = 1.5  # recording stops this long after speech ended
+SPEECH_ANSWER_START_S = 5.0  # a spoken answer: nobody starts speaking within this -> no answer
+SPEECH_SENTENCE_START_S = 8.0  # the sentence: nobody starts speaking within this -> nothing heard
+SPEECH_ANSWER_GRACE_S = 20.0  # the server waits this much longer than the listen window for recording + transcription
+SENTENCE_RESULT_GRACE_S = 20.0  # the client gives the sentence this long beyond its capture window to deliver a result
+SPEECH_METRIC_ID = "speech_duration_v1"
+SPEECH_BASELINE_KEY = "sentence.duration_s"
+SENTENCE_MIN_HALF_WIDTH_S = 0.5  # minimum half width of her usual sentence duration (seconds); first guess
+
 TASK_WINDOW_S = {"smile": 5.0, "arms": 12.0, "sentence": 12.0}
 TASK_SIGN = {"smile": "face", "arms": "arm", "sentence": "speech"}
 TASK_RESOURCE = {"smile": "camera", "arms": "camera", "sentence": "microphone"}

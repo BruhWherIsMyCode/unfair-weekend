@@ -1,4 +1,8 @@
-# PC link protocol, version 1
+# PC link protocol, version 2
+
+**Version 2 (v8) adds speech** (see "Speech messages (version 2)" at the end). A version 1 client (no microphone,
+`speech: false`, `protocol: 1` in `hello`) still works unchanged; the server answers `hello_ok` with the client's own
+version. The server accepts protocol 1 and 2 and refuses anything else with `error` `protocol`.
 
 The client program (camera + measuring) and the server program (all call logic) talk over one WebSocket
 (`ws://host:port`). Text frames only, one JSON object per message. The server accepts ONE client at a time: a second
@@ -113,3 +117,61 @@ arrive as ordinary `say` messages.
 {"type": "error", "call_id": null, "seq": 8, "code": "busy", "text": "another client is connected"}
 ```
 Codes used: `busy`, `invalid_message`, `expected_hello`, `protocol`, `call_in_progress`, `no_call`.
+
+## Speech messages (version 2)
+
+Idea: the ElevenLabs API key lives ONLY in the server's environment (`ELEVENLABS_API_KEY`) and never travels over the
+link. For each recording the client asks the server for a **single-use token** (valid 15 minutes, used once), calls
+ElevenLabs speech-to-text itself with that token, and sends the server the **text and word timings, never audio**.
+Claude cannot hear: the server turns the word timings into numbers (duration, longest pause, words per minute, word
+error rate against "Today I am sitting by the window.") and Claude sees the numbers and the transcript.
+
+`hello` capabilities: `microphone: true` and `speech: true` when the client has a microphone and can reach the speech
+module; `measures` then also lists `"sentence"`. The server makes the sentence task required for a call only when the
+client reports `speech: true` AND the server has a key (otherwise the call needs only smile and arms and the sentence
+check is skipped).
+
+Client -> server
+
+`stt_token_request` (before transcribing one recording; at most one in flight, at most 10 per call)
+```json
+{"type": "stt_token_request", "call_id": "call_...", "seq": 20, "purpose": "answer", "ref": "ans_q_feeling_1"}
+```
+`purpose` is `answer` or `sentence`; `ref` is the client's own id, copied into the reply.
+
+`answer` (as before) gains two optional fields
+```json
+{"type": "answer", "call_id": "call_...", "seq": 21, "question_id": "q_feeling", "transcript": "I feel fine.",
+ "words": [{"text": "I", "start": 0.12, "end": 0.3, "logprob": -0.08}], "stt_error": null}
+```
+`words` are the speech-to-text words only (no spacing or sound tags); `start`, `end`, `logprob` may be `null`. When
+speech-to-text failed: `transcript: null` and `stt_error` a short word (`stt_http_401`, `token_busy`,
+`speech_not_configured`, ...); the call goes on.
+
+`speech_result` (the sentence task; sent once, then `capture_ended`)
+```json
+{"type": "speech_result", "call_id": "call_...", "seq": 40, "attempt_id": "A3",
+ "transcript": "Today I am sitting by the window.",
+ "words": [{"text": "Today", "start": 0.1, "end": 0.5, "logprob": -0.1}],
+ "duration_recorded_s": 4.7, "stt_error": null}
+```
+While it records and transcribes, the client sends one `reading` per 250 ms with `task: "sentence"` and
+`data: {"phase": "recording" | "transcribing", "level": 0.31}` so the server's sample watchdogs know it is alive. The
+`speech_result` is the attempt's one result sample (format `speech`).
+
+Server -> client
+
+`stt_token`
+```json
+{"type": "stt_token", "call_id": "call_...", "seq": 9, "ref": "ans_q_feeling_1", "token": "sutkn_...", "error": null}
+```
+Without `ELEVENLABS_API_KEY` on the server: `"token": null, "error": "speech_not_configured"`. Other errors:
+`token_busy` (one already in flight), `token_limit` (10 per call), `token_failed_<http status>`.
+
+`say` gains an optional `audio_pcm16k_b64` (ElevenLabs voice, `--tts elevenlabs`): base64 of raw PCM, 16 kHz, mono,
+signed 16-bit little-endian. The client plays it and sends `said` when playback ends; without the field the line is
+shown (and spoken locally with `--tts system`) as in version 1.
+
+Order of one spoken answer: `listen` -> client records (at most `timeout_s`, stops 1.5 s after she stops talking) ->
+`stt_token_request` -> `stt_token` -> client calls ElevenLabs -> `answer` with `transcript` and `words`. Nobody spoke:
+`answer` with `transcript: null` and no token request at all.

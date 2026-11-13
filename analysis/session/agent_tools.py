@@ -218,7 +218,9 @@ class ToolHandlers:
                  "value": {"type": "string", "maxLength": limits.ANSWER_MAX_CHARS}},
                  "required": ["question_id", "value"], "additionalProperties": False}},
             {"name": "run_task", "description": "Run one check: the code plays the instruction lines, measures, and "
-             "returns plain facts about how the attempt went (never a result).",
+             "returns facts about how the attempt went, with today's number and her usual range. For the sentence "
+             "check it also returns `speech`: what was heard, word_error_rate, missing_words, changed_words, "
+             "extra_words, longest_pause_s and words_per_min (null when nothing usable was heard).",
              "input_schema": {"type": "object", "properties": {"task": {"type": "string", "enum": list(limits.TASKS)}},
                               "required": ["task"], "additionalProperties": False}},
             {"name": "recover_resource", "description": "After an interruption, ask her to fix the camera or "
@@ -410,12 +412,16 @@ class ToolHandlers:
         """A TaskResult dict -> the facts Claude gets, now with today's numbers."""
         i = result.get("interruption")
         ready = bool((result.get("baseline") or {}).get("ready"))
-        return {"task": task, "outcome": result["outcome"], "quality": result["quality"]["status"],
-                "reasons": list(result["quality"]["reasons"]),
-                "interruption": {"code": i["code"], "recoverable": i["recoverable"]} if i else None,
-                "attempts_left": self.attempts_left(task), "needs_another_reading": self.needs_another(task),
-                "skip": self.skip(task), "resources": self.resource_states(),
-                "reading": self._reading_facts(result.get("reading"), ready), "baseline_ready": ready}
+        out = {"task": task, "outcome": result["outcome"], "quality": result["quality"]["status"],
+               "reasons": list(result["quality"]["reasons"]),
+               "interruption": {"code": i["code"], "recoverable": i["recoverable"]} if i else None,
+               "attempts_left": self.attempts_left(task), "needs_another_reading": self.needs_another(task),
+               "skip": self.skip(task), "resources": self.resource_states(),
+               "reading": self._reading_facts(result.get("reading"), ready), "baseline_ready": ready}
+        if task == "sentence":  # v8: the speech numbers (Claude cannot hear; the code turned the word timings into numbers)
+            details = getattr(self._module("sentence"), "attempt_details", None)
+            out["speech"] = details(result.get("attempt_id")) if callable(details) else None
+        return out
 
     async def _do_alert_family(self, args: Dict[str, Any]) -> Dict[str, Any]:
         note = args.get("note", "")

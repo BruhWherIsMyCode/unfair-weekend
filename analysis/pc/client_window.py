@@ -75,6 +75,13 @@ class Window:
         self._text(panel, "TIMER", x, y, 0.5, GREY)
         y = self._block(panel, [view.timer or "-"], x, y + 28, 0.7, WHITE, 28)
         y += 8
+        if view.listening:  # spoken answer or sentence: a live input level bar
+            self._text(panel, view.listening, x, y + 8, 0.7, AMBER, 2)
+            cv2.rectangle(panel, (x, y + 22), (x + 300, y + 38), GREY, 1)
+            cv2.rectangle(panel, (x, y + 22), (x + int(300 * max(0.0, min(1.0, view.input_level))), y + 38), GREEN, -1)
+            y += 52
+        if view.heard and view.answer_prompt is None and view.result_title is None:
+            y = self._block(panel, ["I heard:"] + wrap_text(view.heard, 40)[:3], x, y + 10, 0.5, WHITE, 20)
         if view.answer_prompt is not None:
             y = self._block(panel, wrap_text(view.answer_prompt, 38), x, y + 8, 0.5, AMBER, 20)
             self._text(panel, "> " + view.answer_text[-34:] + "_", x, y + 10, 0.6, WHITE)

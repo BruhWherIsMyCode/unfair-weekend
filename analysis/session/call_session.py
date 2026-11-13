@@ -734,6 +734,8 @@ class CallSession:
             for side, key in limits.ARMS_BASELINE_KEYS.items():
                 if values.get(side) is not None:
                     out[key] = float(values[side])
+        if limits.SPEECH_METRIC_ID in out:  # the sentence: stored under its own baseline key (seconds)
+            out[limits.SPEECH_BASELINE_KEY] = out.pop(limits.SPEECH_METRIC_ID)
         return out
 
     async def _publish(self, phase: str) -> bool:

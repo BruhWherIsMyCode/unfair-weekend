@@ -7,6 +7,7 @@ baseline dicts a CallSession expects:
     smile  make_baseline over the stored corner_height values (+ snapshot_id)
     arms   {"snapshot_id", "sessions", "needed", "ready", "hand_left": make_baseline, "hand_right": make_baseline}
            (ready only when both hands are), as in v6.
+    sentence  make_baseline over the stored `sentence.duration_s` values (v8, seconds, + snapshot_id)
 
 The snapshot id includes how many values the baseline was built from, so it changes when the baseline does and is
 frozen for the whole call (loaded once at call start).
@@ -58,7 +59,12 @@ class BaselineStore:
             "sessions": min(counts), "needed": config.BASELINE_NEEDED,
             "ready": all(h["ready"] for h in hands.values()),
             "hand_left": hands["left"], "hand_right": hands["right"]}
-        return {"smile": smile, "arms": arms}
+        # v8: how long she takes to say the sentence (seconds); the usual is at least +/- SENTENCE_MIN_HALF_WIDTH_S wide
+        sentence_values = baseline_mod.baseline_values(person, limits.SPEECH_BASELINE_KEY)
+        sentence = baseline_mod.make_baseline(sentence_values, metric="sentence_duration",
+                                              min_half_width=limits.SENTENCE_MIN_HALF_WIDTH_S)
+        sentence["snapshot_id"] = "baseline_%s_sentence_%d" % (self._safe(), len(sentence_values))
+        return {"smile": smile, "arms": arms, "sentence": sentence}
 
     def _safe(self) -> str:
         return "".join(c if c.isalnum() or c in "-_" else "_" for c in self.person)

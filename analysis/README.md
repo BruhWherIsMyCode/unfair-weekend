@@ -248,3 +248,35 @@ Two separate programs joined by a websocket (`analysis/pc/protocol.md`, protocol
 **Offline demo (no camera, no network, no Claude):** `python -m analysis.pc.demo_link [--driver fake-claude]`. Server logic and a scripted client in one process over an in-memory link, a fake clock, made-up readings.
 
 **Status.** The tests (400) and both demos ran offline with fake clients. **Never run: the camera client (`client.py`, `client_window.py`, `frame_source.WebcamSource`, `client_measure` with real MediaPipe), the websocket server path outside one loopback test, the real Claude API path, the subscription path with the real `claude_agent_sdk`, and pyttsx3.** The 1 s camera-blocked thresholds and the wording of the hints are first guesses.
+
+## v8: speech
+
+The PC version can now talk and listen. Her answers are spoken (not typed), the sentence check is real, and the avatar's lines can use an ElevenLabs voice. Protocol version 2 (`analysis/pc/protocol.md`); a version 1 client still works.
+
+**Setup.** `pip install sounddevice` (microphone and line playback in the client; without it the client says so and answers stay typed). Put the ElevenLabs key in the **SERVER terminal only**: `export ELEVENLABS_API_KEY=...` (Windows: `set ELEVENLABS_API_KEY=...`). The key never goes in the client terminal, the repo, a `.env` that is committed, or over the link. Optional: `UW_TTS_VOICE_ID` (needed for `--tts elevenlabs`; the built-in default is an unverified placeholder and the server refuses to use it), `UW_TTS_MODEL` (default `eleven_multilingual_v2`), `UW_STT_LANGUAGE` (default `en`, read by the client).
+
+**How it works.** The client records when a `listen` arrives (up to 8 s, it stops 1.5 s after she stops talking; nobody speaks within 5 s = no answer and **no request to ElevenLabs**). It then asks the server for a **single-use token**, calls ElevenLabs speech-to-text (`scribe_v2`, word timestamps) itself with that token, and sends the server the **text and word timings, never audio**. The server mints at most one token at a time and 10 per call. Speech-to-text fails or the server has no key: the answer is `null` with a short `stt_error`, the call goes on, and without a key the client falls back to typing (the server prints it) and the sentence check is skipped.
+
+**The sentence check.** The avatar says "Please repeat this sentence after me: Today I am sitting by the window." The client records up to 12 s (stops 1.5 s after she stops), transcribes, and sends a `speech_result`. The code turns the word timings into numbers (`analysis/speech/sentence_metric.py`, pure): `duration_s` (first word start to last word end), `longest_pause_s`, `words_per_min`, `word_error_rate` (word edit distance to the expected sentence, lowercased, punctuation removed), `missing_words`, `extra_words`, `changed_words`, `heard`.
+
+- **What the rule uses.** One number: `duration_s` (metric `speech_duration_v1`, unit `s`, sign `speech`, side always null), compared with her own usual (baseline key `sentence.duration_s`, at least +/- 0.5 s wide, ready after 5 calls). Outside = **longer** than her usual high only; faster is never outside. Two outside readings confirm a change and the safety floor publishes it, as for the other checks. Quality is `unusable` with `speech_to_text_failed` or `nothing_heard`.
+- **What Claude sees.** In the `run_task` result for the sentence: the usual `reading` and, new, `speech`: `heard`, `word_error_rate`, `missing_words`, `changed_words`, `extra_words`, `longest_pause_s`, `words_per_min`. Claude may judge them (and call `alert_family`); the safety floor does not use them. The server terminal prints the same numbers for each attempt.
+- **Required tasks.** `smile`, `arms` and `sentence` for a call when the client reports speech AND the server has a key; otherwise `smile` and `arms`. Decided per call and logged (`required_tasks`).
+
+**Line voice: `--tts off|elevenlabs` (server).** With `elevenlabs`, at start-up the server speaks every line the call can play (script lines with the name filled, the PC line texts, `swap_hands`) once into `analysis/runs/tts_cache/<voice_id>/<line_id>.pcm` (git-ignored; reused when the text is unchanged, so a restart costs nothing) and attaches the audio to `say`. Any failure: logged, those lines go out as text. The client plays the audio and sends `said` when it ends.
+
+**Client flags.** `--answers speech|typed` (default: speech when `sounddevice` and a microphone exist). The window shows "Listening..." with a live input level bar while it records, then "I heard: ..." with the transcript.
+
+**Run.**
+```
+# terminal 1 (the key lives here only)
+export ELEVENLABS_API_KEY=...          # and, for the line voice, export UW_TTS_VOICE_ID=...
+python -m analysis.pc.server --person feodor --name Feodor --tts off           # or: --tts elevenlabs
+# terminal 2
+python -m analysis.pc.client --server ws://127.0.0.1:8765 --person feodor --answers speech
+```
+Offline demo with a fake ElevenLabs and a fake microphone: `python -m analysis.pc.demo_link --speech [--driver fake-claude]`.
+
+**Costs.** Per ElevenLabs plan (speech-to-text per audio second, text-to-speech per character, once per line thanks to the cache). **Not measured here.**
+
+**Status. No request to ElevenLabs was ever made in the build session; the first real run is the owner's.** Never run: the microphone (`mic.py` with `sounddevice`), line playback, ElevenLabs token minting, speech-to-text with the token in the query (that this authentication works on `/v1/speech-to-text` is taken from the API reference only) and text-to-speech, the websocket path with audio-sized messages (a 12 s line is about 0.5 MB of base64; lines longer than that go out as text). The voice-activity thresholds (`mic.py`) and the 0.5 s minimum width of her usual sentence duration are first guesses. The voice id default is an unverified placeholder.

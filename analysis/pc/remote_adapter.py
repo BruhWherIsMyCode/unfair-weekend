@@ -3,8 +3,11 @@
 The server's receive loop validates each client message and hands it to `dispatch`. The adapter turns the session's
 calls into messages and the client's messages into what the session expects:
 
-    say            -> `say` {line_id, text}; waits for `said` (limits.PREPARE_PLAYBACK_S on the clock, then logs and returns)
-    listen         -> `listen`; waits for `answer` (None for a null transcript or after timeout_s + a short grace)
+    say            -> `say` {line_id, text, audio_pcm16k_b64 when --tts elevenlabs}; waits for `said`
+                      (limits.PREPARE_PLAYBACK_S on the clock, then logs and returns)
+    listen         -> `listen`; waits for `answer` (None for a null transcript or after timeout_s + a grace; the answer
+                      may carry the speech-to-text words, kept in `answer_words`)
+    speech_result  -> the one sample (format "speech") of a sentence attempt; its `reading` keep-alives are format "reading"
     start_capture  -> `start_capture` {attempt_id, task, settings, cues, phases (arms only)}
     cancel_capture -> `cancel_capture`
     samples        -> one sample per `reading` (format "reading", data = the reading dict); ends on `capture_ended`
@@ -37,8 +40,13 @@ def line_text(line_id: str, script: Dict[str, str], name: str) -> str:
 
 class RemoteAdapter:
     def __init__(self, endpoint: Endpoint, script: Dict[str, str], person_name: str, clock: Any, family: Any,
-                 initial_resources: Optional[Dict[str, str]] = None) -> None:
+                 initial_resources: Optional[Dict[str, str]] = None, line_audio: Optional[Dict[str, str]] = None,
+                 answer_grace_s: float = _ANSWER_GRACE_S) -> None:
         self.endpoint = endpoint
+        self.line_audio: Dict[str, str] = dict(line_audio or {})  # line_id -> base64 PCM (--tts elevenlabs)
+        self.answer_grace_s = answer_grace_s  # a speech client needs time to record and transcribe
+        self.answer_words: Dict[str, List[Dict[str, Any]]] = {}  # question_id -> the words of her last answer
+        self._last_seq: Dict[str, int] = {}
         self.script = script
         self.person_name = person_name
         self.clock = clock
@@ -114,7 +122,11 @@ class RemoteAdapter:
         future = asyncio.get_running_loop().create_future()
         self._said.setdefault(line_id, []).append(future)
         try:
-            if not await self._send("say", line_id=line_id, text=line_text(line_id, self.script, self.person_name)):
+            fields: Dict[str, Any] = {"line_id": line_id, "text": line_text(line_id, self.script, self.person_name)}
+            audio = self.line_audio.get(line_id)
+            if audio:
+                fields["audio_pcm16k_b64"] = audio  # ElevenLabs voice (v2); text-only lines carry no audio
+            if not await self._send("say", **fields):
                 return
             if not await self._wait(future, limits.PREPARE_PLAYBACK_S):
                 self._note("say_timeout", line=line_id)
@@ -129,7 +141,7 @@ class RemoteAdapter:
         try:
             if not await self._send("listen", question_id=question_id, timeout_s=float(timeout_s)):
                 return None
-            if not await self._wait(future, timeout_s + _ANSWER_GRACE_S):
+            if not await self._wait(future, timeout_s + self.answer_grace_s):
                 self._note("listen_timeout", question=question_id)
                 return None
             result = future.result()
@@ -194,7 +206,11 @@ class RemoteAdapter:
                     f.set_result(True)
                     break
         elif kind == "answer":
-            waiters = self._answers.get(message["question_id"]) or []
+            question_id = message["question_id"]
+            self.answer_words[question_id] = message.get("words") or []
+            if message.get("stt_error"):
+                self._note("speech_to_text_failed", question=question_id, error=str(message["stt_error"])[:80])
+            waiters = self._answers.get(question_id) or []
             for f in list(waiters):
                 if not f.done():
                     f.set_result(message.get("transcript"))
@@ -204,8 +220,21 @@ class RemoteAdapter:
             if attempt_id in self._closed_attempts:
                 self._note("reading_ignored", attempt_id=attempt_id, reason="capture_closed")
                 return
+            self._last_seq[attempt_id] = max(self._last_seq.get(attempt_id, -1), message["sequence"])
             self._queue(attempt_id).put_nowait({"sequence": message["sequence"], "captured_ms": message["captured_ms"],
                                                 "format": "reading", "data": message.get("data")})
+        elif kind == "speech_result":  # v2: the transcript and word timings of the sentence attempt (one sample)
+            attempt_id = message["attempt_id"]
+            if attempt_id in self._closed_attempts:
+                self._note("speech_result_ignored", attempt_id=attempt_id, reason="capture_closed")
+                return
+            sequence = self._last_seq.get(attempt_id, -1) + 1
+            self._last_seq[attempt_id] = sequence
+            data = {"transcript": message.get("transcript"), "words": message.get("words") or [],
+                    "duration_recorded_s": message["duration_recorded_s"], "stt_error": message.get("stt_error")}
+            self._queue(attempt_id).put_nowait({"sequence": sequence,
+                                                "captured_ms": max(0, int(message["duration_recorded_s"] * 1000)),
+                                                "format": "speech", "data": data})
         elif kind == "capture_ended":
             self._close_attempt(message["attempt_id"])
         elif kind == "capture_started":

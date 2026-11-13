@@ -131,11 +131,16 @@ class RemoteHandReader:
         return reading
 
 
-def remote_modules() -> Dict[str, Any]:
-    """The task modules for a call whose client measures. Fresh instances per call."""
+def remote_modules(speech: bool = False) -> Dict[str, Any]:
+    """The task modules for a call whose client measures. Fresh instances per call.
+
+    speech=True (v8): the sentence task measures a speech result from the client. Otherwise the in-process stub
+    stays (it has no metric, so the call skips it)."""
+    from analysis.tasks.stream_speech import StreamSpeechSentence
+
     return {"smile": StreamSmile(RemoteSmileReader(), passthrough_decode, use_executor=False),
             "arms": StreamArms(RemoteHandReader(), passthrough_decode, use_executor=False),
-            "sentence": StreamSentence()}
+            "sentence": StreamSpeechSentence() if speech else StreamSentence()}
 
 
 def field_names(cls: Any) -> tuple:

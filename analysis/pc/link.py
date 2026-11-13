@@ -1,4 +1,4 @@
-"""The link between the client program and the server program (protocol version 1, see protocol.md).
+"""The link between the client program and the server program (protocol version 2, see protocol.md).
 
 One JSON object per message; every message has `type`, `call_id` (null before a call) and `seq` (the sender's own
 counter). Program logic only ever uses the `Transport` interface (send, recv, close):
@@ -16,7 +16,8 @@ import asyncio
 import json
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2  # v2 adds speech; a v1 client (no speech) still works
+SUPPORTED_PROTOCOLS = (1, 2)
 MAX_TEXT_CHARS = 2000
 
 
@@ -203,6 +204,22 @@ def _phases(x: Any) -> bool:
                                         for p in x))
 
 
+MAX_WORDS = 200
+MAX_AUDIO_B64_CHARS = 700_000  # a websocket message stays under the default 1 MiB limit
+
+
+def _words(x: Any) -> bool:
+    """Speech-to-text words: [{"text", "start", "end", "logprob"}], start / end / logprob may be null."""
+    return (isinstance(x, list) and len(x) <= MAX_WORDS
+            and all(isinstance(w, dict) and isinstance(w.get("text"), str) and len(w["text"]) <= 100
+                    and all(w.get(k) is None or _is_num(w.get(k)) for k in ("start", "end", "logprob"))
+                    for w in x))
+
+
+def _audio_b64(x: Any) -> bool:
+    return isinstance(x, str) and len(x) <= MAX_AUDIO_B64_CHARS
+
+
 def _cues(x: Any) -> bool:
     return isinstance(x, list) and all(isinstance(c, dict) and _is_int(c.get("at_ms")) and _is_id(c.get("line_id"))
                                        for c in x)
@@ -223,6 +240,10 @@ CLIENT_FIELDS: Dict[str, Dict[str, Callable[[Any], bool]]] = {
     "said": {"line_id": _is_id},
     "answer": {"question_id": _is_id, "transcript": _opt(_is_str)},
     "hang_up": {},
+    # protocol v2 (speech)
+    "stt_token_request": {"purpose": _enum("answer", "sentence"), "ref": _is_id},
+    "speech_result": {"attempt_id": _is_id, "transcript": _opt(_is_str), "words": _words,
+                      "duration_recorded_s": _is_num},
 }
 SERVER_FIELDS: Dict[str, Dict[str, Callable[[Any], bool]]] = {
     "hello_ok": {"protocol": _is_int, "server_version": _is_str},
@@ -234,8 +255,12 @@ SERVER_FIELDS: Dict[str, Dict[str, Callable[[Any], bool]]] = {
     "progress": {"text": _is_str},
     "call_result": {"summary": lambda d: isinstance(d, dict), "family_text": _is_str},
     "error": {"code": _is_id, "text": _is_str},
+    "stt_token": {"ref": _is_id, "token": _opt(_is_str), "error": _opt(_is_str)},  # protocol v2
 }
-OPTIONAL_FIELDS = {("start_capture", "phases"): _opt(_phases)}  # arms only
+OPTIONAL_FIELDS = {("start_capture", "phases"): _opt(_phases),  # arms only
+                   ("say", "audio_pcm16k_b64"): _opt(_audio_b64)}  # v2: ElevenLabs line audio
+CLIENT_OPTIONAL_FIELDS = {("answer", "words"): _opt(_words), ("answer", "stt_error"): _opt(_is_str),
+                          ("speech_result", "stt_error"): _opt(_is_str)}  # v2: speech
 
 
 def _validate(message: Any, table: Dict[str, Dict[str, Callable[[Any], bool]]], optional: Dict[Tuple[str, str], Any]
@@ -264,7 +289,7 @@ def _validate(message: Any, table: Dict[str, Dict[str, Callable[[Any], bool]]], 
 
 def validate_client_message(message: Any) -> Optional[str]:
     """None when a client -> server message is well formed, else a short plain reason."""
-    return _validate(message, CLIENT_FIELDS, {})
+    return _validate(message, CLIENT_FIELDS, CLIENT_OPTIONAL_FIELDS)
 
 
 def validate_server_message(message: Any) -> Optional[str]:

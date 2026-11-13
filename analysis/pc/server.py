@@ -16,7 +16,16 @@ compact log line per step in this terminal. One client and one call at a time.
                         published mid-call whatever Claude does. OFF is for experiments only
                         (UW_SAFETY_FLOOR=off also turns it off).
 
-STATUS: the websocket serving path and the real Claude paths were never run in the build session.
+--tts off|elevenlabs    elevenlabs: every line the call can play is spoken once with an ElevenLabs voice at start-up
+                        (cached in analysis/runs/tts_cache/<voice_id>/) and the audio is attached to `say`. Needs
+                        ELEVENLABS_API_KEY and UW_TTS_VOICE_ID in THIS terminal. Any failure: lines go out as text.
+
+Speech (v8): the API key lives only in this process (env ELEVENLABS_API_KEY). A client asks for a single-use token
+(`stt_token_request`), calls ElevenLabs speech-to-text itself, and sends back the text and word timings. Without a key
+the answer to a token request is `speech_not_configured`; that call then needs only smile and arms.
+
+STATUS: the websocket serving path, the real Claude paths and every real ElevenLabs request were never run in the
+build session.
 """
 from __future__ import annotations
 
@@ -26,7 +35,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional
 
 from analysis import config
 from analysis.pc import link
@@ -35,6 +44,7 @@ from analysis.pc.remote_adapter import RemoteAdapter
 from analysis.pc.remote_tasks import remote_modules
 from analysis.pc.store import BaselineStore
 from analysis.session import limits
+from analysis.speech import elevenlabs
 from analysis.session.adapters import render_family_text
 from analysis.session.agent_tools import load_script
 from analysis.session.call_session import CallSession
@@ -77,14 +87,28 @@ def format_numbers(reading: Optional[Dict[str, Any]]) -> str:
     return "value %.3f %s %s side=%s" % (reading["value"], usual, outside, reading.get("side"))
 
 
+def format_speech(session: Any, attempt_id: Optional[str]) -> str:
+    """The numbers of a sentence attempt for the terminal line."""
+    details = getattr(session.modules.get("sentence"), "attempt_details", None)
+    d = details(attempt_id) if callable(details) and attempt_id else None
+    if not d:
+        return "nothing usable heard"
+    return "heard %r | word error rate %s | longest pause %s s | %s words/min | missing %s changed %s extra %s" % (
+        d["heard"][:60], d["word_error_rate"], d["longest_pause_s"], d["words_per_min"], d["missing_words"],
+        [c["heard"] for c in d["changed_words"]], d["extra_words"])
+
+
 def format_log_line(entry: Dict[str, Any], session: Any) -> Optional[str]:
     kind = entry["kind"]
     rest = {k: v for k, v in entry.items() if k not in ("t", "kind")}
     if kind == "attempt_finished":
         last = session.results[-1] if session.results else {}
-        return "task %s %s: %s | %s" % (last.get("task"), rest.get("attempt_id"), rest.get("outcome"),
+        line = "task %s %s: %s | %s" % (last.get("task"), rest.get("attempt_id"), rest.get("outcome"),
                                       format_numbers(last.get("reading")))
-    shown = {"call_driver": "driver", "agent_tool": "claude tool", "agent_fallback": "FALLBACK to fixed order",
+        if last.get("task") == "sentence":
+            line += " | " + format_speech(session, rest.get("attempt_id"))
+        return line
+    shown = {"required_tasks": "required tasks", "call_driver": "driver", "agent_tool": "claude tool", "agent_fallback": "FALLBACK to fixed order",
              "fallback_step": "fixed step", "agent_refused": "step refused", "change_confirmed": "CHANGE CONFIRMED",
              "published": "family message", "concern_raised": "CONCERN RAISED", "resource_changed": "resource",
              "floor_off_suppressed": "FLOOR OFF - would have published", "task_refused": "task refused",
@@ -99,10 +123,24 @@ class PcServer:
     def __init__(self, person: str, name: str, claude: str = "off", safety_floor: bool = True, label: str = "live",
                  data_dir: Optional[Path] = None, runs_dir: Optional[Path] = None, clock: Any = None,
                  out: Callable[[str], Any] = print, client_factory: Optional[Callable[[], Any]] = None,
-                 modules_factory: Callable[[], Dict[str, Any]] = remote_modules,
-                 script: Optional[Dict[str, str]] = None) -> None:
+                 modules_factory: Callable[..., Dict[str, Any]] = remote_modules,
+                 script: Optional[Dict[str, str]] = None, line_audio: Optional[Dict[str, str]] = None,
+                 http: Optional[Callable[..., Any]] = None, environ: Optional[Mapping[str, str]] = None,
+                 inline_blocking: bool = False) -> None:
+        """v8 additions: `line_audio` (line id -> base64 PCM, from tts_lines), and for tests `http` (a fake ElevenLabs),
+        `environ` (a fake environment holding ELEVENLABS_API_KEY) and `inline_blocking` (mint tokens in the event
+        loop thread instead of an executor, so a fake clock stays deterministic)."""
         if claude not in ("off", "api", "subscription"):
             raise ValueError("claude must be off, api or subscription")
+        self.line_audio: Dict[str, str] = dict(line_audio or {})
+        self.http = http
+        self.environ = environ
+        self.inline_blocking = inline_blocking
+        self.client_caps: Dict[str, Any] = {}
+        self._token_inflight = False
+        self._tokens_in_call = 0
+        self._token_tasks: set = set()
+        self._call_speech = False
         self.person, self.name, self.claude, self.label = person, name, claude, label
         self.safety_floor = safety_floor
         self.store = BaselineStore(person, data_dir)
@@ -151,17 +189,24 @@ class PcServer:
                         if not await self._reply(endpoint, "error", code="expected_hello", text="send hello first"):
                             break
                         continue
-                    if message["protocol"] != link.PROTOCOL_VERSION:
+                    if message["protocol"] not in link.SUPPORTED_PROTOCOLS:
                         await self._reply(endpoint, "error", code="protocol",
-                                          text="this server speaks protocol %d" % link.PROTOCOL_VERSION)
+                                          text="this server speaks protocol %s" % " or ".join(
+                                              str(v) for v in link.SUPPORTED_PROTOCOLS))
                         break
                     greeted = True
-                    self.out("client connected: %s (person %s)" % (message["client"], message["person_id"]))
-                    if not await self._reply(endpoint, "hello_ok", protocol=link.PROTOCOL_VERSION,
+                    self.client_caps = dict(message["capabilities"])
+                    self.out("client connected: %s (person %s, protocol %d, speech %s)" % (
+                        message["client"], message["person_id"], message["protocol"],
+                        "yes" if self.client_caps.get("speech") else "no"))
+                    if not await self._reply(endpoint, "hello_ok", protocol=message["protocol"],
                                              server_version=SERVER_VERSION):
                         break
                     continue
                 if kind == "hello":
+                    continue
+                if kind == "stt_token_request":
+                    self._handle_token_request(endpoint, message)
                     continue
                 if kind == "status":
                     self.last_status = message
@@ -183,6 +228,8 @@ class PcServer:
                 adapter.connection_lost()  # the client left mid-call: same as a hang-up
             if call_task is not None:
                 await asyncio.gather(call_task, return_exceptions=True)
+            if self._token_tasks:
+                await asyncio.gather(*list(self._token_tasks), return_exceptions=True)
             self._busy = False
             self.out("client disconnected")
             await endpoint.close()
@@ -194,6 +241,55 @@ class PcServer:
         except link.TransportClosed:
             return False
 
+    # ---- speech: single-use tokens (the API key never leaves this process) ---------------------------------------
+
+    def speech_configured(self) -> bool:
+        return elevenlabs.key_configured(self.environ)
+
+    async def _blocking(self, fn: Callable[[], Any]) -> Any:
+        if self.inline_blocking:
+            return fn()
+        return await asyncio.get_running_loop().run_in_executor(None, fn)
+
+    def _handle_token_request(self, endpoint: link.Endpoint, message: Dict[str, Any]) -> None:
+        """Answer `stt_token_request` with `stt_token`: one batch_scribe token, at most one in flight and
+        limits.STT_TOKENS_PER_CALL per call. Without a key: token null + error speech_not_configured."""
+        ref = message["ref"]
+        if not self.speech_configured():
+            error: Optional[str] = "speech_not_configured"
+        elif self._token_inflight:
+            error = "token_busy"
+        elif self._tokens_in_call >= limits.STT_TOKENS_PER_CALL:
+            error = "token_limit"
+        else:
+            error = None
+        if error is not None:
+            self.out("speech: token refused (%s)" % error)
+            task = asyncio.ensure_future(self._reply(endpoint, "stt_token", ref=ref, token=None, error=error))
+        else:
+            self._token_inflight = True
+            self._tokens_in_call += 1
+            task = asyncio.ensure_future(self._mint_and_reply(endpoint, ref, message["purpose"]))
+        self._token_tasks.add(task)
+        task.add_done_callback(self._token_tasks.discard)
+
+    async def _mint_and_reply(self, endpoint: link.Endpoint, ref: str, purpose: str) -> None:
+        token: Optional[str] = None
+        error: Optional[str] = None
+        try:
+            token = await self._blocking(lambda: elevenlabs.mint_token("batch_scribe", self.http, self.environ))
+            self.out("speech: token issued for %s (%d of %d this call)" % (purpose, self._tokens_in_call,
+                                                                              limits.STT_TOKENS_PER_CALL))
+        except elevenlabs.SpeechError as exc:
+            error = "token_failed_%s" % (exc.status if exc.status else "network")
+            self.out("speech: token request failed (%s)" % error)
+        except Exception as exc:
+            error = "token_failed"
+            self.out("speech: token request failed (%s)" % type(exc).__name__)
+        finally:
+            self._token_inflight = False
+        await self._reply(endpoint, "stt_token", ref=ref, token=token, error=error)
+
     def _new_adapter(self, endpoint: link.Endpoint) -> RemoteAdapter:
         self._call_counter += 1
         endpoint.call_id = "call_%s_%d" % (time.strftime("%Y%m%d_%H%M%S"), self._call_counter)
@@ -202,20 +298,33 @@ class PcServer:
         if status is not None:
             initial = {"camera": status["camera"], "microphone": status["microphone"]}
         family = FamilyStandIn(endpoint.call_id, self.name, self.runs_dir / "family_messages.log", self.out)
-        return RemoteAdapter(endpoint, self.script, self.name, self.clock, family, initial)
+        self._tokens_in_call = 0
+        self._call_speech = bool(self.client_caps.get("speech")) and self.speech_configured()
+        grace = limits.SPEECH_ANSWER_GRACE_S if self._call_speech else 2.0
+        return RemoteAdapter(endpoint, self.script, self.name, self.clock, family, initial, self.line_audio,
+                             answer_grace_s=grace)
 
     # ---- one call ---------------------------------------------------------------------------------------
 
     async def _run_one_call(self, endpoint: link.Endpoint, adapter: RemoteAdapter) -> None:
         call_id = endpoint.call_id or "call_unknown"
         started_wall = time.time()
-        modules = self.modules_factory()
+        # v8: the sentence task is required only when the client can speak AND this server can mint tokens
+        speech = self._call_speech
+        required = limits.REQUIRED_TASKS_WITH_SPEECH if speech else limits.REQUIRED_TASKS
+        modules = self.modules_factory(speech=speech)
         initial = dict(adapter._states)
         session = CallSession(call_id, self.person, self.name, adapter, modules, self.store.load_baselines(),
                               self.clock, label=self.label, initial_resources=initial or None,
-                              safety_floor=self.safety_floor)
+                              safety_floor=self.safety_floor, required_tasks=required)
         session.log = LiveLog(lambda e: self._print_entry(e, session))
         adapter.session = session
+        session.note("required_tasks", tasks=list(required), speech=speech,
+                     client_speech=bool(self.client_caps.get("speech")), server_key=self.speech_configured(),
+                     line_audio=len(self.line_audio))
+        if self.client_caps.get("speech") and not speech:
+            self.out("speech: the client can speak but ELEVENLABS_API_KEY is not set in this terminal; "
+                     "answers fall back to typing and the sentence check is skipped")
         self.out("=== call %s started (claude=%s, safety floor %s, label %s)" % (
             call_id, self.claude, "ON" if self.safety_floor else "OFF", self.label))
         mode, backend = ("fixed", "api") if self.claude == "off" else ("claude", self.claude)
@@ -275,12 +384,39 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--safety-floor", choices=("on", "off"), default="on",
                    help="keep ON for the demo and any real use; OFF is for experiments only")
     p.add_argument("--label", choices=("live", "normal", "acted"), default="live")
+    p.add_argument("--tts", choices=("off", "elevenlabs"), default="off",
+                   help="elevenlabs: the avatar's lines are spoken with an ElevenLabs voice (needs ELEVENLABS_API_KEY "
+                        "and UW_TTS_VOICE_ID in THIS terminal)")
     return p.parse_args(argv)
+
+
+def prepare_tts(args: argparse.Namespace, script: Dict[str, str]) -> Optional[Dict[str, str]]:
+    """--tts elevenlabs: synthesize every line once (cached). None when the options are not usable."""
+    from analysis.pc.tts_lines import prepare_line_audio
+
+    cfg = elevenlabs.load_config()
+    if not cfg.voice_explicit:
+        print("--tts elevenlabs needs a voice id: set UW_TTS_VOICE_ID (the built-in default is an unverified placeholder).")
+        return None
+    if not elevenlabs.key_configured():
+        print("--tts elevenlabs needs ELEVENLABS_API_KEY in this terminal.")
+        return None
+    return prepare_line_audio(script, args.name, cfg.voice_id, config.RUNS_DIR / "tts_cache",
+                              lambda text: elevenlabs.synthesize(text, cfg.voice_id, cfg.tts_model))
 
 
 async def serve_forever(args: argparse.Namespace) -> None:
     floor = args.safety_floor == "on" and safety_floor_from_env(True)
-    server = PcServer(args.person, args.name, args.claude, floor, args.label)
+    script = load_pc_script()
+    audio: Dict[str, str] = {}
+    if args.tts == "elevenlabs":
+        prepared = prepare_tts(args, script)
+        if prepared is None:
+            return
+        audio = prepared
+    server = PcServer(args.person, args.name, args.claude, floor, args.label, script=script, line_audio=audio)
+    print("speech: %s" % ("the client may use ElevenLabs speech-to-text (key found)" if server.speech_configured()
+                          else "ELEVENLABS_API_KEY not set: answers are typed, no sentence check"))
     if not floor:
         print("!!! SAFETY FLOOR IS OFF: a confirmed change will NOT be published mid-call. Experiments only. !!!")
     ws = await link.serve(server.handle_connection, args.host, args.port)

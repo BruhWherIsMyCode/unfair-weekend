@@ -12,3 +12,5 @@ websockets>=12
 # claude-agent-sdk
 # Optional: spoken lines in the PC client (--tts system). Without it the client shows text only.
 # pyttsx3
+# Optional (v8): the PC client's microphone and ElevenLabs line playback. Without it answers are typed.
+# sounddevice
