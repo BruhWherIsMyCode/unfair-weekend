@@ -28,16 +28,18 @@ import threading
 import time
 from collections.abc import Callable
 from contextlib import closing
+from contextvars import Context, copy_context
 from pathlib import Path
 from typing import Any
 
 from storage import apply_migrations, connect_database
 
 from .people import Person
+from .logging_config import log_context
 
 log = logging.getLogger("checkin_backend.store")
 
-Job = tuple[str, Callable[[Any], None]]
+Job = tuple[str, Callable[[Any], None], Context]
 
 # Client event types that end a command, and the command state they lead to.
 COMMAND_OUTCOMES = {
@@ -107,10 +109,15 @@ class Store:
         self._submit("flush", lambda c: done.set())
         await asyncio.to_thread(done.wait, 10)
 
-    def _submit(self, name: str, job: Callable[[Any], None]) -> None:
+    def _submit(self, name: str, job: Callable[[Any], None], *, call_id: str | None = None) -> None:
         if self._thread is None:
             return
-        self._jobs.put((name, job))
+        if call_id is not None:
+            with log_context(call_id=call_id):
+                context = copy_context()
+        else:
+            context = copy_context()
+        self._jobs.put((name, job, context))
 
     def _run(self) -> None:
         with closing(connect_database(self.path)) as db:
@@ -118,8 +125,8 @@ class Store:
                 item = self._jobs.get()
                 if item is None:
                     return
-                name, job = item
-                self._transaction(db, name, job)
+                name, job, context = item
+                context.run(self._transaction, db, name, job)
 
     def _transaction(self, db: Any, name: str, job: Callable[[Any], None]) -> None:
         try:
@@ -193,7 +200,7 @@ class Store:
                      stamp, stamp, stamp),
                 )
 
-        self._submit("call started", job)
+        self._submit("call started", job, call_id=call_id)
 
     def record_ring_sent(self, call_id: str, parent_devices: list[str]) -> None:
         stamp = now_ms()
@@ -202,7 +209,7 @@ class Store:
             for target in parent_devices:
                 self._delivered(db, f"{stored_id(call_id, 'ring')}.{target}", stamp)
 
-        self._submit("ring sent", job)
+        self._submit("ring sent", job, call_id=call_id)
 
     def record_call_answered(self, call_id: str, call_timeout_s: float) -> None:
         stamp = now_ms()
@@ -218,7 +225,7 @@ class Store:
             self._event(db, call_id, "answer", "client", "call.answered", {}, stamp,
                         device_id=self._device_of(db, call_id))
 
-        self._submit("call answered", job)
+        self._submit("call answered", job, call_id=call_id)
 
     def record_call_ended(self, call_id: str, state: str, reason: str | None) -> None:
         stamp = now_ms()
@@ -233,7 +240,7 @@ class Store:
             self._event(db, call_id, "end", "server", "call.ended", {"state": state, "reason": reason}, stamp)
             self._cancel_commands(db, call_id, stamp)
 
-        self._submit("call ended", job)
+        self._submit("call ended", job, call_id=call_id)
         self._parent_device.pop(call_id, None)
 
     # ---- commands and client events ---------------------------------------------------------------------
@@ -257,7 +264,7 @@ class Store:
                 (stored_id(call_id, wire_id), event_id, call_id, device_id, command["kind"], stamp, deadline, stamp),
             )
 
-        self._submit("command", job)
+        self._submit("command", job, call_id=call_id)
 
     def record_command_cancel(self, call_id: str, wire_id: str, reason: str) -> None:
         """A command.cancel pushed to the parent device (timeout, task stop, call end)."""
@@ -269,12 +276,13 @@ class Store:
             state = "failed" if reason == "timeout" else "cancelled"
             self._finish_command(db, call_id, wire_id, state, stamp, None)
 
-        self._submit("command cancel", job)
+        self._submit("command cancel", job, call_id=call_id)
 
     def record_command_done(self, call_id: str, wire_id: str, state: str) -> None:
         """An answer upload or a task finish completed the command on the server side."""
         stamp = now_ms()
-        self._submit("command done", lambda db: self._finish_command(db, call_id, wire_id, state, stamp, None))
+        self._submit("command done", lambda db: self._finish_command(db, call_id, wire_id, state, stamp, None),
+                     call_id=call_id)
 
     def record_client_event(self, call_id: str, event: dict[str, Any]) -> None:
         """An accepted client event: journal it and move its command along."""
@@ -298,7 +306,7 @@ class Store:
             elif event["type"] in COMMAND_OUTCOMES:
                 self._finish_command(db, call_id, wire_id, COMMAND_OUTCOMES[event["type"]], stamp, event_id)
 
-        self._submit(f"client {event['type']}", job)
+        self._submit(f"client {event['type']}", job, call_id=call_id)
 
     # ---- family messages -----------------------------------------------------------------------------
 
@@ -336,7 +344,7 @@ class Store:
                 # Pushed over SSE in-process before this commit (write-behind).
                 self._delivered(db, notification_id, stamp)
 
-        self._submit("family message", job)
+        self._submit("family message", job, call_id=call_id)
 
     # ---- reads (run in a worker thread; never on the event loop) ----------------------------------------------
 

@@ -10,6 +10,9 @@ def isolated_analysis_files(tmp_path, monkeypatch):
     monkeypatch.setenv("UW_DATA_DIR", str(tmp_path / "uw_data"))
     monkeypatch.setenv("UW_RUNS_DIR", str(tmp_path / "uw_runs"))
     monkeypatch.setenv("UW_CALL_LOG", "off")
+    monkeypatch.setenv("LOG_FILE", str(tmp_path / "logs" / "backend.log"))
+    monkeypatch.setenv("LOG_ERROR_FILE", str(tmp_path / "logs" / "errors.log"))
+    monkeypatch.setenv("LOG_CONSOLE", "off")
 
 
 @pytest.fixture(autouse=True)

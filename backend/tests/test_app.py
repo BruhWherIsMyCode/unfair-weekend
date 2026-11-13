@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from checkin_backend.app import create_app
 from checkin_backend.calls import CallState, EndReason
 from checkin_backend.config import Settings
+from checkin_backend.logging_config import LoggingSettings
 
 
 def test_health_requires_demo_key_and_does_not_reveal_credentials():
@@ -49,7 +50,8 @@ def test_environment_factory_needs_no_provider_credentials(monkeypatch, tmp_path
     monkeypatch.delenv("SIMLI_API_KEY", raising=False)
     monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
     assert Settings.from_environment() == Settings(
-        demo_key="test-key-only", ring_timeout_s=7, call_timeout_s=90, database_path=database
+        demo_key="test-key-only", ring_timeout_s=7, call_timeout_s=90, database_path=database,
+        logging=LoggingSettings.from_environment(),
     )
     with TestClient(create_app()) as client:
         assert client.get("/v1/health", headers={"X-Demo-Key": "test-key-only"}).status_code == 200

@@ -8,6 +8,7 @@ in memory only (never on disk, never in the database) and dropped after CLIP_TTL
 """
 
 import base64
+import logging
 import statistics
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -15,8 +16,11 @@ from time import monotonic
 from uuid import uuid4
 
 from .hub import DeviceHub
+from .logging_config import log_event
 from .people import Person
 from .store import NoStore, Store
+
+log = logging.getLogger(__name__)
 
 THINGS = {"face": ("smile", "looks"), "arm": ("arm", "looks"), "speech": ("speech", "sounds")}
 KINDS = ("as_usual", "change_noticed", "concern_raised", "learning", "incomplete", "no_answer")
@@ -199,6 +203,8 @@ class FamilyDelivery:
         self._hub.send_many(family_devices, "message.new", asdict(message),
                             event_id=f"{message.message_id}_{phase}{suffix}")
         self._store.record_message(call_id, person.family_id, asdict(message), phase, summary, family_devices)
+        log_event(log, logging.INFO, "family.message_published", call_id=call_id, message_id=message.message_id,
+                  kind=kind, phase=phase, connected_devices=len(family_devices), persistence_queued=self._store.enabled)
         return message
 
     def for_family(self, family_id: str, people: list[Person]) -> list[Message]:

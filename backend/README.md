@@ -28,6 +28,60 @@ uv build --out-dir .cache/python-dist
 
 Tests exercise a complete HTTP/SSE call with mocked voice, transcripts and video transport, plus lifecycle, cache, cancellation, authentication and provider-error paths. The Simli readiness fix reproduces delayed 404/429 responses and the permitted CDN redirect, with bounded retries and cancellation. One real ElevenLabs/Simli greeting was generated, downloaded and decoded successfully; [VOICE_VIDEO.md](VOICE_VIDEO.md#verification-and-limits) records that trial and its limits. Real answer STT and iPhone audio/video playback remain untested by Agent 2. No provider credits are used by the automated tests. The separate iOS family stage shell remains mocked.
 
+## Python logging
+
+The normal Uvicorn factory command above enables JSON lines on stderr and in two files under
+`backend/.cache/logs/`: `backend.log` contains application activity, and `errors.log` also collects ERROR and
+CRITICAL records. The `python -m checkin_backend.prepare` command uses the same configuration. Paths default to
+that backend folder regardless of the shell's working directory. Files append
+across restarts and rotate into `.1`, `.2`, `.3` backups at about 10 MiB per file. They are git-ignored.
+
+From `backend/`, follow the activity or isolate one call (the latter uses `jq`):
+
+```bash
+tail -F .cache/logs/backend.log .cache/logs/errors.log
+jq -c 'select(.call_id == "call_example")' .cache/logs/backend.log
+```
+
+Set these in `.env`, then restart the backend:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
+| `LOG_FILE` | `backend/.cache/logs/backend.log` | Main file; empty disables it |
+| `LOG_ERROR_FILE` | `backend/.cache/logs/errors.log` | Error file; empty gives a single main file |
+| `LOG_CONSOLE` | `on` | `off` disables the application's JSON stderr output |
+| `LOG_MAX_BYTES` | `10485760` | Approximate rotation size, positive integer |
+| `LOG_BACKUP_COUNT` | `3` | Backups per file, positive integer |
+
+Custom relative paths are relative to the process working directory. To log only to the console, set both file
+variables empty. Uvicorn retains its own startup/shutdown console output. An invalid setting or a file that cannot
+be opened fails startup. New log files use owner-only permissions. Use one backend worker with these rotating
+files; separate processes require separate paths or a collector.
+
+Records include UTC time, level, module and process, plus request/call/command/attempt IDs where available.
+Every HTTP request is assigned a generated `request_id` in the logs. Requests log the matched route, status and duration;
+successful health checks, speech/video downloads and task samples appear only at `DEBUG`. SSE opening and
+closing are logged without buffering the stream. Call lifecycle, playback/capture, resource changes, analysis
+attempts, driver fallback, provider status/timing and family publication have their own event names. SQLite
+writer jobs retain the originating call/request context. A publication log records enqueueing and connected
+devices; it does not confirm database commit or family reading.
+
+The new instrumentation records metadata, excluding bodies, query strings, headers, media, spoken text,
+transcripts and measurement values. Known server credentials are redacted. Exception records retain the class
+and stack locations, omitting exception messages, source lines and locals. Existing `analysis.*` Python logs
+share the files. Session events are mirrored through the backend adapter even with `UW_CALL_LOG=off`; that switch
+still controls Agent 3's separate live terminal printout. Existing call-record JSON and database history are
+separate from these debugging files. The Node greeting reference retains its existing console logging.
+
+For an embedded app constructed with `Settings(...)`, logging stays under the caller's control. Pass
+`logging=LoggingSettings(...)` from `checkin_backend.logging_config` to enable these handlers. Configuration
+replaces only this application's handlers, leaving host/root capture handlers in place.
+
+Verified with synthetic HTTP/SSE calls and mocked providers: rotation, append/reconfiguration, errors-only
+output, redaction, concurrent context, writer-thread failures and stream delivery. No live provider or phone
+trial was performed for the logging change.
+
 ## Running with Agent 3's analysis
 
 `CALL_RUNNER=analysis` (or `auto`, which picks it when the package imports) runs `analysis.backend_entry.run_backend_call(link)` for every answered call: Agent 3's `CallSession` over this backend's `ClientLink`, the real smile and arms tasks on the JPEG frames the phone streams, her usual from a baseline store, and the family message from the result. The backend finds `analysis/` itself when it is in the repo root (the parent of `backend/`); no `PYTHONPATH` is needed. Install its requirements into the backend environment and fetch the model files once, from the repo root:
