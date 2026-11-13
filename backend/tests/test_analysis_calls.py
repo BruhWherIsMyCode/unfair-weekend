@@ -127,6 +127,9 @@ async def test_a_normal_call_says_swap_hands_during_the_arms_capture_is_as_usual
 
 @pytest.mark.anyio
 async def test_two_outside_smiles_give_a_change_message_mid_call_that_stays_to_the_end(monkeypatch, tmp_path):
+    from analysis.session import limits
+
+    monkeypatch.setattr(limits, "CHANGE_ALERT_AT_END", False)  # the mid-call mode (the demo tells it at the end)
     data = install(monkeypatch, tmp_path, corners=(0.11, 0.11))
     async with Server("analysis") as server:
         sim = SimClient(base=server.base, key=KEY, time_scale=0.02)
@@ -138,6 +141,18 @@ async def test_two_outside_smiles_give_a_change_message_mid_call_that_stays_to_t
     assert status["message"]["kind"] == "change_noticed"
     after = usual(data)
     assert after["smile"]["sessions"] == 2 and after["arms"]["sessions"] == 2  # nothing was added
+
+
+@pytest.mark.anyio
+async def test_by_default_one_outside_smile_is_told_once_at_the_end(monkeypatch, tmp_path):
+    # v12b demo defaults: one reading confirms, and the family hears it when the call finishes, not mid-call
+    install(monkeypatch, tmp_path, corners=(0.11,))
+    async with Server("analysis") as server:
+        sim = SimClient(base=server.base, key=KEY, time_scale=0.02)
+        status, family = await call_with_family(server, sim, 1)
+    assert [(m["phase"], m["kind"]) for m in family] == [("final", "change_noticed")]
+    assert family[0]["text"].endswith("If she seems unwell, call 112.")
+    assert status["summary"]["status"] == "change_noticed"
 
 
 @pytest.mark.anyio

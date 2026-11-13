@@ -11,7 +11,7 @@ from pathlib import Path
 from analysis.face_metric import FrameReading
 from analysis.session.models import TaskContext
 from analysis.tasks.stream_registry import STREAM_TASKS
-from analysis.tasks.stream_smile import METRIC_ID, StreamSmile, final_result
+from analysis.tasks.stream_smile import METRIC_ID, StreamSmile, final_result, phase_reading
 
 FIXTURES = json.loads((Path(__file__).resolve().parents[2] / "contract" / "fixtures.json").read_text("utf-8"))
 
@@ -160,6 +160,30 @@ def test_final_result_is_pure_and_matches_clip_arithmetic():
     assert abs(d["reading"]["value"] - 0.05) < 1e-9 and d["reading"]["outside"] is True
 
 
+def _clip(relax_corner, smile_corner, smile_strength):
+    """1.5 s relaxed (strength 0), then the smile phase with the given corner height and strength."""
+    frames = [FrameReading(usable=True, unit=100.0, below_left=1.0, below_right=1.0, corner_height=relax_corner,
+                           smile_strength=0.0, timestamp_ms=i * 200) for i in range(8)]
+    frames += [FrameReading(usable=True, unit=100.0, below_left=1.0, below_right=1.0, corner_height=smile_corner,
+                            smile_strength=smile_strength, timestamp_ms=1600 + i * 200) for i in range(20)]
+    return frames
+
+
+def test_a_one_sided_smile_with_little_strength_is_still_measured():
+    # owner's acted run: the face model scored the lopsided smile ~0.1, but the corner height moved 0.00 -> +0.11
+    status, value, reason = phase_reading(_clip(-0.01, 0.11, 0.1))
+    assert (status, reason) == ("usable", None) and abs(value - 0.11) < 1e-9
+
+
+def test_no_smile_and_no_corner_move_is_still_no_smile_seen():
+    assert phase_reading(_clip(-0.01, 0.02, 0.1)) == ("not_measured", None, "no_smile_seen")
+
+
+def test_a_normal_smile_keeps_the_strength_rule():
+    status, value, _ = phase_reading(_clip(-0.01, -0.05, 0.7))
+    assert status == "usable" and abs(value - (-0.05)) < 1e-9
+
+
 # ---- definitions and stubs ----------------------------------------------------------------------
 
 def fixture(name):
@@ -168,7 +192,7 @@ def fixture(name):
 
 def test_definitions_use_the_published_capture_settings():
     assert STREAM_TASKS["smile"].definition()["capture"] == fixture("capture_smile")
-    assert STREAM_TASKS["arms"].definition()["capture"] == dict(fixture("capture_arms"), duration_ms=15000)  # v11
+    assert STREAM_TASKS["arms"].definition()["capture"] == dict(fixture("capture_arms"), duration_ms=20000)  # v12
     assert STREAM_TASKS["sentence"].definition()["capture"] == fixture("capture_sentence")
     smile = STREAM_TASKS["smile"].definition()
     assert smile["instruction_line"] == "task_smile" and smile["repeat_line"] == "repeat_smile"

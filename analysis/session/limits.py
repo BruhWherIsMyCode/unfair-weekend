@@ -22,6 +22,18 @@ MAX_USABLE_PER_TASK = 2  # a third usable reading is never needed (two confirm o
 # v11 (owner, after real calls): an attempt that ends without a usable reading (unusable, could_not_perform,
 # interrupted, failed) is repeated at most ONCE; the second not-measured attempt of a task skips the task.
 MAX_NOT_MEASURED_PER_TASK = 2
+# v12b (owner, for a short demo call): ONE usable reading outside her usual that points to weakness confirms the
+# change and the family is told; no task is repeated to confirm. Only a try that measured nothing keeps its one
+# technical repeat. False restores the two-reading rule (the same task twice, or the face and an arm on one side).
+CONFIRM_FROM_ONE_READING = True
+# v12b (owner, demo): a confirmed change is told at the END of the call, not in the middle of the checks: the family
+# message goes out as the call finishes, then she hears ALERT_REASSURANCE, then goodbye. False tells both mid-call.
+# The agent's alert_family (she says she is unwell or asks for help) is always told at once.
+CHANGE_ALERT_AT_END = True
+# v12b (owner): when her family is told mid-call (a confirmed change or the agent's alert), she hears it at once from
+# the code, never from the model (which is not told about the alert). Spoken through say_text (live voice, no clip).
+ALERT_REASSURANCE = ("I've let your family know, so they can check on you. "
+                     "If you feel unwell at any time, call 112 straight away.")
 
 WATCHDOG_TICK_S = 0.1  # how often the session re-checks its watchdogs (through the clock)
 SAMPLE_QUEUE_MAX = 64  # bounded sample queue per attempt; a full queue drops the new sample and logs it
@@ -34,11 +46,15 @@ BASELINE_NEEDED_DEFAULT = 5  # used for the summary when no baseline is known
 # Side words are HER left and right. First guesses, editable in this one place.
 # v11 (owner, after the real PC run): 15 s window (the contract maximum), longer holds; the right hold starts while
 # the swap line is still playing, so its raise grace covers the rest of the line.
+# v12 (owner, after the acted phone run): moving the phone from one hand to the other took longer than the 2 s swap,
+# so the window is 20 s (CAPTURE_MAX_MS, the raised contract maximum) and the swap 4.5 s. The swap line still plays
+# when the swap starts; it ends about when the right hold starts, and the raise grace covers the raise.
+CAPTURE_MAX_MS = 20000  # longest capture window and largest captured_ms/elapsed_ms (also contract, backend, iOS)
 ARMS_PHASES = (
     ("settle", 0, 1000, None),
-    ("hold_left", 1000, 6500, "left"),
-    ("swap", 6500, 8500, None),
-    ("hold_right", 8500, 15000, "right"),
+    ("hold_left", 1000, 7000, "left"),
+    ("swap", 7000, 11500, None),
+    ("hold_right", 11500, 20000, "right"),
 )
 # Time she gets at the start of each hold phase to raise the hand: until her hand is first seen in that phase, and
 # for at most this long, a frame without the hand is "pending", not framing_unusable (the 2 s framing rule

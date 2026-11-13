@@ -324,8 +324,10 @@ final class WAVRecorder: AnswerRecorder, @unchecked Sendable {
         stopped = false
         recorder.record()
         let started = Date()
-        var heardSpeech = false
-        var quietSince: Date?
+        // Speech and quiet are judged against the room's own noise (AnswerEndDetector): a fixed level never saw
+        // "quiet" in a noisy room, so every answer ran to maxMs and she said it again.
+        var detector = AnswerEndDetector(stopOnSilenceMs: stopOnSilenceMs,
+                                         noAnswerMs: stopOnSilenceMs == nil ? Int.max : 8000)
         while !stopped {
             try await Task.sleep(nanoseconds: 100_000_000)
             let elapsedMs = Int(Date().timeIntervalSince(started) * 1000)
@@ -333,14 +335,7 @@ final class WAVRecorder: AnswerRecorder, @unchecked Sendable {
                 break
             }
             recorder.updateMeters()
-            let level = recorder.averagePower(forChannel: 0)
-            if level > -35 {
-                heardSpeech = true
-                quietSince = nil
-            } else if heardSpeech {
-                quietSince = quietSince ?? Date()
-            }
-            if let stopOnSilenceMs, let quietSince, Date().timeIntervalSince(quietSince) * 1000 >= Double(stopOnSilenceMs) {
+            if detector.add(levelDb: recorder.averagePower(forChannel: 0), atMs: elapsedMs) != .keepListening {
                 break
             }
         }

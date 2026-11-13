@@ -44,9 +44,11 @@ def test_the_published_copy_equals_the_draft():
     # v11: one fixture is intentionally newer (the smile window is 6 s now); every other fixture is the draft's.
     published = json.loads((CONTRACT / "fixtures.json").read_text("utf-8"))
     older = json.loads((draft / "fixtures.json").read_text("utf-8"))
-    assert [f["name"] for f in published] == [f["name"] for f in older]
+    # v12b: a confirmation from one outside attempt is valid now (limits.CONFIRM_FROM_ONE_READING)
+    renamed = {"reject_confirmation_from_one_attempt": "confirmation_from_one_attempt"}
+    assert [f["name"] for f in published] == [renamed.get(f["name"], f["name"]) for f in older]
     changed = [p["name"] for p, o in zip(published, older) if p != o]
-    assert changed == ["capture_smile"]
+    assert changed == ["capture_smile", "confirmation_from_one_attempt"]
     smile = next(f for f in published if f["name"] == "capture_smile")
     assert smile["data"]["settings"]["duration_ms"] == 6000
 

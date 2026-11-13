@@ -184,7 +184,7 @@ class TaskObservation:
         _check_id(self.attempt_id, "attempt_id")
         _req(self.task in TASKS, "task %r not in %s" % (self.task, TASKS))
         _req(_is_int(self.sequence) and self.sequence >= 0, "sequence must be an integer >= 0")
-        _req(_is_int(self.elapsed_ms) and 0 <= self.elapsed_ms <= 15000, "elapsed_ms must be 0..15000")
+        _req(_is_int(self.elapsed_ms) and 0 <= self.elapsed_ms <= 20000, "elapsed_ms must be 0..20000")
         _req(self.phase in PHASES, "phase %r not in %s" % (self.phase, PHASES))
         self.quality.validate(observation=True)
         for m in self.metrics:
@@ -385,7 +385,8 @@ class SummarySign:
         _req(isinstance(self.confirmed, bool), "confirmed must be a boolean")
         attempts = [a.to_dict() for a in self.attempts]
         if self.confirmed:
-            _req(len(attempts) >= 2, "a confirmed sign needs two attempts")
+            # v12/v12b: one attempt (one outside reading, or the face and an arm on the same side)
+            _req(len(attempts) >= 1, "a confirmed sign needs an attempt")
             for a in attempts:
                 _req(a["outside"] is True and _is_num(a["usual_low"]) and _is_num(a["usual_high"]),
                      "a confirmed sign needs outside attempts with a numeric usual range")
@@ -429,6 +430,10 @@ class SessionResult:
             _req(isinstance(self.answers[k], str) and len(self.answers[k]) <= 2000, "answers.%s too long" % k)
         _req(len(self.signs) <= 3, "at most 3 signs")
         signs = [s.to_dict() for s in self.signs]
+        # v12b: a sign may be confirmed from ONE outside attempt (limits.CONFIRM_FROM_ONE_READING)
+        for s in signs:
+            if s["confirmed"]:
+                _req(all(a["outside"] is True for a in s["attempts"]), "a confirmed sign has only outside attempts")
         _req(self.status in STATUSES, "status %r not in %s" % (self.status, STATUSES))
         if self.status == "change_noticed":
             _req(any(s["confirmed"] for s in signs), "change_noticed requires a confirmed sign")

@@ -164,7 +164,7 @@ def test_arms_keeps_the_same_definition_reading_and_per_hand_baseline_values():
         task = stream_task("arms", mirrored=True)
         module = NativeStreamTask(task, lambda: reader)
         assert module.definition() == task.definition()
-        result = await module.run(context("arms", baseline=ARMS_BASELINE), samples(range(0, 15001, 200)),
+        result = await module.run(context("arms", baseline=ARMS_BASELINE), samples(range(0, 20001, 200)),
                                   lambda obs: None)
         assert result.to_dict()["quality"] == {"status": "usable", "reasons": []}
         assert result.reading.outside is False

@@ -21,7 +21,7 @@ NOT_IMPLEMENTED = "not_implemented_in_v5"
 CAPTURE_SETTINGS: Dict[str, Dict[str, Any]] = {
     "smile": {"media_kind": "video", "duration_ms": 6000, "prepare_ms": 0, "stop_on_silence_ms": None,
               "format": "jpeg", "sample_period_ms": 200},
-    "arms": {"media_kind": "video", "duration_ms": 15000, "prepare_ms": 2000, "stop_on_silence_ms": None,
+    "arms": {"media_kind": "video", "duration_ms": 20000, "prepare_ms": 2000, "stop_on_silence_ms": None,
              "format": "jpeg", "sample_period_ms": 200},
     "sentence": {"media_kind": "audio", "duration_ms": 12000, "prepare_ms": 0, "stop_on_silence_ms": 1500,
                  "format": "pcm_s16le_16000_mono", "sample_period_ms": 250},

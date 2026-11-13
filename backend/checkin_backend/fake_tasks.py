@@ -10,15 +10,15 @@ from typing import Any
 from .media import jpeg_size
 
 # Same cue lines as Agent 3's real modules (runner.CUES), so the phone's timer follows the same parts.
-CUES = {"smile": [{"at_ms": 1500, "line_id": "smile_now"}], "arms": [{"at_ms": 6500, "line_id": "swap_hands"}]}
+CUES = {"smile": [{"at_ms": 1500, "line_id": "smile_now"}], "arms": [{"at_ms": 7000, "line_id": "swap_hands"}]}
 
-WINDOW_MS = {"smile": 6000, "arms": 15000, "sentence": 12000}
+WINDOW_MS = {"smile": 6000, "arms": 20000, "sentence": 12000}
 SIGN = {"smile": "face", "arms": "arm", "sentence": "speech"}
 RESOURCE = {"smile": "camera", "arms": "camera", "sentence": "microphone"}
 CAPTURE = {
     "smile": {"media_kind": "video", "duration_ms": 6000, "prepare_ms": 0, "stop_on_silence_ms": None,
               "format": "jpeg", "sample_period_ms": 200},
-    "arms": {"media_kind": "video", "duration_ms": 15000, "prepare_ms": 2000, "stop_on_silence_ms": None,
+    "arms": {"media_kind": "video", "duration_ms": 20000, "prepare_ms": 2000, "stop_on_silence_ms": None,
              "format": "jpeg", "sample_period_ms": 200},
     "sentence": {"media_kind": "audio", "duration_ms": 12000, "prepare_ms": 0, "stop_on_silence_ms": 1500,
                  "format": "pcm_s16le_16000_mono", "sample_period_ms": 250},
@@ -57,7 +57,7 @@ class InputOnlyTask:
             emit_observation(
                 TaskObservation(
                     f"obs_{context.attempt_id}_{sequence}", context.call_id, context.attempt_id, self.name,
-                    sequence, max(0, min(ms, 15000)), phase, Quality(status, reasons), [], "none",
+                    sequence, max(0, min(ms, 20000)), phase, Quality(status, reasons), [], "none",
                 )
             )
             sequence += 1

@@ -249,7 +249,7 @@ components:
       required: [media_kind, duration_ms, prepare_ms, stop_on_silence_ms, format, sample_period_ms]
       properties:
         media_kind: {type: string, enum: [audio, video]}
-        duration_ms: {type: integer, minimum: 1000, maximum: 15000}
+        duration_ms: {type: integer, minimum: 1000, maximum: 20000}
         prepare_ms: {type: integer, minimum: 0, maximum: 2000, description: 'Included at start of duration,
             not added to it'}
         stop_on_silence_ms:
@@ -493,7 +493,9 @@ components:
         then:
           properties:
             attempts:
-              minItems: 2
+              minItems: 1
+              description: One outside attempt confirms (v12b, the demo rule), or two of the same task / the face
+                and an arm on the same side under the two-reading rule.
               items:
                 properties:
                   outside: {const: true}
@@ -613,7 +615,7 @@ components:
       required: [sequence, captured_ms, format, data_base64]
       properties:
         sequence: {type: integer, minimum: 0}
-        captured_ms: {type: integer, minimum: 0, maximum: 15000}
+        captured_ms: {type: integer, minimum: 0, maximum: 20000}
         format: {type: string, enum: [jpeg, pcm_s16le_16000_mono]}
         data_base64:
           type: string
@@ -632,7 +634,7 @@ components:
       required: [last_sequence, captured_until_ms]
       properties:
         last_sequence: {type: integer, minimum: -1}
-        captured_until_ms: {type: integer, minimum: 0, maximum: 15000}
+        captured_until_ms: {type: integer, minimum: 0, maximum: 20000}
       description: Client stops locally then waits for all sample acknowledgments before finish. last_sequence
         is highest sent sequence, -1 for none; it must match the last accepted sequence. Repeat identical finish
         is accepted; conflicting finish is 409; terminal/interrupted attempt is 410.
@@ -674,7 +676,7 @@ components:
         attempt_id: {$ref: '#/components/schemas/Id'}
         task: {$ref: '#/components/schemas/Task'}
         sequence: {type: integer, minimum: 0}
-        elapsed_ms: {type: integer, minimum: 0, maximum: 15000}
+        elapsed_ms: {type: integer, minimum: 0, maximum: 20000}
         phase: {type: string, enum: [capturing, finalizing]}
         quality: {$ref: '#/components/schemas/ObservationQuality'}
         metrics:
@@ -743,7 +745,7 @@ components:
         call_id: {$ref: '#/components/schemas/Id'}
         attempt_id: {$ref: '#/components/schemas/Id'}
         type: {const: task.progress}
-        elapsed_ms: {type: integer, minimum: 0, maximum: 15000}
+        elapsed_ms: {type: integer, minimum: 0, maximum: 20000}
         phase: {type: string, enum: [capturing, finalizing, stopped]}
         input_quality: {type: string, enum: [pending, usable, unusable]}
         hint: {type: [string, 'null'], enum: [null, look_at_camera, show_both_arms, show_your_hand, check_camera, check_microphone]}

@@ -99,6 +99,8 @@ class CallSession:
         self.message_id: Optional[str] = None
         self.published: List[Dict[str, Any]] = []
         self._change_published = False
+        self._change_pending = False  # v12b: a confirmed change waiting for the end of the call (CHANGE_ALERT_AT_END)
+        self._reassured = False  # v12b: she heard that her family was told (ALERT_REASSURANCE), once per call
 
         self._attempt_counter = 0
         self._refusal_counter = 0
@@ -712,11 +714,14 @@ class CallSession:
             except Exception:
                 values = None
             self._rec("attempt_finished", attempt, d, self, values)
-        if usable and not self._change_published and self._confirmed_any():
+        if usable and not self._change_published and not self._change_pending and self._confirmed_any():
             if self.safety_floor:
                 self._log("change_confirmed", attempt_id=attempt.attempt_id, task=attempt.task)
-                if await self._publish("mid_call"):
+                if limits.CHANGE_ALERT_AT_END:
+                    self._change_pending = True  # told when the call finishes (finish())
+                elif await self._publish("mid_call"):
                     self._change_published = True
+                    await self._reassure()
             else:
                 self._log("floor_off_suppressed", attempt_id=attempt.attempt_id, task=attempt.task,
                           detail="the safety floor is off: the confirmed sign is kept but nothing is published")
@@ -738,7 +743,23 @@ class CallSession:
         if not self._concern_published:
             if await self._publish("mid_call"):
                 self._concern_published = True
+                await self._reassure()
         return True
+
+    async def _reassure(self) -> None:
+        """Her family was just told mid-call: tell her too, with the 112 line (limits.ALERT_REASSURANCE), once per
+        call. Needs the adapter's optional say_text; a failed playback is logged and never ends the call."""
+        say_text = getattr(self.adapter, "say_text", None)
+        if say_text is None or self.hung_up or self._reassured:
+            return
+        self._reassured = True
+        try:
+            await say_text(limits.ALERT_REASSURANCE)
+            self._log("reassured")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._log("reassure_failed", error=type(exc).__name__)
 
     def _last_finished(self) -> Optional[Attempt]:
         finished = [a for a in self.attempts.values() if a.is_terminal]
@@ -772,7 +793,7 @@ class CallSession:
     # ---- summary and finish -----------------------------------------------------------------------
 
     def _evaluations(self) -> Dict[str, rules.SignEvaluation]:
-        return {task: rules.evaluate_sign(self._records_for(task)) for task in limits.TASKS}
+        return rules.evaluate_all({task: self._records_for(task) for task in limits.TASKS})
 
     def _confirmed_any(self) -> bool:
         return any(e.confirmed for e in self._evaluations().values())
@@ -836,12 +857,18 @@ class CallSession:
             return self._final
         if self._active is not None:
             raise RuntimeError("finish() while a task is running")
+        published = False
+        if self._change_pending and not self.hung_up:
+            # v12b: the change is told at the end: the family first, then she hears it, then goodbye
+            published = await self._publish("final")
+            await self._reassure()
         if not self.hung_up:
             try:
                 await self.adapter.say("bye")
             except Exception as exc:
                 self._log("bye_failed", error=type(exc).__name__)
-        await self._publish("final")
+        if not published:
+            await self._publish("final")
         self.finished = True
         self._final = self.build_session_result().to_dict()
         self._log("call_finished", status=self._final["status"])

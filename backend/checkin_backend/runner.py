@@ -26,12 +26,12 @@ READY_TIMEOUT_S = 15.0
 TASKS = ("smile", "arms", "sentence")
 # The cue lines Agent 3's session plays after a capture starts (analysis/session/limits.py SMILE_CUE_MS and the
 # ARMS_PHASES swap). The stand-in runners play the same ones, so the phone's task card and timer behave alike.
-CUES = {"smile": [{"at_ms": 1500, "line_id": "smile_now"}], "arms": [{"at_ms": 6500, "line_id": "swap_hands"}]}
+CUES = {"smile": [{"at_ms": 1500, "line_id": "smile_now"}], "arms": [{"at_ms": 7000, "line_id": "swap_hands"}]}
 QUESTIONS = ("q_medicine", "q_feeling", "q_unusual")
 CAPTURE_SETTINGS = {
     "smile": {"media_kind": "video", "duration_ms": 6000, "prepare_ms": 0, "stop_on_silence_ms": None,
               "format": "jpeg", "sample_period_ms": 200},
-    "arms": {"media_kind": "video", "duration_ms": 15000, "prepare_ms": 2000, "stop_on_silence_ms": None,
+    "arms": {"media_kind": "video", "duration_ms": 20000, "prepare_ms": 2000, "stop_on_silence_ms": None,
              "format": "jpeg", "sample_period_ms": 200},
     "sentence": {"media_kind": "audio", "duration_ms": 12000, "prepare_ms": 0, "stop_on_silence_ms": 1500,
                  "format": "pcm_s16le_16000_mono", "sample_period_ms": 250},

@@ -84,6 +84,18 @@ def test_only_a_confirmed_change_replaces_a_concern_and_then_stays():
     assert delivery.publish("call_1", person(), "as_usual", "final").kind == "change_noticed"
 
 
+def test_a_later_change_summary_names_every_confirmed_sign():
+    # acted phone run: the face confirmed mid-call, the arm later; the final message still named only the smile
+    _, delivery = desk()
+    first = delivery.publish("call_1", person(), "change_noticed", "mid_call", [{"sign": "face", "confirmed": True}])
+    assert "Ona's smile looks different" in first.text
+    signs = [{"sign": "face", "confirmed": True}, {"sign": "arm", "confirmed": True}]
+    final = delivery.publish("call_1", person(), "change_noticed", "final", signs)
+    assert final.message_id == first.message_id and final.text.startswith("Ona's smile and arm look different")
+    assert final.text.endswith("If she seems unwell, call 112.")
+    assert delivery.publish("call_1", person(), "as_usual", "final").text == final.text  # still never calmer
+
+
 def test_a_concern_after_nothing_or_after_a_calm_message_is_published():
     _, delivery = desk()
     assert delivery.publish("c1", person(), "as_usual", "mid_call").kind == "as_usual"

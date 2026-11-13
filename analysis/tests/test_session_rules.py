@@ -260,3 +260,29 @@ def test_smile_sides_follow_the_same_rule():
     a = rec(0.11, attempt="A1", side="left")
     b = rec(0.09, attempt="A2", side="right")
     assert rules.evaluate_sign([a, b]).confirmed is False
+
+
+# ---- v12b: one reading confirms (limits.CONFIRM_FROM_ONE_READING, the demo default) ----------------------------
+
+def test_one_reading_confirms_a_lopsided_smile_on_the_side_of_the_lower_corner():
+    ev = rules.evaluate_all({"smile": [rec(0.11)], "arms": [rec(0.01, task="arms")]}, one_reading=True)
+    assert ev["smile"].confirmed and ev["smile"].side == "left" and len(ev["smile"].attempts) == 1
+    assert not ev["arms"].confirmed
+    ev = rules.evaluate_all({"smile": [rec(-0.09)]}, one_reading=True)
+    assert ev["smile"].confirmed and ev["smile"].side == "right"
+
+
+def test_one_reading_confirms_a_sinking_hand():
+    ev = rules.evaluate_all({"arms": [rec(0.4, task="arms", side="left")]}, one_reading=True)
+    assert ev["arms"].confirmed and ev["arms"].side == "left"
+
+
+def test_a_hand_held_higher_than_usual_is_settled_and_not_a_sign():
+    ev = rules.evaluate_all({"smile": [rec(0.01)], "arms": [rec(-0.3, task="arms", side="left")]}, one_reading=True)
+    assert not ev["arms"].confirmed and ev["arms"].latest_outside is False
+    assert rules.session_status(ev, ("smile", "arms")) == "as_usual"
+
+
+def test_without_one_reading_a_single_outside_reading_still_waits_for_its_repeat():
+    ev = rules.evaluate_all({"smile": [rec(0.11)]}, one_reading=False)
+    assert not ev["smile"].confirmed and ev["smile"].latest_outside is True

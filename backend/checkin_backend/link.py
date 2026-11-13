@@ -12,7 +12,9 @@ cancellation cannot interleave halfway.
 
 import asyncio
 import hashlib
+import json
 import logging
+import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,6 +32,11 @@ from .store import NoStore, Store
 from .session_logging import SessionEventLog
 
 log = logging.getLogger(__name__)
+
+# Development only: when set, every task frame is also written to <dir>/<call_id>/<task>_<attempt_id>/<ms>.jpg and
+# the family summary to <dir>/<call_id>/summary_<phase>.json, so a try can be replayed through the analysis later
+# (python -m checkin_backend.replay_attempt). These are pictures of a person: point it outside the repo, delete after.
+DEBUG_FRAMES_ENV = "DEBUG_FRAMES_DIR"
 
 ANSWER_CAPTURE = {
     "media_kind": "audio",
@@ -141,6 +148,8 @@ class ClientLink:
         self._pending_resource_events: list[dict[str, Any]] = []
         # Camera frames per attempt, in memory only, for the family's alert clip (delivery.ClipShelf).
         self._frames: dict[str, tuple[str, list[tuple[int, bytes]]]] = {}
+        root = os.environ.get(DEBUG_FRAMES_ENV, "").strip()
+        self._frames_dir = Path(root) / call_id if root else None
 
     # ---- helpers -------------------------------------------------------------------------------
 
@@ -338,6 +347,7 @@ class ClientLink:
     async def publish(self, summary: dict[str, Any], phase: str, message_id: str | None = None) -> dict[str, Any]:
         kind = summary.get("status", "incomplete")
         clip = self.alert_frames(summary.get("signs")) if kind == "change_noticed" else None
+        self._save_debug(f"summary_{phase}.json", json.dumps(summary, indent=1, default=str).encode())
         message = self.delivery.publish(
             self.call_id, self.person, kind, phase, summary.get("signs"), summary.get("concern"), summary=summary,
             clip=clip,
@@ -499,6 +509,18 @@ class ClientLink:
             task, frames = self._frames.setdefault(attempt_id, (capture.task, []))
             if len(frames) < MAX_CLIP_FRAMES_PER_ATTEMPT:
                 frames.append((captured_ms, data))
+            self._save_debug(f"{capture.task}_{attempt_id}/{captured_ms:05d}.jpg", data)
+
+    def _save_debug(self, name: str, data: bytes) -> None:
+        """DEBUG_FRAMES_DIR only (see DEBUG_FRAMES_ENV); a failed write never affects the call."""
+        if self._frames_dir is None:
+            return
+        try:
+            path = self._frames_dir / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        except OSError as exc:
+            log.warning("debug frame not saved (%s)", type(exc).__name__)
 
     def on_finish(self, attempt_id: str, last_sequence: int, captured_until_ms: int) -> None:
         capture = self._captures.get(attempt_id)

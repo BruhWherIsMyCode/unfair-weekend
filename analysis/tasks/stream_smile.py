@@ -105,9 +105,31 @@ def phase_reading(frame_readings: List[Optional[FrameReading]],
             return "unusable", None, "face_not_in_view"
         relaxed, peak, height = clip.relaxed_strength, clip.peak_strength, None
     if peak - relaxed < config.MIN_SMILE_RISE:
-        return "not_measured", None, ("already_smiling" if relaxed >= limits.SMILE_ALREADY_SMILING
-                                       else "no_smile_seen")
+        if relaxed >= limits.SMILE_ALREADY_SMILING:
+            return "not_measured", None, "already_smiling"
+        if len(relax) >= limits.SMILE_MIN_PHASE_FRAMES and len(smile) >= limits.SMILE_MIN_PHASE_FRAMES:
+            one_sided = one_sided_height(relax, smile)
+            if one_sided is not None:
+                return "usable", one_sided, None
+        return "not_measured", None, "no_smile_seen"
     return "usable", height, None
+
+
+def one_sided_height(relax: List[FrameReading], smile: List[FrameReading]) -> Optional[float]:
+    """The mouth-corner height of a clearly one-sided smile, or None.
+
+    A smile that lifts one corner only can score almost no smile strength (both mouthSmile blendshapes stay low),
+    yet its corners move far apart: exactly the droop the check is for (owner's acted run: strength peak 0.11
+    against 0.67 for a normal smile, corner height 0.00 -> +0.10). The peak is the strongest 20 % (at least 3) of
+    the smile-phase frames by how far the corner height moved from the relaxed median; it counts as a smile when
+    that move is at least ONE_SIDED_MIN_SHIFT, and the reading is the median corner height over those frames."""
+    relaxed_height = float(median([f.corner_height for f in relax]))
+    n_peak = min(len(smile), max(config.MIN_PEAK_FRAMES, int(round(len(smile) * config.PEAK_FRACTION))))
+    moved = sorted(smile, key=lambda f: abs(f.corner_height - relaxed_height))[len(smile) - n_peak:]
+    shift = float(median([abs(f.corner_height - relaxed_height) for f in moved]))
+    if shift < config.ONE_SIDED_MIN_SHIFT:
+        return None
+    return float(median([f.corner_height for f in moved]))
 
 
 def final_result(context: TaskContext, frame_readings: List[Optional[FrameReading]]) -> TaskResult:
@@ -193,7 +215,7 @@ class StreamSmile:
             nonlocal sequence
             emit_observation(TaskObservation(
                 "obs_%s_%d" % (context.attempt_id, sequence), context.call_id, context.attempt_id, "smile",
-                sequence, max(0, min(int(ms), 15000)), phase, quality, metrics, signal))
+                sequence, max(0, min(int(ms), limits.CAPTURE_MAX_MS)), phase, quality, metrics, signal))
             sequence += 1
 
         try:

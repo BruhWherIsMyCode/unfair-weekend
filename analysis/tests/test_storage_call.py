@@ -36,7 +36,7 @@ def test_a_whole_call_is_recorded_in_every_owner_3_table(env):
     assert count(path, "policy_definitions") == 1
     defs = rows(path, "SELECT task, metric_id, unit, required_resource, window_ms FROM task_definitions ORDER BY task")
     assert [d["task"] for d in defs] == ["arms", "smile"]  # the sentence stub has no metric: nothing to store
-    assert defs[0]["window_ms"] == 15000 and defs[1]["metric_id"] == "corner_height_v1"
+    assert defs[0]["window_ms"] == 20000 and defs[1]["metric_id"] == "corner_height_v1"
 
     session = rows(path, "SELECT * FROM call_sessions")[0]
     assert session["phase"] == "finished" and session["finished_at_ms"] >= session["started_at_ms"]
@@ -211,6 +211,7 @@ def test_alert_family_has_no_tool_row_but_its_turn_and_the_summary_status_are_ke
 
 # ---- summaries, change and learning rules -------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("two_readings", "alert_mid_call")
 def test_a_confirmed_change_writes_a_mid_call_then_a_final_summary_and_no_new_baseline(env):
     path, writer = env
     add_call(path)

@@ -48,9 +48,9 @@ def test_an_arms_stop_names_the_hand_phase():
 def test_arms_phase_names_follow_the_phase_table():
     assert call_record.arms_phase_name(500) == "settle"
     assert call_record.arms_phase_name(3000) == "hold_left (left hand)"
-    assert call_record.arms_phase_name(7000) == "swap"
-    assert call_record.arms_phase_name(9000) == "hold_right (right hand)"
-    assert call_record.arms_phase_name(15500) == "past the window"
+    assert call_record.arms_phase_name(8000) == "swap"
+    assert call_record.arms_phase_name(12000) == "hold_right (right hand)"
+    assert call_record.arms_phase_name(20500) == "past the window"
 
 
 def test_a_stop_before_any_observation_says_so():

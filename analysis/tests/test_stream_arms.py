@@ -19,7 +19,7 @@ FIXTURES = json.loads((Path(__file__).resolve().parents[2] / "contract" / "fixtu
 NO_BASELINE = {"snapshot_id": "baseline_none", "ready": False, "sessions": 0, "needed": 5}
 
 
-async def sample_stream(last_ms=15000, step=200):
+async def sample_stream(last_ms=limits.CAPTURE_MAX_MS, step=200):
     for i, ms in enumerate(range(0, last_ms + 1, step)):
         yield {"sequence": i, "captured_ms": ms, "format": "jpeg", "data_base64": "AAAA"}
 
@@ -121,13 +121,13 @@ def test_unreadable_jpeg_counts_as_a_hand_not_seen():
 
 def test_phase_boundaries():
     assert phase_at(0)[0] == "settle" and phase_at(999)[0] == "settle"
-    assert phase_at(1000)[3] == "left" and phase_at(6499)[3] == "left"
-    assert phase_at(6500)[0] == "swap" and phase_at(8499)[0] == "swap"
-    assert phase_at(8500)[3] == "right" and phase_at(14999)[3] == "right"
-    assert phase_at(15000) is None
-    assert hold_windows() == {"left": (1000, 6500), "right": (8500, 15000)}
-    assert cue_at_ms() == 6500
-    assert limits.ARMS_PHASES[0][1] == 0 and limits.ARMS_PHASES[-1][2] == 15000
+    assert phase_at(1000)[3] == "left" and phase_at(6999)[3] == "left"
+    assert phase_at(7000)[0] == "swap" and phase_at(11499)[0] == "swap"
+    assert phase_at(11500)[3] == "right" and phase_at(19999)[3] == "right"
+    assert phase_at(20000) is None
+    assert hold_windows() == {"left": (1000, 7000), "right": (11500, 20000)}
+    assert cue_at_ms() == 7000
+    assert limits.ARMS_PHASES[0][1] == 0 and limits.ARMS_PHASES[-1][2] == limits.CAPTURE_MAX_MS == 20000
 
 
 def test_frames_in_settle_and_swap_are_not_read_at_all():
@@ -136,7 +136,7 @@ def test_frames_in_settle_and_swap_are_not_read_at_all():
     assert reader.calls, "hold frames must be read"
     for ts, side in reader.calls:
         assert in_hold(ts) and phase_at(ts)[3] == side  # the reader got the side of the phase it was called in
-    assert not [c for c in reader.calls if c[0] < 1000 or 6500 <= c[0] < 8500]
+    assert not [c for c in reader.calls if c[0] < 1000 or 7000 <= c[0] < 11500]
 
 
 def test_observations_flag_framing_only_in_hold_phases():
@@ -198,8 +198,8 @@ def test_baseline_ready_only_when_both_hands_are_ready():
 
 def test_samples_after_the_window_are_not_measured():
     reader = FakeHands()
-    run_arms(reader, stream=sample_stream(last_ms=15600))
-    assert max(ts for ts, _ in reader.calls) <= 15000
+    run_arms(reader, stream=sample_stream(last_ms=20600))
+    assert max(ts for ts, _ in reader.calls) <= 20000
 
 
 def test_cancel_signal_ends_the_run_without_a_reading():
@@ -211,9 +211,9 @@ def test_cancel_signal_ends_the_run_without_a_reading():
 def test_definition_has_the_published_capture_settings_and_the_swap_cue():  # noqa: E302
     d = StreamArms().definition()
     fixture = next(f for f in FIXTURES if f["name"] == "capture_arms")["data"]["settings"]
-    # v11: the arms window grew to 15 s (the contract maximum); fixtures.json keeps draft 0.2's 12000
-    assert d["capture"] == dict(fixture, duration_ms=15000)
-    assert d["cues"] == [{"at_ms": 6500, "line_id": "swap_hands"}]
+    # v12: the arms window grew to 20 s (the raised contract maximum); fixtures.json keeps draft 0.2's 12000
+    assert d["capture"] == dict(fixture, duration_ms=20000)
+    assert d["cues"] == [{"at_ms": 7000, "line_id": "swap_hands"}]
     assert d["metric_id"] == "hand_sink_v1" and d["required_resource"] == "camera" and d["sign"] == "arm"
     assert d["instruction_line"] == "task_arms" and d["repeat_line"] == "repeat_arms"
 
@@ -222,7 +222,7 @@ def test_definition_has_the_published_capture_settings_and_the_swap_cue():  # no
 
 def test_a_hand_raised_late_within_the_grace_is_not_flagged_and_still_measured():
     # the left hand appears 2.4 s into its hold, the right hand 2.8 s into its hold (still within the grace)
-    reader = FakeHands(usable=lambda side, ts: (side == "left" and ts >= 3400) or (side == "right" and ts >= 11300))
+    reader = FakeHands(usable=lambda side, ts: (side == "left" and ts >= 3400) or (side == "right" and ts >= 14300))
     result, obs, _ = run_arms(reader)
     assert not [o for o in obs if o.signal == "framing_unusable"]
     d = result.to_dict()
@@ -235,7 +235,7 @@ def test_a_hand_never_raised_is_flagged_once_the_grace_is_over():
     bad = [o.elapsed_ms for o in obs if o.signal == "framing_unusable"]
     first = 1000 + limits.ARMS_RAISE_GRACE_MS
     assert bad and first <= min(bad) < first + 200  # the first sample at or after the grace
-    assert all(first <= ms < 6500 for ms in bad)
+    assert all(first <= ms < 7000 for ms in bad)
 
 
 def test_losing_the_hand_after_it_was_seen_is_flagged_at_once_even_inside_the_grace():

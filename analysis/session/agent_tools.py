@@ -173,10 +173,23 @@ class ToolHandlers:
         usable = [r for r in records if r.usable and r.reading is not None]
         if not usable:
             return True
-        if rules.evaluate_sign(records).confirmed:
+        if limits.CONFIRM_FROM_ONE_READING:
+            return False  # v12b: one usable reading settles the task (an outside one has already told the family)
+        evals = rules.evaluate_all({t: self.session.records_for(t) for t in limits.TASKS})
+        if evals[task].confirmed:
             return False
         last = usable[-1]
-        return len(usable) < 2 and bool(last.baseline_ready) and rules.reading_direction(last.reading) != 0
+        if not (len(usable) < 2 and bool(last.baseline_ready) and rules.reading_direction(last.reading) != 0):
+            return False
+        # v12: a first outside face or arm reading waits for the other task, which may confirm it with no repeat.
+        partner = rules.cross_partner(task)
+        return partner is None or not self._awaits_first_reading(partner)
+
+    def _awaits_first_reading(self, task: str) -> bool:
+        """A required task that has no usable reading yet and can still get one in this call."""
+        if task not in self.session.required_tasks or self._unimplemented(task) or self.skip(task):
+            return False
+        return not any(r.usable and r.reading is not None for r in self.session.records_for(task))
 
     def has_result(self, task: str) -> bool:
         """A usable reading exists and nothing more is needed."""
@@ -354,7 +367,7 @@ class ToolHandlers:
                  "required": ["reason", "note"], "additionalProperties": False}},
             {"name": "say_own", "description": "Say one or two short sentences of your own to her: react to what she "
              "just said or to what just happened, or tell her in a few words why a check is repeated (use the "
-             "result's retry_hint). At most %d words, no digits, none of these words: %s. At most %d own lines in the "
+             "result's retry_hint). Never a question. At most %d words, no digits, none of these words: %s. At most %d own lines in the "
              "call (say_own and ask_followup together); not while a check runs."
              % (limits.OWN_LINE_MAX_WORDS, ", ".join(limits.OWN_LINE_BANNED_WORDS), limits.OWN_LINES_MAX),
              "input_schema": {"type": "object", "properties": {"text": {"type": "string",
@@ -421,7 +434,12 @@ class ToolHandlers:
         if not self.greeted:
             return "play the greeting first: say(\"greet\")"
         if name == "say":  # setup_phone
-            return "the set-up line was already played" if self.setup_played else None
+            if self.setup_played:
+                return "the set-up line was already played"
+            if not all(self.recorded.values()):
+                # v12b: played before the questions it cost the call ~10 s; run_task plays it before the first check
+                return "the set-up line comes right before the first check: run_task() plays it, ask the questions first"
+            return None
         if name == "ask":
             q = args["question_id"]
             if self.asks[q] >= limits.MAX_ASKS_PER_QUESTION:
@@ -446,6 +464,9 @@ class ToolHandlers:
             reason = self._own_refusal()
             if reason is None and name == "ask_followup":
                 reason = self._followup_refusal(args["question_id"])
+            if reason is None and name == "say_own" and "?" in str(args["text"]):
+                # v12b: its reactions asked the next question in its own words, then ask() asked it again
+                reason = "say_own never asks a question: the questions are ask() and ask_followup()"
             return reason or own_text_problem(args["text"])
         return None
 

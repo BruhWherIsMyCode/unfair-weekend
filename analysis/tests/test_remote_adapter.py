@@ -134,10 +134,10 @@ def test_samples_follow_reading_messages_and_end_on_capture_ended():
 def test_arms_start_capture_carries_phases_and_cues_and_acks_reach_the_session():
     async def scenario():
         adapter, client, clock = rig()
-        await adapter.start_capture("A2", "arms", {"duration_ms": 15000})
+        await adapter.start_capture("A2", "arms", {"duration_ms": 20000})
         start = await client.recv()
         assert start["phases"] == [list(p) for p in limits.ARMS_PHASES]
-        assert start["cues"] == [{"at_ms": 6500, "line_id": "swap_hands"}]
+        assert start["cues"] == [{"at_ms": 7000, "line_id": "swap_hands"}]
         await adapter.dispatch(m("capture_started", attempt_id="A2"))
         await adapter.cancel_capture("A2", "task_interrupted")
         assert (await client.recv())["type"] == "cancel_capture"

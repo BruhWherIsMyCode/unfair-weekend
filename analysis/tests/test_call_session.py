@@ -4,6 +4,8 @@ Each test runs its own event loop with asyncio.run; time moves only through Fake
 """
 from __future__ import annotations
 
+import pytest
+
 import asyncio
 
 from analysis.session.models import BaselineInfo, Quality, TaskResult
@@ -348,6 +350,7 @@ def test_hang_up_during_instruction_playback():
 
 # ---- confirmation and publishing -------------------------------------------------------------------
 
+@pytest.mark.usefixtures("two_readings", "alert_mid_call")
 def test_two_outside_readings_publish_once_then_the_final_message_reuses_the_id():
     async def scenario():
         rig = Rig()
@@ -369,6 +372,7 @@ def test_two_outside_readings_publish_once_then_the_final_message_reuses_the_id(
     asyncio.run(scenario())
 
 
+@pytest.mark.usefixtures("two_readings")
 def test_outside_then_within_is_not_confirmed_and_never_published_mid_call():
     async def scenario():
         rig = Rig()

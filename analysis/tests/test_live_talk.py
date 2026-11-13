@@ -5,6 +5,8 @@ FakeClock, fake adapters, scripted fake Claude; no mediapipe, no network, no rea
 """
 from __future__ import annotations
 
+import pytest
+
 import asyncio
 import json
 
@@ -150,9 +152,10 @@ def test_the_fixed_order_driver_obeys_the_same_budget():
     asyncio.run(scenario())
 
 
+@pytest.mark.usefixtures("two_readings")
 def test_a_usable_outside_reading_has_no_retry_hint():
     async def scenario():
-        rig = CallRig(corners=(0.11, 0.09))
+        rig = CallRig(corners=(0.11, 0.09), required_tasks=("smile",))  # v12: no arms to wait for: the same-task repeat
         await rig.greet()
         first = await rig.run_tool("run_task", {"task": "smile"})
         assert first["needs_another_reading"] is True and first["retry_hint"] is None
@@ -440,3 +443,28 @@ def test_selfcheck_is_ready_when_everything_is_there(tmp_path):
     model = tmp_path / "m.task"
     model.write_text("x")
     assert selfcheck.check(import_module=lambda name: None, model_paths=[("face", model), ("hand", model)]) == []
+
+
+def test_say_own_never_asks_a_question():
+    # acted phone run: "Good, thank you, Ona. Now, how are you feeling today?" and then ask() asked it again
+    async def scenario():
+        rig = CallRig()
+        await rig.greet()
+        refused = await rig.handlers.execute("say_own", {"text": "Good, thank you. How are you feeling today?"})
+        assert "never asks a question" in refused.get("error", "")
+        assert rig.adapter.own_said == []
+        assert "error" not in await rig.handlers.execute("say_own", {"text": "Good, thank you, Ona."})
+
+    asyncio.run(scenario())
+
+
+def test_the_set_up_line_is_refused_before_the_questions():
+    # acted phone run: the agent played setup_phone before the questions and the call lost ~10 s
+    async def scenario():
+        rig = CallRig()
+        await rig.greet()
+        refused = await rig.handlers.execute("say", {"line_id": "setup_phone"})
+        assert "right before the first check" in refused.get("error", "")
+        assert "setup_phone" not in rig.adapter.said
+
+    asyncio.run(scenario())

@@ -19,8 +19,8 @@ class FakeArms:
         self.probe = probe
 
     def definition(self):
-        return {"capture": {"duration_ms": 15000, "sample_period_ms": 200, "format": "jpeg"},
-                "cues": [{"at_ms": 6500, "line_id": "swap_hands"}]}
+        return {"capture": {"duration_ms": 20000, "sample_period_ms": 200, "format": "jpeg"},
+                "cues": [{"at_ms": 7000, "line_id": "swap_hands"}]}
 
     async def run(self, context, samples, emit):
         count = 0
@@ -86,7 +86,7 @@ def test_probe_tallies_where_the_hand_was_per_phase():
     probe = FrameProbe()
     probe.arms_frame("a1", 2000, "left", None, Face(), [Hand(400.0)], False)  # her left: larger x
     probe.arms_frame("a1", 2200, "left", None, Face(), [Hand(100.0)], False)  # her right
-    probe.arms_frame("a1", 9000, "right", None, Face(), [], False)
+    probe.arms_frame("a1", 12000, "right", None, Face(), [], False)
     assert probe.tally()["hold_left"] == {"left": 1, "right": 1, "none": 0, "no_face": 0}
     assert probe.tally()["hold_right"]["none"] == 1
     assert probe.latest()["eye_distance_px"] == 100.0 and probe.latest()["roll_deg"] == 0.0

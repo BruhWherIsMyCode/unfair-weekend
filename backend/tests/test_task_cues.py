@@ -27,5 +27,5 @@ async def test_scripted_call_plays_now_smile_and_swap_during_their_captures(monk
 def test_fake_modules_carry_the_same_cues_as_the_analysis():
     modules = fake_modules()
     assert modules["smile"].definition()["cues"] == CUES["smile"] == [{"at_ms": 1500, "line_id": "smile_now"}]
-    assert modules["arms"].definition()["cues"] == CUES["arms"] == [{"at_ms": 6500, "line_id": "swap_hands"}]
+    assert modules["arms"].definition()["cues"] == CUES["arms"] == [{"at_ms": 7000, "line_id": "swap_hands"}]
     assert modules["sentence"].definition()["cues"] == []

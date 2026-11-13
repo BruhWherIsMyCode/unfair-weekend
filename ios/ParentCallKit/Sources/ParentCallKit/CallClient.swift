@@ -416,9 +416,9 @@ public actor CallClient {
             if let payload, let callId {
                 do {
                     try await api.postSample(callId: callId, attemptId: attempt, sequence: sequence,
-                                             capturedMs: min(capturedMs, 15000), format: format, data: payload)
+                                             capturedMs: min(capturedMs, 20000), format: format, data: payload)
                     lastSent = sequence
-                    lastMs = min(capturedMs, 15000)
+                    lastMs = min(capturedMs, 20000)
                     sequence += 1
                 } catch APIError.http(status: 410, _) {
                     return

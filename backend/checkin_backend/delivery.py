@@ -66,8 +66,12 @@ def render(kind: str, person: Person, signs: list[dict] | None = None, concern: 
         confirmed = [s for s in signs or [] if s.get("confirmed") is True]
         if not confirmed:
             raise ValueError("A change message requires a confirmed sign")
-        sign = confirmed[0]["sign"]
-        thing, verb = THINGS.get(sign, THINGS["face"])
+        things = [THINGS.get(s["sign"], THINGS["face"]) for s in confirmed]
+        if len(things) == 1:
+            thing, verb = things[0]
+        else:  # the face and an arm confirmed each other: "Ona's smile and arm look different ..."
+            thing = " and ".join(t for t, _ in things)
+            verb = "look" if all(v == "looks" for _, v in things) else "seem"
         return f"{w['name']}'s {thing} {verb} different from {w['her']} usual. Call {w['her_obj']} now. {handoff}"
     if kind == "incomplete":
         return f"{w['name']}'s check-in could not be finished. Please call {w['her_obj']}. {handoff}"
@@ -168,7 +172,8 @@ class FamilyDelivery:
             raise ValueError("phase must be mid_call or final")
         message_id = self._by_call.get(call_id)
         previous = self._messages.get(message_id) if message_id else None
-        keep_change = previous is not None and previous.kind == "change_noticed"
+        # A later change summary (more confirmed signs, e.g. the arm after the face) re-renders the change text.
+        keep_change = previous is not None and previous.kind == "change_noticed" and kind != "change_noticed"
         # A concern is replaced only by a confirmed change, never by a calmer summary.
         keep_concern = previous is not None and previous.kind == "concern_raised" and kind != "change_noticed"
         if keep_change or keep_concern:

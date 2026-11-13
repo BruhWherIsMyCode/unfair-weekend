@@ -53,6 +53,13 @@ final class FamilyFeed {
     }
 
     init() {
+        // Launch arguments (`-family.baseURL https://…`) are kept as if typed in the demo panel.
+        let passed = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
+        for key in [Key.baseURL, Key.demoKey, Key.familyId] {
+            if let value = passed[key] as? String {
+                defaults.set(value, forKey: key)
+            }
+        }
         baseURL = defaults.string(forKey: Key.baseURL) ?? ""
         demoKey = defaults.string(forKey: Key.demoKey) ?? ""
         familyId = defaults.string(forKey: Key.familyId) ?? "f_demo"

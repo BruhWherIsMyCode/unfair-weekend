@@ -1,6 +1,8 @@
 """The shared tool handlers: every guard, with a fake clock, fake adapter and fake readers. Written, not run."""
 from __future__ import annotations
 
+import pytest
+
 import asyncio
 import json
 
@@ -38,6 +40,7 @@ def test_say_accepts_only_greet_and_setup_phone_and_setup_only_once():
         await rig.greet()
         assert (await h.execute("say", {"line_id": "bye"}))["error"].startswith("invalid input")
         assert (await h.execute("say", {"line_id": "task_smile"}))["error"].startswith("invalid input")
+        h.recorded = {q: True for q in h.recorded}  # v12b: the set-up line only after the questions
         assert "error" not in await h.execute("say", {"line_id": "setup_phone"})
         assert not_allowed(await h.execute("say", {"line_id": "setup_phone"}))
         assert rig.adapter.said == ["greet", "setup_phone"]
@@ -135,9 +138,10 @@ def test_setup_phone_is_played_before_the_first_video_task_and_not_again():
     asyncio.run(scenario())
 
 
+@pytest.mark.usefixtures("two_readings", "alert_mid_call")
 def test_run_task_returns_plain_facts_only():
     async def scenario():
-        rig = CallRig(corners=(0.11, 0.09))  # both smile readings outside her usual
+        rig = CallRig(corners=(0.11, 0.09), required_tasks=("smile",))  # both smile readings outside her usual; v12: no arms to wait for
         await rig.greet()
         first = await rig.run_tool("run_task", {"task": "smile"})
         assert set(first) == FACT_KEYS
