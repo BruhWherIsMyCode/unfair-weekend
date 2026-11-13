@@ -308,7 +308,7 @@ def test_a_confirmed_change_is_published_even_if_claude_fails_right_after():
     async def scenario():
         os.environ["ANTHROPIC_API_KEY"] = SECRET
         try:
-            rig = CallRig(corners=(0.11, 0.09))
+            rig = CallRig(corners=(0.11, 0.09), required_tasks=("smile",))  # v12: no arms to wait for: the same-task repeat
             script = [say("greet"), run_task("smile"), run_task("smile"), Hang()]
             agent, client = make(rig, script)
             await rig.drive(agent.run())

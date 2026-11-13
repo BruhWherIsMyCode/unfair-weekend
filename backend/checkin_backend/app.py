@@ -90,14 +90,14 @@ class ResourceEventIn(Strict):
 
 class SampleIn(Strict):
     sequence: int = Field(ge=0)
-    captured_ms: int = Field(ge=0, le=15000)
+    captured_ms: int = Field(ge=0, le=20000)
     format: Literal["jpeg", "pcm_s16le_16000_mono"]
     data_base64: str = Field(min_length=4, max_length=174764)
 
 
 class FinishIn(Strict):
     last_sequence: int = Field(ge=-1)
-    captured_until_ms: int = Field(ge=0, le=15000)
+    captured_until_ms: int = Field(ge=0, le=20000)
 
 
 def parse_client_event(body: Any) -> dict[str, Any]:

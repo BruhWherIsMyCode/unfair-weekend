@@ -16,7 +16,7 @@ async def test_frames_and_summary_are_saved_only_when_asked(tmp_path, monkeypatc
     folders = sorted(p.name.split("_")[0] for p in call_dir.iterdir() if p.is_dir())
     assert folders == ["arms", "sentence", "smile"] or {"arms", "smile"} <= set(folders)
     arms = next(p for p in call_dir.iterdir() if p.name.startswith("arms_"))
-    assert len(list(arms.glob("*.jpg"))) == 75
+    assert len(list(arms.glob("*.jpg"))) == 100
     summary = json.loads(next(call_dir.glob("summary_*.json")).read_text())
     assert summary["status"] == "incomplete"
 

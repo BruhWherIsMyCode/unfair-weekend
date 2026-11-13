@@ -81,7 +81,7 @@ class StreamSpeechSentence:
             nonlocal sequence
             emit_observation(TaskObservation(
                 "obs_%s_%d" % (context.attempt_id, sequence), context.call_id, context.attempt_id, "sentence",
-                sequence, max(0, min(int(ms), 15000)), phase, quality, metrics, "none"))
+                sequence, max(0, min(int(ms), 20000)), phase, quality, metrics, "none"))
             sequence += 1
 
         async for sample in samples:

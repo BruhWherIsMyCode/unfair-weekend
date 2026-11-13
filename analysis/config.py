@@ -44,6 +44,7 @@ PEAK_FRACTION = 0.2  # share of usable frames (strongest smile) taken as the pea
 MIN_PEAK_FRAMES = 3  # at least this many peak frames are used; first guess
 MIN_USABLE_FRAMES = 8  # fewer usable frames than this makes the clip unusable; first guess
 MIN_SMILE_RISE = 0.15  # peak minus relaxed smile strength (stronger side) below this means no smile happened; lowered from 0.25 after the owner's first run rejected normal smiles
+ONE_SIDED_MIN_SHIFT = 0.06  # eye distances: without enough smile strength, a corner-height move this large after the cue still counts as a (one-sided) smile; acted droops moved 0.07-0.12, normal smiles 0.04 (owner's acted run)
 
 # ---- Baseline ---------------------------------------------------------------
 BASELINE_K = 3.0  # range = median +/- K x robust spread; first guess

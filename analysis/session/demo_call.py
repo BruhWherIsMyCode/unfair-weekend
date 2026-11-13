@@ -190,7 +190,7 @@ async def normal_branch() -> None:
 
     arms2 = asyncio.ensure_future(session.run_task("arms"))
     await clock.settle()
-    await stream(adapter, clock, current_attempt(session), 76)  # the whole 15 s window, both hands
+    await stream(adapter, clock, current_attempt(session), 101)  # the whole 20 s window, both hands
     show("arms A2 (made-up hands, both within her usual)", await arms2)
     show("sentence (not implemented in this version, so it ends failed)", await session.run_task("sentence"))
 

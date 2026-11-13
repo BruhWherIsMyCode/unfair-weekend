@@ -152,7 +152,7 @@ def test_the_fixed_order_driver_obeys_the_same_budget():
 
 def test_a_usable_outside_reading_has_no_retry_hint():
     async def scenario():
-        rig = CallRig(corners=(0.11, 0.09))
+        rig = CallRig(corners=(0.11, 0.09), required_tasks=("smile",))  # v12: no arms to wait for: the same-task repeat
         await rig.greet()
         first = await rig.run_tool("run_task", {"task": "smile"})
         assert first["needs_another_reading"] is True and first["retry_hint"] is None

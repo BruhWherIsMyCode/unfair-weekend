@@ -772,7 +772,7 @@ class CallSession:
     # ---- summary and finish -----------------------------------------------------------------------
 
     def _evaluations(self) -> Dict[str, rules.SignEvaluation]:
-        return {task: rules.evaluate_sign(self._records_for(task)) for task in limits.TASKS}
+        return rules.evaluate_all({task: self._records_for(task) for task in limits.TASKS})
 
     def _confirmed_any(self) -> bool:
         return any(e.confirmed for e in self._evaluations().values())

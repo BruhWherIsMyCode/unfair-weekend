@@ -34,11 +34,15 @@ BASELINE_NEEDED_DEFAULT = 5  # used for the summary when no baseline is known
 # Side words are HER left and right. First guesses, editable in this one place.
 # v11 (owner, after the real PC run): 15 s window (the contract maximum), longer holds; the right hold starts while
 # the swap line is still playing, so its raise grace covers the rest of the line.
+# v12 (owner, after the acted phone run): moving the phone from one hand to the other took longer than the 2 s swap,
+# so the window is 20 s (CAPTURE_MAX_MS, the raised contract maximum) and the swap 4.5 s. The swap line still plays
+# when the swap starts; it ends about when the right hold starts, and the raise grace covers the raise.
+CAPTURE_MAX_MS = 20000  # longest capture window and largest captured_ms/elapsed_ms (also contract, backend, iOS)
 ARMS_PHASES = (
     ("settle", 0, 1000, None),
-    ("hold_left", 1000, 6500, "left"),
-    ("swap", 6500, 8500, None),
-    ("hold_right", 8500, 15000, "right"),
+    ("hold_left", 1000, 7000, "left"),
+    ("swap", 7000, 11500, None),
+    ("hold_right", 11500, 20000, "right"),
 )
 # Time she gets at the start of each hold phase to raise the hand: until her hand is first seen in that phase, and
 # for at most this long, a frame without the hand is "pending", not framing_unusable (the 2 s framing rule

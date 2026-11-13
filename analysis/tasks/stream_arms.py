@@ -1,12 +1,12 @@
 """The arms task on streamed JPEG samples: one free hand at a time (v6).
 
 The person holds the phone in ONE hand (owner's decision), so she raises the other hand beside her face, then
-swaps. One `arms` task, one 15 s capture window, two halves (limits.ARMS_PHASES, editable there):
+swaps. One `arms` task, one 20 s capture window, two halves (limits.ARMS_PHASES, editable there):
 
-    0-1 s settle, 1-6.5 s hold LEFT hand (her left; the phone is in her right hand),
-    6.5-8.5 s swap (frames ignored), 8.5-15 s hold RIGHT hand.
+    0-1 s settle, 1-7 s hold LEFT hand (her left; the phone is in her right hand),
+    7-11.5 s swap (frames ignored), 11.5-20 s hold RIGHT hand.
 
-The task definition carries a cue: the session plays the `swap_hands` line when the swap phase starts (6.5 s).
+The task definition carries a cue: the session plays the `swap_hands` line when the swap phase starts (7 s).
 Raise grace (limits.ARMS_RAISE_GRACE_MS): until her hand is first seen in a hold, and for at most that long, a
 frame without it is not judged; each hold is measured from the first frame her hand was seen.
 
@@ -238,7 +238,7 @@ class StreamArms:
             nonlocal sequence
             emit_observation(TaskObservation(
                 "obs_%s_%d" % (context.attempt_id, sequence), context.call_id, context.attempt_id, "arms",
-                sequence, max(0, min(int(ms), 15000)), phase, quality, metrics, signal))
+                sequence, max(0, min(int(ms), limits.CAPTURE_MAX_MS)), phase, quality, metrics, signal))
             sequence += 1
 
         try:

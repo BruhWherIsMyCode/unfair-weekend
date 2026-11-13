@@ -66,8 +66,12 @@ def render(kind: str, person: Person, signs: list[dict] | None = None, concern: 
         confirmed = [s for s in signs or [] if s.get("confirmed") is True]
         if not confirmed:
             raise ValueError("A change message requires a confirmed sign")
-        sign = confirmed[0]["sign"]
-        thing, verb = THINGS.get(sign, THINGS["face"])
+        things = [THINGS.get(s["sign"], THINGS["face"]) for s in confirmed]
+        if len(things) == 1:
+            thing, verb = things[0]
+        else:  # the face and an arm confirmed each other: "Ona's smile and arm look different ..."
+            thing = " and ".join(t for t, _ in things)
+            verb = "look" if all(v == "looks" for _, v in things) else "seem"
         return f"{w['name']}'s {thing} {verb} different from {w['her']} usual. Call {w['her_obj']} now. {handoff}"
     if kind == "incomplete":
         return f"{w['name']}'s check-in could not be finished. Please call {w['her_obj']}. {handoff}"

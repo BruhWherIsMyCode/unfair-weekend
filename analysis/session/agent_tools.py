@@ -173,10 +173,21 @@ class ToolHandlers:
         usable = [r for r in records if r.usable and r.reading is not None]
         if not usable:
             return True
-        if rules.evaluate_sign(records).confirmed:
+        evals = rules.evaluate_all({t: self.session.records_for(t) for t in limits.TASKS})
+        if evals[task].confirmed:
             return False
         last = usable[-1]
-        return len(usable) < 2 and bool(last.baseline_ready) and rules.reading_direction(last.reading) != 0
+        if not (len(usable) < 2 and bool(last.baseline_ready) and rules.reading_direction(last.reading) != 0):
+            return False
+        # v12: a first outside face or arm reading waits for the other task, which may confirm it with no repeat.
+        partner = rules.cross_partner(task)
+        return partner is None or not self._awaits_first_reading(partner)
+
+    def _awaits_first_reading(self, task: str) -> bool:
+        """A required task that has no usable reading yet and can still get one in this call."""
+        if task not in self.session.required_tasks or self._unimplemented(task) or self.skip(task):
+            return False
+        return not any(r.usable and r.reading is not None for r in self.session.records_for(task))
 
     def has_result(self, task: str) -> bool:
         """A usable reading exists and nothing more is needed."""

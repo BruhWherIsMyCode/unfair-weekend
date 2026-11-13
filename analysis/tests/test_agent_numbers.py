@@ -146,7 +146,7 @@ def test_the_fixed_order_driver_never_alerts():
 
 def test_a_confirmed_change_beats_a_concern_and_both_are_published():
     async def scenario():
-        rig = CallRig(corners=(0.11, 0.09))
+        rig = CallRig(corners=(0.11, 0.09), required_tasks=("smile",))  # v12: no arms to wait for: the same-task repeat
         await rig.greet()
         assert await rig.handlers.execute("alert_family", {"reason": "other", "note": "n"}) == {"sent": True}
         await rig.run_tool("run_task", {"task": "smile"})

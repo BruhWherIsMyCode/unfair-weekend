@@ -58,8 +58,12 @@ def render_family_text(summary: Dict[str, Any], name: str) -> str:
     """A stand-in for Agent 2's approved templates, used by the fake and the demo only."""
     status = summary.get("status")
     if status == "change_noticed":
-        confirmed = [s for s in summary["signs"] if s["confirmed"]]
-        noun, verb = _THING[confirmed[0]["sign"]]
+        things = [_THING[s["sign"]] for s in summary["signs"] if s["confirmed"]]
+        if len(things) == 1:
+            noun, verb = things[0]
+        else:  # v12: the face and an arm can confirm each other ("Ona's smile and arm look different ...")
+            noun = " and ".join(n for n, _ in things)
+            verb = "look" if all(v == "looks" for _, v in things) else "seem"
         return "%s's %s %s different from her usual. Call her now. If she seems unwell, call 112." % (name, noun, verb)
     if status == "concern_raised":
         reason = (summary.get("concern") or {}).get("reason", "other")

@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 
 from analysis.session import limits
+from analysis.session.adapters import render_family_text
 from analysis.session.fallback import FixedOrderDriver, answer_value, next_step, parse_medicine, step_key
 from analysis.tests.agent_helpers import CallRig
 
@@ -211,6 +212,44 @@ def test_left_hand_outside_twice_is_confirmed_on_the_left():
         assert mid["phase"] == "mid_call" and mid["summary"]["status"] == "change_noticed"
         sign = next(s for s in mid["summary"]["signs"] if s["sign"] == "arm")
         assert sign["confirmed"] is True and sign["side"] == "left"
+
+    asyncio.run(scenario())
+
+
+def test_face_and_arm_outside_on_the_same_side_confirm_each_other_with_no_repeat():
+    # v12: corner height above her usual = her LEFT corner lower; with her left hand sinking that is one finding
+    async def scenario():
+        rig = CallRig(corners=(0.11,), sinks=({"left": 0.4},))
+        await rig.drive(FixedOrderDriver(rig.handlers).run())
+        assert len(rig.session.task_attempts["smile"]) == 1 and len(rig.session.task_attempts["arms"]) == 1
+        assert "repeat_smile" not in rig.adapter.said and "repeat_arms" not in rig.adapter.said
+        mid = rig.adapter.published[0]
+        assert mid["phase"] == "mid_call" and mid["summary"]["status"] == "change_noticed"
+        signs = {s["sign"]: s for s in mid["summary"]["signs"]}
+        assert signs["face"]["confirmed"] and signs["arm"]["confirmed"]
+        assert signs["face"]["side"] == signs["arm"]["side"] == "left"
+        assert render_family_text(mid["summary"], "Ona").startswith("Ona's smile and arm look different")
+
+    asyncio.run(scenario())
+
+
+def test_an_outside_face_alone_is_repeated_once_after_the_arms():
+    async def scenario():
+        rig = CallRig(corners=(0.11, 0.09))  # arms within her usual
+        await rig.drive(FixedOrderDriver(rig.handlers).run())
+        tasks = [line for line in rig.adapter.said if line in ("task_smile", "task_arms", "repeat_smile")]
+        assert tasks == ["task_smile", "task_arms", "repeat_smile"]  # the confirming repeat waits for the arms
+        assert rig.adapter.published[0]["summary"]["status"] == "change_noticed"
+
+    asyncio.run(scenario())
+
+
+def test_face_and_arm_on_different_sides_do_not_confirm_each_other():
+    async def scenario():
+        rig = CallRig(corners=(0.11, 0.01), sinks=({"right": 0.4}, {}))  # face: her left; arm: her right
+        await rig.drive(FixedOrderDriver(rig.handlers).run())
+        assert len(rig.session.task_attempts["smile"]) == 2 and len(rig.session.task_attempts["arms"]) == 2
+        assert [p["phase"] for p in rig.adapter.published] == ["final"]
 
     asyncio.run(scenario())
 

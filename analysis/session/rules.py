@@ -201,6 +201,63 @@ def evaluate_sign(records: Sequence[FinalRecord]) -> SignEvaluation:
                           last.baseline_ready)
 
 
+# v12 (owner, after the acted phone run): the face and an arm outside on the SAME side in one call confirm each
+# other, so neither task is repeated for confirmation (a repeat of the arms was the slowest part of the call).
+# A first outside face or arm reading waits for the other task before its own confirming repeat.
+CROSS_TASKS = ("smile", "arms")
+
+
+def cross_partner(task: str) -> Optional[str]:
+    """The task whose outside reading on the same side would confirm this one, or None."""
+    if task not in CROSS_TASKS:
+        return None
+    return CROSS_TASKS[1] if task == CROSS_TASKS[0] else CROSS_TASKS[0]
+
+
+def reading_side(task: str, reading: Dict[str, Any]) -> Optional[str]:
+    """The side (her left or right) an outside reading points to, or None.
+
+    Arms: the hand the reading names, and only when it sank more than usual (a hand held higher is no weakness).
+    Smile: corner_height is below_left - below_right, so above her usual means her LEFT mouth corner sits lower
+    than usual, below her usual her RIGHT corner."""
+    direction = reading_direction(reading)
+    if direction == 0:
+        return None
+    if task == "arms":
+        return reading.get("side") if direction > 0 else None
+    if task == "smile":
+        return "left" if direction > 0 else "right"
+    return None
+
+
+def cross_confirmation(records_by_task: Dict[str, Sequence[FinalRecord]]
+                       ) -> Optional[tuple]:
+    """(side, {task: reading}) when a usable face reading and a usable arm reading, each outside her ready usual,
+    point to the same side; otherwise None."""
+    sides: Dict[str, List[tuple]] = {}
+    for task in CROSS_TASKS:
+        usable = [r for r in records_by_task.get(task, ()) if r.usable and r.reading is not None and r.baseline_ready]
+        sides[task] = [(reading_side(task, r.reading), r.reading) for r in usable]
+    for side_a, reading_a in sides[CROSS_TASKS[0]]:
+        for side_b, reading_b in sides[CROSS_TASKS[1]]:
+            if side_a is not None and side_a == side_b:
+                return side_a, {CROSS_TASKS[0]: reading_a, CROSS_TASKS[1]: reading_b}
+    return None
+
+
+def evaluate_all(records_by_task: Dict[str, Sequence[FinalRecord]]) -> Dict[str, SignEvaluation]:
+    """evaluate_sign per task, then the cross-task rule: a same-side face and arm pair confirms both signs."""
+    evals = {task: evaluate_sign(records) for task, records in records_by_task.items()}
+    pair = cross_confirmation(records_by_task)
+    if pair is not None:
+        side, readings = pair
+        for task, reading in readings.items():
+            e = evals[task]
+            if not e.confirmed:
+                evals[task] = SignEvaluation([reading], True, side, e.latest_outside, e.baseline_ready)
+    return evals
+
+
 def session_status(evals: Dict[str, SignEvaluation], required_tasks: Sequence[str], concern: bool = False,
                    floor_on: bool = True) -> str:
     """confirmed change > concern_raised > incomplete (a required task unfinished) > learning (no baseline) > as_usual.

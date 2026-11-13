@@ -36,7 +36,7 @@ def test_a_whole_call_is_recorded_in_every_owner_3_table(env):
     assert count(path, "policy_definitions") == 1
     defs = rows(path, "SELECT task, metric_id, unit, required_resource, window_ms FROM task_definitions ORDER BY task")
     assert [d["task"] for d in defs] == ["arms", "smile"]  # the sentence stub has no metric: nothing to store
-    assert defs[0]["window_ms"] == 15000 and defs[1]["metric_id"] == "corner_height_v1"
+    assert defs[0]["window_ms"] == 20000 and defs[1]["metric_id"] == "corner_height_v1"
 
     session = rows(path, "SELECT * FROM call_sessions")[0]
     assert session["phase"] == "finished" and session["finished_at_ms"] >= session["started_at_ms"]

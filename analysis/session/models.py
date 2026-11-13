@@ -184,7 +184,7 @@ class TaskObservation:
         _check_id(self.attempt_id, "attempt_id")
         _req(self.task in TASKS, "task %r not in %s" % (self.task, TASKS))
         _req(_is_int(self.sequence) and self.sequence >= 0, "sequence must be an integer >= 0")
-        _req(_is_int(self.elapsed_ms) and 0 <= self.elapsed_ms <= 15000, "elapsed_ms must be 0..15000")
+        _req(_is_int(self.elapsed_ms) and 0 <= self.elapsed_ms <= 20000, "elapsed_ms must be 0..20000")
         _req(self.phase in PHASES, "phase %r not in %s" % (self.phase, PHASES))
         self.quality.validate(observation=True)
         for m in self.metrics:
@@ -385,7 +385,8 @@ class SummarySign:
         _req(isinstance(self.confirmed, bool), "confirmed must be a boolean")
         attempts = [a.to_dict() for a in self.attempts]
         if self.confirmed:
-            _req(len(attempts) >= 2, "a confirmed sign needs two attempts")
+            # v12: one attempt when the face and an arm confirmed each other on the same side (rules.evaluate_all)
+            _req(len(attempts) >= 1, "a confirmed sign needs an attempt")
             for a in attempts:
                 _req(a["outside"] is True and _is_num(a["usual_low"]) and _is_num(a["usual_high"]),
                      "a confirmed sign needs outside attempts with a numeric usual range")
@@ -429,6 +430,12 @@ class SessionResult:
             _req(isinstance(self.answers[k], str) and len(self.answers[k]) <= 2000, "answers.%s too long" % k)
         _req(len(self.signs) <= 3, "at most 3 signs")
         signs = [s.to_dict() for s in self.signs]
+        # v12: a sign confirmed from ONE attempt is only the face and an arm confirming each other on one side
+        single = [s for s in signs if s["confirmed"] and len(s["attempts"]) == 1]
+        if single:
+            _req(len(single) == 2 and {s["sign"] for s in single} == {"face", "arm"}
+                 and single[0]["side"] is not None and single[0]["side"] == single[1]["side"],
+                 "a confirmation from one attempt needs the face and an arm outside on the same side")
         _req(self.status in STATUSES, "status %r not in %s" % (self.status, STATUSES))
         if self.status == "change_noticed":
             _req(any(s["confirmed"] for s in signs), "change_noticed requires a confirmed sign")

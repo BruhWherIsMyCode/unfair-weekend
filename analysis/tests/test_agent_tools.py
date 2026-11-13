@@ -137,7 +137,7 @@ def test_setup_phone_is_played_before_the_first_video_task_and_not_again():
 
 def test_run_task_returns_plain_facts_only():
     async def scenario():
-        rig = CallRig(corners=(0.11, 0.09))  # both smile readings outside her usual
+        rig = CallRig(corners=(0.11, 0.09), required_tasks=("smile",))  # both smile readings outside her usual; v12: no arms to wait for
         await rig.greet()
         first = await rig.run_tool("run_task", {"task": "smile"})
         assert set(first) == FACT_KEYS
