@@ -34,6 +34,7 @@ final class CameraDebugTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Smile wide!"].waitForExistence(timeout: 5), "No smile cue.")
         snap("smile")
         XCTAssertTrue(app.staticTexts["Result"].waitForExistence(timeout: 40), "No result from the analysis.")
+        XCTAssertTrue(app.staticTexts["What the family would get"].waitForExistence(timeout: 5), "No verdict.")
         sleep(1)
         snap("result")
         XCTAssertTrue(app.staticTexts["Analysis events (newest first)"].exists || app.staticTexts["Latest frame"].exists
