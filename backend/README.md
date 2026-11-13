@@ -37,6 +37,14 @@ uv pip install -r analysis/requirements.txt   # or: pip install -r analysis/requ
 python -m analysis.get_models
 ```
 
+The backend owns native smile/arms reader cleanup through [native_tasks.py](checkin_backend/native_tasks.py).
+An interrupted attempt waits for its in-flight inference before closing MediaPipe, with cleanup on a worker
+thread. Repeated cancellation keeps the analyzer slot busy until cleanup finishes; a retry gets a fresh reader.
+Ten regression checks cover this lifecycle, late decoding, errors, retries and unchanged hand measurements.
+A synthetic-image smoke test with real MediaPipe models completed 24 cancellations and two fresh attempts,
+closing all 26 readers without inference/cleanup overlap. A live phone call still needs to be repeated.
+The separate SQLite recording warnings are tracked with Agent 3 in [issue #24](https://github.com/BruhWherIsMyCode/unfair-weekend/issues/24).
+
 Optional environment variables (all can stay empty; see `.env.example`). They are read for each call and checked before it starts; an invalid value ends the call with an `incomplete` family message.
 
 - `CALL_RUNNER`: `auto`, `analysis`, `fake` (stand-in tasks, never a reading), `scripted`.
