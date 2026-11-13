@@ -63,11 +63,16 @@ async def run_analysis_call(link: ClientLink, modules: str, database_path: str |
     ensure_analysis_path()
     from analysis.backend_entry import run_backend_call
 
+    # One writer for the shared database: when the call service's Store is on, Agent 3's recorder hands its jobs
+    # to the same writer thread (its calls row is then always committed before ours; summaries stay the Store's).
+    store = getattr(link, "store", None)
+    submit = store._submit if (database_path and store is not None and getattr(store, "enabled", False)) else None
+    chosen = None
     if modules == "fake":
         from .fake_tasks import fake_modules
 
-        return await run_backend_call(link, modules=fake_modules(), database_path=database_path)
-    return await run_backend_call(link, modules=None, database_path=database_path)
+        chosen = fake_modules()
+    return await run_backend_call(link, modules=chosen, database_path=database_path, submit=submit)
 
 
 class ScriptedSession:

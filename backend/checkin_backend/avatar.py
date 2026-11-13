@@ -4,17 +4,24 @@ import asyncio
 import base64
 import hashlib
 import json
+import math
 import os
+from asyncio import sleep
+from email.utils import parsedate_to_datetime
 from pathlib import Path
+from time import time
 from urllib.parse import urlsplit
 
 import httpx
 
-from .provider_io import PendingAssets, ProviderError, private_write, provider_bytes
+from .provider_io import PendingAssets, ProviderError, ProviderHTTPError, private_write, provider_bytes
 from .speech import check_pcm
 
 MAX_VIDEO_BYTES = 30 * 1024 * 1024
 DEFAULT_FACE_ID = "bf13113a-355a-4d97-8b90-4edccd1da7b2"
+MAX_DOWNLOAD_ATTEMPTS = 20
+DOWNLOAD_WAIT_TIMEOUT_S = 300.0
+MAX_ETA_WAIT_S = 60.0
 
 
 def mp4_header(data: bytes) -> bool:
@@ -22,21 +29,44 @@ def mp4_header(data: bytes) -> bool:
     return len(data) >= 16 and data[4:8] == b"ftyp" and int.from_bytes(data[:4], "big") >= 16
 
 
-def check_download_url(value: object) -> str:
+def check_download_url(value: object, *, cdn_redirect: bool = False) -> str:
     if not isinstance(value, str):
         raise ProviderError("Simli did not return an MP4 URL")
     try:
         url = urlsplit(value)
+        host = "simlimicrocdn.blob.core.windows.net" if cdn_redirect else "api.simli.ai"
+        prefixes = ("/mp4/",) if cdn_redirect else ("/static/mp4/", "/mp4/")
         permitted = (
-            url.scheme == "https" and url.hostname == "api.simli.ai"
+            url.scheme == "https" and url.hostname == host
             and url.port in (None, 443) and url.username is None and url.password is None
-            and not url.fragment and url.path.startswith(("/static/mp4/", "/mp4/"))
+            and not url.fragment and url.path.startswith(prefixes)
         )
     except ValueError:
         permitted = False
     if not permitted:
         raise ProviderError("Simli returned an unexpected MP4 location")
     return value
+
+
+def eta_wait(value: object) -> float:
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+        return 0.0
+    if isinstance(value, float) and not math.isfinite(value):
+        return 0.0
+    return min(value, MAX_ETA_WAIT_S - 1.0) + 1.0
+
+
+def retry_after_wait(value: str | None) -> float:
+    if value is None:
+        return 0.0
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            seconds = parsedate_to_datetime(value).timestamp() - time()
+        except (ValueError, TypeError, OverflowError):
+            return 0.0
+    return max(0.0, seconds) if math.isfinite(seconds) else 0.0
 
 
 class ClipGateway:
@@ -98,15 +128,48 @@ class ClipGateway:
         except (ValueError, UnicodeError):
             raise ProviderError("Simli returned an unexpected video response") from None
         url = check_download_url(result.get("mp4_url") if isinstance(result, dict) else None)
-        # Signed URL is used verbatim. Never send the account API key to a download URL.
-        data = await provider_bytes(
-            self._client, "GET", url, provider="Simli video", limit=MAX_VIDEO_BYTES, timeout_s=30,
-        )
+        # Simli returns before rendering finishes. Retrying GET must never repeat the paid POST.
+        data = await self._download(url, eta_wait(result.get("mp4_availablility_eta_seconds")))
         if not mp4_header(data):
             raise ProviderError("Simli did not return an MP4 container")
         path = self._path(audio)
         await asyncio.to_thread(private_write, path, data)
         return path
+
+    async def _download(self, url: str, initial_wait_s: float) -> bytes:
+        redirected = False
+        delay_s = 3.0
+
+        async def fetch() -> bytes:
+            # Preserve signed query parameters; downloads never receive the account API key.
+            return await provider_bytes(
+                self._client, "GET", url, provider="Simli video", limit=MAX_VIDEO_BYTES, timeout_s=30,
+            )
+
+        try:
+            async with asyncio.timeout(DOWNLOAD_WAIT_TIMEOUT_S):
+                if initial_wait_s:
+                    await sleep(initial_wait_s)
+                for attempt in range(MAX_DOWNLOAD_ATTEMPTS):
+                    try:
+                        try:
+                            return await fetch()
+                        except ProviderHTTPError as exc:
+                            if exc.status_code != 307 or redirected:
+                                raise
+                            url = check_download_url(exc.location, cdn_redirect=True)
+                            redirected = True
+                            return await fetch()
+                    except ProviderHTTPError as exc:
+                        if exc.status_code not in (404, 429):
+                            raise
+                        if attempt + 1 == MAX_DOWNLOAD_ATTEMPTS:
+                            break
+                        await sleep(max(delay_s, retry_after_wait(exc.retry_after)))
+                        delay_s = min(delay_s * 1.5, 15.0)
+        except TimeoutError:
+            raise ProviderError("Simli video did not become ready within the time limit") from None
+        raise ProviderError("Simli video did not become ready within the download attempt limit")
 
     async def aclose(self) -> None:
         await self._pending.aclose()

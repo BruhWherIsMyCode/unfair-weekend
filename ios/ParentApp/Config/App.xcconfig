@@ -1,0 +1,9 @@
+// Target build settings for the parent app. No team id here: it comes from
+// ios/ParentApp/Local.xcconfig, which is untracked. See Local.xcconfig.example.
+
+PARENT_BUNDLE_ID = com.unfairweekend.parentcall
+PRODUCT_BUNDLE_IDENTIFIER = $(PARENT_BUNDLE_ID)
+CODE_SIGN_STYLE = Automatic
+
+// Optional: a missing file is fine (Simulator builds).
+#include? "../Local.xcconfig"

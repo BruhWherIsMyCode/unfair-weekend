@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from .hub import DeviceHub
 from .people import Person
+from .store import NoStore, Store
 
 THINGS = {"face": ("smile", "looks"), "arm": ("arm", "looks"), "speech": ("speech", "sounds")}
 KINDS = ("as_usual", "change_noticed", "concern_raised", "learning", "incomplete", "no_answer")
@@ -77,8 +78,9 @@ def now_iso() -> str:
 
 
 class FamilyDelivery:
-    def __init__(self, hub: DeviceHub) -> None:
+    def __init__(self, hub: DeviceHub, store: Store | None = None) -> None:
         self._hub = hub
+        self._store = store if store is not None else NoStore()
         self._messages: dict[str, Message] = {}
         self._by_call: dict[str, str] = {}
         self._sent: dict[tuple[str, str], int] = {}
@@ -91,6 +93,7 @@ class FamilyDelivery:
         phase: str,
         signs: list[dict] | None = None,
         concern: dict | None = None,
+        summary: dict | None = None,
     ) -> Message:
         if kind not in KINDS:
             raise ValueError(f"Unknown message kind {kind}")
@@ -124,12 +127,10 @@ class FamilyDelivery:
         sent = self._sent.get((message.message_id, phase), 0)
         self._sent[(message.message_id, phase)] = sent + 1
         suffix = "" if sent == 0 else f"_{sent + 1}"  # a second mid-call publish must not reuse the first event ID
-        self._hub.send_many(
-            self._hub.families_of(person.family_id),
-            "message.new",
-            asdict(message),
-            event_id=f"{message.message_id}_{phase}{suffix}",
-        )
+        family_devices = self._hub.families_of(person.family_id)
+        self._hub.send_many(family_devices, "message.new", asdict(message),
+                            event_id=f"{message.message_id}_{phase}{suffix}")
+        self._store.record_message(call_id, person.family_id, asdict(message), phase, summary, family_devices)
         return message
 
     def for_family(self, family_id: str, people: list[Person]) -> list[Message]:

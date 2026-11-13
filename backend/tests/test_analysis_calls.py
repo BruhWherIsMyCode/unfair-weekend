@@ -164,9 +164,9 @@ async def test_a_learning_usual_gives_a_learning_message_and_collects_the_first_
 
 
 @pytest.mark.anyio
-async def test_a_database_path_without_a_calls_row_leaves_the_call_unchanged(monkeypatch, tmp_path):
-    """This branch has no Agent 2 writer, so the `calls` row of the answered call does not exist: Agent 3's recorder
-    switches itself off for the call (one log line) and the call, its message and her usual are as without a database."""
+async def test_with_a_database_path_the_call_is_recorded_through_the_call_service_store(monkeypatch, tmp_path):
+    """Since main has Agent 2's Store (PR #9/#17), the answered call has its `calls` row and Agent 3's recorder writes
+    through the same writer thread: the session, attempts and results are recorded, summaries stay the Store's (once)."""
     from contextlib import closing
     import sqlite3
 
@@ -184,10 +184,16 @@ async def test_a_database_path_without_a_calls_row_leaves_the_call_unchanged(mon
     assert status["reason"] == "completed" and status["summary"]["status"] == "as_usual"
     assert status["message"]["kind"] == "as_usual" and [m["phase"] for m in family] == ["final"]
     assert usual(data)["smile"]["sessions"] == 3 and usual(data)["arms"]["sessions"] == 3  # the JSON store still learns
-    with closing(sqlite3.connect(database)) as db:  # migrated at startup, nothing recorded: there was no calls row
-        assert db.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == 1
-        for table in ("call_sessions", "task_attempts", "task_results", "model_turns", "session_summaries"):
-            assert db.execute("SELECT count(*) FROM %s" % table).fetchone()[0] == 0
+    with closing(sqlite3.connect(database)) as db:
+        count = lambda table: db.execute("SELECT count(*) FROM %s" % table).fetchone()[0]  # noqa: E731
+        counts = {t: count(t) for t in ("calls", "call_sessions", "task_attempts", "task_results", "model_turns",
+                                         "session_summaries", "family_messages")}
+        print("recorded rows:", counts)
+        assert counts["calls"] == 1 and counts["call_sessions"] == 1
+        assert counts["task_attempts"] >= 2 and counts["task_results"] == counts["task_attempts"]
+        models = {r[0] for r in db.execute("SELECT DISTINCT model_id FROM model_turns")}
+        assert counts["model_turns"] >= 1 and models == {"fixed_order"}  # the fixed driver's steps, no model
+        assert counts["family_messages"] == 1 and counts["session_summaries"] == 1  # written once, by the Store
 
 
 @pytest.mark.anyio

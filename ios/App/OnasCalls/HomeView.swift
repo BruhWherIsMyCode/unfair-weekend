@@ -1,0 +1,255 @@
+import SwiftUI
+
+/// Design steps 3 (alert above Fedya) and 6 (declined), plus the "as usual" state.
+struct HomeView: View {
+    @Environment(DemoStore.self) private var store
+    @State private var showPanel = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                Spacer().frame(height: 24)
+                switch store.phase {
+                case .alert, .calling:
+                    fedyaGroup { AlertCard() } row: {
+                        FedyaRow(subtitle: String(localized: "Dad, last call \(Clock.time(store.alertTime))"))
+                    }
+                    everyoneElse(title: String(localized: "Everyone else"), includeFedya: false)
+                case .declined:
+                    fedyaGroup { DeclinedCard() } row: {
+                        FedyaRow(subtitle: String(localized: "Dad, you called at \(Clock.time(store.calledAt ?? .now))"))
+                    }
+                    everyoneElse(title: String(localized: "Everyone else"), includeFedya: false)
+                case .asUsual:
+                    everyoneElse(title: nil, includeFedya: true)
+                }
+            }
+            .padding(.bottom, 32)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .background(Palette.page)
+        .foregroundStyle(Palette.ink)
+        .sheet(isPresented: $showPanel) { DemoPanelView() }
+    }
+
+    private var header: some View {
+        TimelineView(.everyMinute) { ctx in
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: Clock.date(ctx.date))
+                    .font(.system(size: 15))
+                    .foregroundStyle(Palette.secondary)
+                Text("Family")
+                    .font(.system(size: 40, weight: .bold))
+                    .tracking(-1)
+                    // Hidden demo panel: hold the title for 2 seconds.
+                    .onLongPressGesture(minimumDuration: 2) {
+                        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                        showPanel = true
+                    }
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 44) // design: 44pt between the status bar and the date
+    }
+
+    /// Amber card on top, Fedya's white row under it, both outlined.
+    private func fedyaGroup<Card: View, Row: View>(@ViewBuilder card: () -> Card, @ViewBuilder row: () -> Row) -> some View {
+        VStack(spacing: 0) {
+            card()
+            Button(action: store.openAlert) {
+                row()
+                    .background(Color.white)
+                    .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 22, bottomTrailingRadius: 22))
+                    .overlay(UnevenRoundedRectangle(bottomLeadingRadius: 22, bottomTrailingRadius: 22)
+                        .strokeBorder(Palette.amberOutline, lineWidth: 1.5))
+            }
+            .buttonStyle(PressStyle())
+        }
+        .padding(.horizontal, 20)
+    }
+
+    @ViewBuilder
+    private func everyoneElse(title: String?, includeFedya: Bool) -> some View {
+        if let title {
+            Text(verbatim: title)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Palette.secondary)
+                .padding(EdgeInsets(top: 28, leading: 24, bottom: 10, trailing: 24))
+        }
+        VStack(spacing: 0) {
+            if includeFedya {
+                PersonRow(name: "Fedya", subtitle: String(localized: "Dad, last call \(store.usualTime)"),
+                          time: store.usualTime, avatarLabel: "Fedya", photo: LocalAssets.fedyaPhoto)
+                Rectangle().fill(Palette.divider).frame(height: 0.5)
+            }
+            PersonRow(name: "Ona", subtitle: String(localized: "Mum. “Going to the market.”"), time: "09:02")
+            Rectangle().fill(Palette.divider).frame(height: 0.5)
+            PersonRow(name: "Aldona", subtitle: String(localized: "Aunt. “Watching the news.”"), time: "09:15")
+        }
+        .padding(.leading, 20)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 22))
+        .padding(.horizontal, 20)
+    }
+}
+
+/// Step 3 amber card: "NOT HIS USUAL / Call Fedya now / Same on both tries / 10 second clip".
+private struct AlertCard: View {
+    @Environment(DemoStore.self) private var store
+
+    var body: some View {
+        Button(action: store.openAlert) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    NotUsualLabel()
+                    Spacer()
+                    Text(verbatim: Clock.time(store.alertTime))
+                        .font(.system(size: 15).monospacedDigit())
+                        .foregroundStyle(Palette.amberTime)
+                }
+                Text("Call Fedya now")
+                    .font(.system(size: 30, weight: .bold))
+                    .tracking(-0.7)
+                HStack(spacing: 14) {
+                    ClipThumbnail()
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Same on both tries").font(.system(size: 15, weight: .semibold))
+                        Text("10 second clip").font(.system(size: 13)).foregroundStyle(Palette.amberTime)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(Palette.amberLabel)
+                }
+                .padding(.top, 4)
+            }
+            .foregroundStyle(Palette.amberInk)
+            .padding(22)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Palette.amberCard)
+            .clipShape(UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28))
+            .overlay(UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28)
+                .strokeBorder(Palette.amberOutline, lineWidth: 1.5))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+    }
+}
+
+/// Step 6 card: "Declined at HH:MM / Call Fedya again / [Call Fedya]".
+private struct DeclinedCard: View {
+    @Environment(DemoStore.self) private var store
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                NotUsualLabel()
+                Spacer()
+                Text("Declined at \(Clock.time(store.declinedAt ?? .now))")
+                    .font(.system(size: 15))
+                    .foregroundStyle(Palette.amberTime)
+            }
+            Text("Call Fedya again")
+                .font(.system(size: 30, weight: .bold))
+                .tracking(-0.7)
+            Button(action: store.callFedya) {
+                HStack(spacing: 10) {
+                    PhoneGlyph().fill(.white).frame(width: 20, height: 20)
+                    Text("Call Fedya")
+                }
+                .font(.system(size: 19, weight: .semibold))
+                .tracking(-0.4)
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 56)
+                .background(Palette.green, in: RoundedRectangle(cornerRadius: 18))
+            }
+            .buttonStyle(PressStyle())
+            .padding(.top, 4)
+            Text("If he seems unwell, call 112.")
+                .font(.system(size: 15))
+                .frame(maxWidth: .infinity)
+        }
+        .foregroundStyle(Palette.amberInk)
+        .padding(22)
+        .background(Palette.amberCard)
+        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28))
+        .overlay(UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28)
+            .strokeBorder(Palette.amberOutline, lineWidth: 1.5))
+    }
+}
+
+/// Fedya's white row under the card (no status pill).
+private struct FedyaRow: View {
+    var subtitle: String
+    var body: some View {
+        HStack(spacing: 14) {
+            Avatar(size: 52, label: "Fedya", photo: LocalAssets.fedyaPhoto)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(verbatim: "Fedya").font(.system(size: 20, weight: .semibold)).tracking(-0.4)
+                Text(verbatim: subtitle).font(.system(size: 15)).foregroundStyle(Palette.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(Palette.ink)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .contentShape(Rectangle())
+    }
+}
+
+/// A row in "Everyone else". Not tappable.
+private struct PersonRow: View {
+    var name: String
+    var subtitle: String
+    var time: String
+    var avatarLabel = ""
+    var photo: UIImage? = nil
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Avatar(size: 52, label: avatarLabel, photo: photo)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(verbatim: name).font(.system(size: 20, weight: .semibold)).tracking(-0.4)
+                Text(verbatim: subtitle)
+                    .font(.system(size: 15))
+                    .foregroundStyle(Palette.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            Spacer(minLength: 0)
+            AsUsualBadge(time: time)
+        }
+        .padding(.vertical, 16)
+        .padding(.trailing, 20)
+    }
+}
+
+/// 112x64 clip thumbnail with a play button.
+private struct ClipThumbnail: View {
+    @State private var frame: UIImage?
+
+    var body: some View {
+        ZStack {
+            if let frame {
+                Image(uiImage: frame).resizable().scaledToFill()
+            } else {
+                Stripes(colors: Palette.thumbStripes, band: 6)
+            }
+            Circle()
+                .fill(Color(hex: 0x1F1B16, opacity: 0.72))
+                .frame(width: 30, height: 30)
+                .overlay(Image(systemName: "play.fill").font(.system(size: 11)).foregroundStyle(.white).offset(x: 1))
+        }
+        .frame(width: 112, height: 64)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .task { frame = await LocalAssets.clipThumbnail() }
+    }
+}
+
+/// Slight dim on press, no other styling.
+struct PressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.opacity(configuration.isPressed ? 0.75 : 1)
+    }
+}

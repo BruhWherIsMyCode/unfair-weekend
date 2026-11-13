@@ -16,6 +16,17 @@ class ProviderError(RuntimeError):
     """A message that contains no provider response body or credentials."""
 
 
+class ProviderHTTPError(ProviderError):
+    """Status/selected headers for internal retry decisions; the message stays redacted."""
+
+    def __init__(self, provider: str, status_code: int, *, retry_after: str | None = None,
+                 location: str | None = None) -> None:
+        super().__init__(f"{provider} returned HTTP {status_code}")
+        self.status_code = status_code
+        self.retry_after = retry_after
+        self.location = location
+
+
 async def provider_bytes(
     client: httpx.AsyncClient,
     method: str,
@@ -30,7 +41,11 @@ async def provider_bytes(
         async with asyncio.timeout(timeout_s):
             async with client.stream(method, url, **kwargs) as response:
                 if response.status_code != 200:
-                    raise ProviderError(f"{provider} returned HTTP {response.status_code}")
+                    raise ProviderHTTPError(
+                        provider, response.status_code,
+                        retry_after=response.headers.get("Retry-After"),
+                        location=response.headers.get("Location"),
+                    )
                 chunks = bytearray()
                 async for chunk in response.aiter_bytes():
                     if len(chunks) + len(chunk) > limit:

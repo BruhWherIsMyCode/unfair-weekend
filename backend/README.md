@@ -26,7 +26,7 @@ uv run --locked --extra dev pytest -q
 uv build --out-dir .cache/python-dist
 ```
 
-Tests exercise a complete HTTP/SSE call with mocked voice, transcripts and video transport, plus lifecycle, cache, cancellation, authentication and provider-error paths. Real provider generation and iPhone audio/video playback are untested in this worktree; provider credentials are not configured. No provider credits are used by the tests. The separate iOS family stage shell remains mocked.
+Tests exercise a complete HTTP/SSE call with mocked voice, transcripts and video transport, plus lifecycle, cache, cancellation, authentication and provider-error paths. The Simli readiness fix reproduces delayed 404/429 responses and the permitted CDN redirect, with bounded retries and cancellation. One real ElevenLabs/Simli greeting was generated, downloaded and decoded successfully; [VOICE_VIDEO.md](VOICE_VIDEO.md#verification-and-limits) records that trial and its limits. Real answer STT and iPhone audio/video playback remain untested by Agent 2. No provider credits are used by the automated tests. The separate iOS family stage shell remains mocked.
 
 ## Running with Agent 3's analysis
 
@@ -65,7 +65,23 @@ python3 -m storage --database .cache/checkin.sqlite3
 python3 -m unittest discover -s storage/tests -v
 ```
 
-Built here: migration tooling, schema constraints and synthetic storage tests. Runtime repositories, observation routes, CallSession, client analyzers, timers and notifications are not implemented by this change. The call service above has in-memory runtime state; the migration does not yet persist its records. [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) gives the transactions each writer must implement.
+Built here: migration tooling, schema constraints and synthetic storage tests. [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) gives the transactions each writer must implement. The call service writes its own tables (see "Call service persistence" below). Observation routes, CallSession storage, client analyzers, timers and recovery beyond closing open calls are not implemented.
+
+## Call service persistence
+
+`DATABASE_PATH` (default `.cache/checkin.sqlite3`, git-ignored; empty turns it off) is the SQLite file. At startup the app applies `storage/migrations`, closes calls and commands a previous process left open (`shutdown` / `cancelled`) and seeds the configured people. [store.py](checkin_backend/store.py) then records, on one writer thread so the event loop never waits on SQLite:
+
+- `families`, `persons`, `devices`: seeded people and registered phones.
+- `calls`: ring, answer and end, with wall-clock deadlines and the session label.
+- `call_events`: the journal of the ring, answer, every `command.execute` / `command.cancel`, every accepted client event and the end. Raw samples, audio and transcripts are not stored.
+- `client_commands`: each say/capture command from `sent` through `started` to `completed`, `failed` or `cancelled`.
+- `family_messages`, `notification_outbox`, `delivery_attempts`: one message per call with its SSE deliveries, plus the ring deliveries.
+- `session_summaries`: the summary that came with each published message. A family message must reference one. Agent 3's coordinator should take this table over.
+
+`GET /v1/families/{id}/messages` reads the stored feed, and `GET /v1/calls/{id}` falls back to the stored record (with `"stored": true`) for calls from an earlier process.
+
+Limits: delivery is write-behind (the SSE push happens before its outbox row commits). Task capture commands have `attempt_id` NULL until Agent 3's `task_attempts` exist. Wire command and client event IDs are only unique per call, so they are stored as `<call_id>.<wire_id>`. `tests/test_store.py` runs whole calls through Uvicorn into a temporary database and checks the rows, foreign keys and journal order, a restart that reads the same history, and recovery of a call left open by a crash.
+
 
 ## Simli + ElevenLabs greeting reference
 

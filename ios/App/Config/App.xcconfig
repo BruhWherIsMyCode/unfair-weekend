@@ -1,0 +1,12 @@
+// Target build settings for Ona's calls. No team id here: it comes from
+// ios/App/Local.xcconfig, which is untracked. See Local.xcconfig.example.
+
+ONAS_BUNDLE_ID = com.unfairweekend.onascalls
+ONAS_ENTITLEMENTS = Config/OnasCalls.entitlements
+
+PRODUCT_BUNDLE_IDENTIFIER = $(ONAS_BUNDLE_ID)
+CODE_SIGN_ENTITLEMENTS = $(ONAS_ENTITLEMENTS)
+CODE_SIGN_STYLE = Automatic
+
+// Optional: missing file is fine (Simulator builds, CI).
+#include? "../Local.xcconfig"

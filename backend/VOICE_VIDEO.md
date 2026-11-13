@@ -23,6 +23,8 @@ uv run --locked --env-file .env uvicorn checkin_backend.app:create_app --factory
 
 Omit `--video` to prepare voice alone. Repeating preparation reuses local assets. Changing the person name, script text, voice/model or face produces the corresponding new assets. Preparation stops at the first failure; it never reports silent demo audio as prepared speech. Use HTTPS for a deployed server. For a local phone test, both devices must be able to reach this computer on the same Wi-Fi or hotspot.
 
+Simli returns its MP4 URL before rendering finishes. Preparation waits for the reported `mp4_availablility_eta_seconds` plus one second (bounded at 60 seconds), then retries download-only 404/429 responses. Pauses increase from 3 seconds by a factor of 1.5 to 15 seconds; a longer `Retry-After` is respected. There are at most 20 download attempts within a five-minute wait/download budget, after the generation request. The generation POST is not repeated by these retries. One 307 redirect is accepted only to HTTPS on `simlimicrocdn.blob.core.windows.net` under `/mp4/`; later retries use that location. Downloads receive no account key. Only a bounded, container-checked MP4 is committed to the local cache. Failure or shutdown leaves no partial asset. This corrects [issue #15](https://github.com/BruhWherIsMyCode/unfair-weekend/issues/15).
+
 The existing parent app can use its current backend-address, demo-key and `p_demo` settings. Register the phone before starting a call. With `DEMO_KEY` exported in another terminal:
 
 ```bash
@@ -34,7 +36,7 @@ One process/worker only. The reused service's devices, connection state and fami
 
 ## iOS playback handoff
 
-**Voice works with the existing PR #9 PCM player. Video needs a client change by its owner.** The new field is a provisional extension for Agent 3 to publish; it does not replace the shared contract.
+**Voice works with the existing PR #9 PCM player.** Its owner reports video playback implemented on that PR in [issue #15](https://github.com/BruhWherIsMyCode/unfair-weekend/issues/15); the native changes are not part of this backend branch. The new field is a provisional extension for Agent 3 to publish; it does not replace the shared contract.
 
 An existing `command.execute` / `kind: say` gains `video_path` only when its exact audio has a prepared MP4:
 
@@ -67,8 +69,10 @@ Ordinary answer recordings are sent temporarily to ElevenLabs and are not writte
 
 ## Verification and limits
 
-Provider tests use mock HTTP responses and synthetic media containers. A real Uvicorn/SSE call test exercises voice download, prepared MP4 download/ranges, three answer uploads and returned transcripts, completion, expired assets and authentication. The synthetic MP4 is a transport fixture, not a playable video or a lip-sync test. Actual generation latency, voice quality, static-video account access and iPhone playback have not been verified in this worktree because provider credentials are not configured.
+Automated provider tests use mock HTTP responses and synthetic media containers. A real Uvicorn/SSE call test exercises voice download, prepared MP4 download/ranges, three answer uploads and returned transcripts, completion, expired assets and authentication. The synthetic MP4 is a transport fixture, not a playable video or a lip-sync test. Regression tests reproduce delayed 404s, 429/Retry-After, the permitted CDN redirect, rejected redirects, attempt/time bounds and shutdown during rendering waits.
 
-The existing Node live-avatar greeting experiment remains available, but this call path uses prepared clips. Simli's continuous-stream `speaking`/`silent` events have no per-line playback identity. Prepared media lets the client acknowledge its own player ending before the next microphone/camera step.
+The issue #15 fix was also checked against real ElevenLabs and Simli using existing local provider configuration: one 2.508-second English greeting produced a 287,000-byte MP4 in 7.95 seconds including voice generation and preparation. That request downloaded directly with HTTP 200 after the readiness wait. FFprobe identified H.264 768×768 at 25 fps and AAC 16 kHz mono, duration 2.64 seconds; FFmpeg decoded both streams without errors. These are observations from one trial, not a latency benchmark or an iPhone/lip-sync assessment. CDN/throttling paths are tested with mocks; live answer STT and iPhone playback remain unverified by Agent 2. Generated media and credentials remain ignored local files.
+
+The existing Node live-avatar greeting experiment remains available; this Python call path uses prepared clips. Both providers also support streaming: ElevenLabs has an [HTTP speech stream](https://elevenlabs.io/docs/api-reference/text-to-speech/stream), and Simli accepts audio over WebSocket and returns the live avatar's audio/video over [WebRTC](https://docs.simli.com/api-reference/simli-webrtc). Simli's static endpoint also returns an HLS URL. These are provider capabilities, not streaming implemented in our Python/iOS call path. Simli's continuous-stream `speaking`/`silent` events have no per-line playback identity. Prepared media lets the client acknowledge its own player ending before the next microphone/camera step.
 
 Provider references checked 13 Nov 2026: [ElevenLabs speech](https://elevenlabs.io/docs/api-reference/text-to-speech/convert), [ElevenLabs transcription](https://elevenlabs.io/docs/api-reference/speech-to-text/convert), [Simli static video](https://docs.simli.com/api-reference/generate-static-video), [Simli OpenAPI with MP4 response fields](https://api.simli.ai/openapi.yaml), [Simli streaming protocol](https://docs.simli.com/api-reference/simli-webrtc).

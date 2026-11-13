@@ -16,7 +16,8 @@ class Settings:
     ring_timeout_s: float = 30.0
     call_timeout_s: float = 180.0
     call_runner: str = "auto"
-    database_path: str | None = None  # the shared SQLite file (DATABASE_SCHEMA.md); None = database off
+    # SQLite file for durable call records (storage/migrations). None or "" keeps everything in memory.
+    database_path: str | None = None
 
     def __post_init__(self) -> None:
         if not self.demo_key or self.demo_key.isspace():
@@ -33,5 +34,5 @@ class Settings:
             ring_timeout_s=float(os.environ.get("RING_TIMEOUT_S", "30")),
             call_timeout_s=float(os.environ.get("CALL_TIMEOUT_S", "180")),
             call_runner=os.environ.get("CALL_RUNNER", "auto"),
-            database_path=os.environ.get("DATABASE_PATH") or None,
+            database_path=os.environ.get("DATABASE_PATH", ".cache/checkin.sqlite3"),
         )
