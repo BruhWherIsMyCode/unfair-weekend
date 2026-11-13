@@ -274,6 +274,30 @@ def test_one_lopsided_smile_tells_the_family_with_no_repeat():
         face = next(s for s in mid["summary"]["signs"] if s["sign"] == "face")
         assert face["confirmed"] is True and face["side"] == "left" and len(face["attempts"]) == 1
         assert rig.adapter.published[-1]["summary"]["status"] == "change_noticed"
+        # v12b: she hears at once that her family was told, with the 112 line, once
+        assert rig.adapter.own_said == [limits.ALERT_REASSURANCE]
+        assert "call 112" in limits.ALERT_REASSURANCE
+
+    asyncio.run(scenario())
+
+
+def test_an_agent_alert_is_also_told_to_her_once():
+    async def scenario():
+        rig = CallRig()
+        await rig.greet()
+        assert await rig.handlers.execute("alert_family", {"reason": "said_unwell", "note": "n"}) == {"sent": True}
+        assert rig.adapter.own_said == [limits.ALERT_REASSURANCE]
+        await rig.drive(FixedOrderDriver(rig.handlers).run())
+        assert rig.adapter.own_said == [limits.ALERT_REASSURANCE]  # once per call
+
+    asyncio.run(scenario())
+
+
+def test_a_calm_call_says_nothing_about_her_family():
+    async def scenario():
+        rig = CallRig()
+        await rig.drive(FixedOrderDriver(rig.handlers).run())
+        assert rig.adapter.own_said == []
 
     asyncio.run(scenario())
 

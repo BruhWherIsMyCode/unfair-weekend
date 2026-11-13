@@ -99,6 +99,7 @@ class CallSession:
         self.message_id: Optional[str] = None
         self.published: List[Dict[str, Any]] = []
         self._change_published = False
+        self._reassured = False  # v12b: she heard that her family was told (ALERT_REASSURANCE), once per call
 
         self._attempt_counter = 0
         self._refusal_counter = 0
@@ -717,6 +718,7 @@ class CallSession:
                 self._log("change_confirmed", attempt_id=attempt.attempt_id, task=attempt.task)
                 if await self._publish("mid_call"):
                     self._change_published = True
+                    await self._reassure()
             else:
                 self._log("floor_off_suppressed", attempt_id=attempt.attempt_id, task=attempt.task,
                           detail="the safety floor is off: the confirmed sign is kept but nothing is published")
@@ -738,7 +740,23 @@ class CallSession:
         if not self._concern_published:
             if await self._publish("mid_call"):
                 self._concern_published = True
+                await self._reassure()
         return True
+
+    async def _reassure(self) -> None:
+        """Her family was just told mid-call: tell her too, with the 112 line (limits.ALERT_REASSURANCE), once per
+        call. Needs the adapter's optional say_text; a failed playback is logged and never ends the call."""
+        say_text = getattr(self.adapter, "say_text", None)
+        if say_text is None or self.hung_up or self._reassured:
+            return
+        self._reassured = True
+        try:
+            await say_text(limits.ALERT_REASSURANCE)
+            self._log("reassured")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._log("reassure_failed", error=type(exc).__name__)
 
     def _last_finished(self) -> Optional[Attempt]:
         finished = [a for a in self.attempts.values() if a.is_terminal]

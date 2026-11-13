@@ -26,6 +26,10 @@ MAX_NOT_MEASURED_PER_TASK = 2
 # change and the family is told; no task is repeated to confirm. Only a try that measured nothing keeps its one
 # technical repeat. False restores the two-reading rule (the same task twice, or the face and an arm on one side).
 CONFIRM_FROM_ONE_READING = True
+# v12b (owner): when her family is told mid-call (a confirmed change or the agent's alert), she hears it at once from
+# the code, never from the model (which is not told about the alert). Spoken through say_text (live voice, no clip).
+ALERT_REASSURANCE = ("I've let your family know, so they can check on you. "
+                     "If you feel unwell at any time, call 112 straight away.")
 
 WATCHDOG_TICK_S = 0.1  # how often the session re-checks its watchdogs (through the clock)
 SAMPLE_QUEUE_MAX = 64  # bounded sample queue per attempt; a full queue drops the new sample and logs it
