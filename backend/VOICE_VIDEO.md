@@ -76,6 +76,10 @@ The backend calls Simli's `POST /compose/token` with the account key (`faceId`, 
 
 This is a provisional extension for Agent 3 to publish. It follows the simli-client 3.2.0 source, and the provider-side path has not been tested here (no key on the machine that built it). The Simli `SILENT` event is used as playback evidence in live mode, because the stream has no per-line player end. Mic recording during an active LiveKit session needs an iPhone check.
 
+## Family alert clip (provisional, 13 Nov)
+
+While a task runs, the backend keeps the parent phone's JPEG frames per attempt in memory (at most 100 per attempt). When a `change_noticed` message is published for a confirmed `face` or `arm` sign, the frames of every attempt at that task (`smile`, or tasks starting with `arm`) are joined into one clip on the delivery shelf, and the message's `clip_url` becomes `/v1/clips/{clip_id}`. The final summary of the same call keeps that URL. `GET /v1/clips/{clip_id}` (demo key) returns `{"clip_id", "format": "jpeg", "period_ms", "frames": [base64 JPEG…]}`, at most 160 frames. Clips live only in memory: never on disk or in the database. They expire 30 minutes after creation, and the link drops its frames when the call ends. Speech changes and concerns carry no clip. This changes the contract's "family clips deferred" (`clip_id: null`) and needs Agent 3 to publish it.
+
 ## Fallback and privacy
 
 Generated speech is PCM16 little-endian, 16 kHz, mono. Prepared audio and MP4s live in ignored `.cache/speech/` and `.cache/avatar/`, written atomically with file mode 0600. Cached voice/video continue working with provider keys removed. An uncached line without an ElevenLabs key is an explicit caption-only demo: `/answer` reports `voiced: false`; no answer transcript is invented. A provider error is reported as a failure, without its response body or credentials.
