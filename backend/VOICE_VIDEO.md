@@ -61,6 +61,21 @@ An existing `command.execute` / `kind: say` gains `video_path` only when its exa
 
 Audio and video routes require the demo header, belong to one call/command, and return 410 after command completion or call end. Provider keys and signed provider URLs are never sent to the phone. The current parent client ignores the additional video field and continues with PCM. iPhone playback, simultaneous camera/microphone capture and audio routing require a device check by the iOS owner.
 
+## Live avatar (provisional, 13 Nov)
+
+With `AVATAR_MODE=live` (the default) and `SIMLI_API_KEY` set, the parent phone asks for a Simli live session once the call is answered:
+
+```
+POST /v1/calls/{call_id}/avatar/live   (X-Demo-Key)
+200 {"session_token": "...", "ws_url": "wss://api.simli.ai/compose/webrtc/livekit"}
+503 {"code": "avatar_unavailable"}   live is off, the key is missing or Simli refused
+409 not answered yet, 410 call ended
+```
+
+The backend calls Simli's `POST /compose/token` with the account key (`faceId`, `handleSilence`, `maxSessionLength` = call timeout + 60 s, `maxIdleTime` 120 s, `pcm16`). The phone receives only the short-lived session token. It opens the WebSocket, joins the LiveKit room that Simli names, and for each `say` downloads the existing `audio_path` PCM and sends it over the socket. The avatar's own LiveKit audio is the voice, in sync with the lips. It sends `playback.completed` after Simli's `SPEAK` then `SILENT`. If no `SPEAK` arrives within 8 s, or the session breaks, that line and the rest of the call fall back to `video_path` and then PCM. The first line waits up to 10 s for the live connection, then plays as a clip. `AVATAR_MODE=clips` turns live off without rebuilding the app.
+
+This is a provisional extension for Agent 3 to publish. It follows the simli-client 3.2.0 source, and the provider-side path has not been tested here (no key on the machine that built it). The Simli `SILENT` event is used as playback evidence in live mode, because the stream has no per-line player end. Mic recording during an active LiveKit session needs an iPhone check.
+
 ## Fallback and privacy
 
 Generated speech is PCM16 little-endian, 16 kHz, mono. Prepared audio and MP4s live in ignored `.cache/speech/` and `.cache/avatar/`, written atomically with file mode 0600. Cached voice/video continue working with provider keys removed. An uncached line without an ElevenLabs key is an explicit caption-only demo: `/answer` reports `voiced: false`; no answer transcript is invented. A provider error is reported as a failure, without its response body or credentials.
