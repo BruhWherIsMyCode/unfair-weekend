@@ -30,7 +30,7 @@ targets:
     info:
       path: Config/Info.plist
       properties:
-        CFBundleDisplayName: "Ona's calls"
+        CFBundleDisplayName: "HeartLine"
         CFBundleDevelopmentRegion: en
         UILaunchScreen:
           UIColorName: LaunchBackground
@@ -39,7 +39,7 @@ targets:
           - UIInterfaceOrientationPortrait
         UIRequiresFullScreen: true
         UIApplicationSupportsIndirectInputEvents: true
-        NSLocalNetworkUsageDescription: "Ona's calls receives check-in alerts from the check-in service on this network."
+        NSLocalNetworkUsageDescription: "HeartLine receives check-in alerts from the check-in service on this network."
         NSAppTransportSecurity:
           # The demo backend runs on a laptop on the same network, over plain HTTP.
           NSAllowsLocalNetworking: true
