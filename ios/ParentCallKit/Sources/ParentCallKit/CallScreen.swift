@@ -207,7 +207,7 @@ public struct CallScreenReducer: Sendable {
         }
     }
 
-    static let defaultMs = ["smile": 5000, "arms": 12000, "sentence": 12000]
+    static let defaultMs = ["smile": 6000, "arms": 15000, "sentence": 12000]
 
     static func taskName(of lineId: String) -> String? {
         for prefix in ["task_", "repeat_"] where lineId.hasPrefix(prefix) {
