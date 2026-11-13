@@ -18,8 +18,8 @@ export function providerConfig(env = process.env) {
   return {
     simliKey: env.SIMLI_API_KEY?.trim() || env.SMILI_API_KEY?.trim() || '',
     elevenLabsKey: env.ELEVENLABS_API_KEY?.trim() || '',
-    faceId: env.SIMLI_FACE_ID?.trim() || 'bf13113a-355a-4d97-8b90-4edccd1da7b2',
-    voiceId: env.ELEVENLABS_VOICE_ID?.trim() || 'JBFqnCBsd6RMkjVDRZzb',
+    faceId: env.SIMLI_FACE_ID?.trim() || 'fa57b877-4b8a-4650-bc43-4d52ae795cdc',
+    voiceId: env.ELEVENLABS_VOICE_ID?.trim() || '4ytNm4ZbEC9VLwa0Yy78',
     modelId: env.ELEVENLABS_MODEL_ID?.trim() || 'eleven_flash_v2_5',
   };
 }

@@ -95,7 +95,7 @@ class SpeechGateway:
         self,
         *,
         api_key: str = "",
-        voice_id: str = "JBFqnCBsd6RMkjVDRZzb",
+        voice_id: str = "4ytNm4ZbEC9VLwa0Yy78",
         model_id: str = "eleven_flash_v2_5",
         stt_model_id: str = "scribe_v2",
         cache_dir: Path | None = None,
@@ -119,7 +119,7 @@ class SpeechGateway:
         cache = Path(__file__).resolve().parents[1] / ".cache" / "speech"
         return cls(
             api_key=os.environ.get("ELEVENLABS_API_KEY", ""),
-            voice_id=os.environ.get("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb"),
+            voice_id=os.environ.get("ELEVENLABS_VOICE_ID", "4ytNm4ZbEC9VLwa0Yy78"),
             model_id=os.environ.get("ELEVENLABS_MODEL_ID", "eleven_flash_v2_5"),
             stt_model_id=os.environ.get("ELEVENLABS_STT_MODEL_ID", "scribe_v2"),
             cache_dir=cache,
