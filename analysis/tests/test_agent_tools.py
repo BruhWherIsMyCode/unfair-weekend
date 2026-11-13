@@ -40,6 +40,7 @@ def test_say_accepts_only_greet_and_setup_phone_and_setup_only_once():
         await rig.greet()
         assert (await h.execute("say", {"line_id": "bye"}))["error"].startswith("invalid input")
         assert (await h.execute("say", {"line_id": "task_smile"}))["error"].startswith("invalid input")
+        h.recorded = {q: True for q in h.recorded}  # v12b: the set-up line only after the questions
         assert "error" not in await h.execute("say", {"line_id": "setup_phone"})
         assert not_allowed(await h.execute("say", {"line_id": "setup_phone"}))
         assert rig.adapter.said == ["greet", "setup_phone"]

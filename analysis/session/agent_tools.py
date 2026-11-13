@@ -434,7 +434,12 @@ class ToolHandlers:
         if not self.greeted:
             return "play the greeting first: say(\"greet\")"
         if name == "say":  # setup_phone
-            return "the set-up line was already played" if self.setup_played else None
+            if self.setup_played:
+                return "the set-up line was already played"
+            if not all(self.recorded.values()):
+                # v12b: played before the questions it cost the call ~10 s; run_task plays it before the first check
+                return "the set-up line comes right before the first check: run_task() plays it, ask the questions first"
+            return None
         if name == "ask":
             q = args["question_id"]
             if self.asks[q] >= limits.MAX_ASKS_PER_QUESTION:

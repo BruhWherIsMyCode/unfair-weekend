@@ -456,3 +456,15 @@ def test_say_own_never_asks_a_question():
         assert "error" not in await rig.handlers.execute("say_own", {"text": "Good, thank you, Ona."})
 
     asyncio.run(scenario())
+
+
+def test_the_set_up_line_is_refused_before_the_questions():
+    # acted phone run: the agent played setup_phone before the questions and the call lost ~10 s
+    async def scenario():
+        rig = CallRig()
+        await rig.greet()
+        refused = await rig.handlers.execute("say", {"line_id": "setup_phone"})
+        assert "right before the first check" in refused.get("error", "")
+        assert "setup_phone" not in rig.adapter.said
+
+    asyncio.run(scenario())
