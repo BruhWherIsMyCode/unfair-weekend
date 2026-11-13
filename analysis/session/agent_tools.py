@@ -317,15 +317,35 @@ class ToolHandlers:
             return {"error": "call ended"}
         problem = self.validate(name, args)
         if problem is not None:
-            return {"error": "invalid input: %s" % problem}
+            out = {"error": "invalid input: %s" % problem}
+            self._rec("tool_rejected", name, args, out)
+            return out
         reason = self.refusal(name, args)
         if reason is not None:
-            return {"error": "not allowed: %s" % reason, "allowed": self.allowed_now()}
+            out = {"error": "not allowed: %s" % reason, "allowed": self.allowed_now()}
+            self._rec("tool_rejected", name, args, out)
+            return out
+        self._rec("tool_started", name, args)
         try:
-            return await getattr(self, "_do_" + name)(args)
+            out = await getattr(self, "_do_" + name)(args)
         except Exception as exc:  # a failing step must not take the driver down
             self.session.note("tool_error", tool=name, error=type(exc).__name__)
-            return {"error": "internal error: the step was not completed"}
+            out = {"error": "internal error: the step was not completed"}
+        except BaseException:  # cancelled with the call: the tool row must not stay running
+            self._rec("tool_finished", {"error": "call ended"})
+            raise
+        self._rec("tool_finished", out)
+        return out
+
+    def _rec(self, hook: str, *args: Any) -> None:
+        """One recorder hook (the session's optional database recorder). Never raises."""
+        recorder = getattr(self.session, "recorder", None)
+        if recorder is None:
+            return
+        try:
+            getattr(recorder, hook)(*args)
+        except Exception:
+            pass
 
     async def _play(self, line_id: str) -> bool:
         try:
@@ -348,19 +368,25 @@ class ToolHandlers:
         q = args["question_id"]
         self.asks[q] += 1
         text: Optional[str] = None
+        available = False  # the question was played and listening worked (else the answer is "unavailable")
         if await self._play(q):
             if self.session.hung_up:
+                self._rec("answer_heard", q, "interrupted", None)
                 return {"error": "call ended"}
             try:
                 text = await self.adapter.listen(q, limits.LISTEN_TIMEOUT_S)
+                available = True
             except Exception as exc:
                 self.session.note("listen_failed", question=q, error=type(exc).__name__)
         if self.session.hung_up:
+            self._rec("answer_heard", q, "interrupted", None)
             return {"error": "call ended"}
         heard = isinstance(text, str) and text.strip() != ""
         if heard:
             self.heard[q] = True
             self.transcripts[q] = text.strip()
+        self._rec("answer_heard", q, "heard" if heard else ("no_speech" if available else "unavailable"),
+                  self.transcripts[q] if heard else None)
         return {"question_id": q, "heard": heard,
                 "transcript": self.transcripts[q][:limits.TRANSCRIPT_TO_CLAUDE_CHARS] if heard else ""}
 

@@ -67,8 +67,11 @@ def _loggable(name: Any, args: Any) -> Dict[str, Any]:
 class ClaudeAgent:
     def __init__(self, session: Any, handlers: Any, client: Any, clock: Any = None,
                  prompt_path: Optional[Path] = None, unavailable_reason: Optional[str] = None,
-                 max_turns: int = limits.CLAUDE_MAX_TURNS, timeout_s: float = limits.CLAUDE_TIMEOUT_S) -> None:
+                 max_turns: int = limits.CLAUDE_MAX_TURNS, timeout_s: float = limits.CLAUDE_TIMEOUT_S,
+                 recorder: Any = None) -> None:
         self.session = session
+        # Optional database recorder: defaults to the session's. None = no recording. Hooks never raise.
+        self.recorder = recorder if recorder is not None else getattr(session, "recorder", None)
         self.handlers = handlers
         self.client = client  # None when it could not be built
         self.clock = clock or session.clock
@@ -100,31 +103,41 @@ class ClaudeAgent:
             self.turns += 1
             version = self.session.event_version
             started = self.clock.now()
+            self._rec("turn_started")
             try:
                 response = await self._request(system, messages, tools)
             except _RequestTimeout:
+                self._record_turn("failed", messages, error_code="request_timeout")
                 await self._fallback("request_timeout")
                 return
             except Exception as exc:
+                self._record_turn("failed", messages, error_code="request_error_%s" % type(exc).__name__)
                 await self._fallback("request_error_%s" % type(exc).__name__)
                 return
             self.session.note("agent_request", turn=self.turns, latency_s=round(self.clock.now() - started, 3))
             if self.handlers.ended:  # hang-up during the request: stop, no further request
+                self._record_turn("cancelled", messages, error_code="call_ended")
                 return
             parsed = self._parse(response)
             if parsed is None:
+                self._record_turn("failed", messages, error_code="malformed_response")
                 await self._fallback("malformed_response")
                 return
             content, uses = parsed
+            stop_reason = response.get("stop_reason") if isinstance(response, dict) else None
             if not uses:
+                self._record_turn("completed", messages, content, stop_reason)
                 await self._fallback("no_tool_use")
                 return
+            stale = self.session.event_version != version
+            self._record_turn("stale" if stale else "completed", messages, content, stop_reason,
+                              first=None if stale else uses[0])
             messages.append({"role": "assistant", "content": content})
 
             first = uses[0]
             name, args = first["name"], first["raw_input"]
             fallback_reason: Optional[str] = None
-            if self.session.event_version != version:
+            if stale:
                 self.session.note("agent_stale", turn=self.turns, tool=name)
                 payload: Dict[str, Any] = {"stale": True, "state": self.handlers.plain_state()}
             else:
@@ -133,6 +146,7 @@ class ClaudeAgent:
                     schema_streak += 1
                     self.session.note("agent_refused", turn=self.turns, tool=name, reason="invalid input: %s" % problem)
                     payload = {"error": "invalid input: %s" % problem}
+                    self._rec("tool_rejected", name, args, payload)
                     if schema_streak >= 2:
                         fallback_reason = "bad_tool_input_twice"
                 else:
@@ -158,6 +172,36 @@ class ClaudeAgent:
                 return
             if self.handlers.ended:
                 return
+
+    # ---- recording (optional; never raises) -------------------------------------------------------------
+
+    def _rec(self, hook: str, *args: Any, **kwargs: Any) -> None:
+        if self.recorder is None:
+            return
+        try:
+            getattr(self.recorder, hook)(*args, **kwargs)
+        except Exception:
+            pass
+
+    def _record_turn(self, state: str, messages: List[Dict[str, Any]], content: Optional[List[Dict[str, Any]]] = None,
+                     stop_reason: Optional[str] = None, error_code: Optional[str] = None,
+                     first: Optional[Dict[str, Any]] = None) -> None:
+        """One finished model request for the database: the output with free text left out (`_loggable`)."""
+        if self.recorder is None:
+            return
+        blocks: Optional[List[Dict[str, Any]]] = None
+        if content is not None:
+            blocks = []
+            for block in content:
+                if block.get("type") == "tool_use":
+                    blocks.append({"type": "tool_use", "id": block["id"], "name": block["name"],
+                                   "input": _loggable(block["name"], block.get("input"))})
+                elif block.get("type") == "text":
+                    blocks.append({"type": "text", "text": str(block.get("text", ""))[:300]})
+        model_id = getattr(self.client, "model", None) or ("fake-claude" if self.client is not None else "none")
+        self._rec("model_turn", state=state, messages=messages, content=blocks, stop_reason=stop_reason,
+                  error_code=error_code, model_id=str(model_id),
+                  tool_use={"id": first["id"], "name": first["name"]} if first is not None else None)
 
     # ---- pieces -----------------------------------------------------------------------------------------
 

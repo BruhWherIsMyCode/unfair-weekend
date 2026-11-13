@@ -49,8 +49,11 @@ class CallSession:
                  baselines: Optional[Dict[str, Dict[str, Any]]] = None, clock: Any = None, label: str = "live",
                  required_tasks: Sequence[str] = limits.REQUIRED_TASKS,
                  initial_resources: Optional[Dict[str, str]] = None,
-                 safety_floor: bool = limits.SAFETY_FLOOR_DEFAULT) -> None:
+                 safety_floor: bool = limits.SAFETY_FLOOR_DEFAULT, recorder: Any = None) -> None:
         self.call_id = call_id
+        # Optional database recorder (analysis/storage). None = exactly the behaviour without a database. Its hooks
+        # are fire-and-forget; `_rec` makes sure nothing it does can reach the call.
+        self.recorder = recorder
         self.person_id = person_id
         self.person_name = person_name
         self.adapter = adapter
@@ -109,6 +112,16 @@ class CallSession:
         entry.update(fields)
         self.log.append(entry)
 
+    def _rec(self, hook: str, *args: Any) -> None:
+        """Call one recorder hook, if there is a recorder. Never raises."""
+        recorder = self.recorder
+        if recorder is None:
+            return
+        try:
+            getattr(recorder, hook)(*args)
+        except Exception:  # recording must never reach the call
+            pass
+
     # ---- small helpers --------------------------------------------------------------------------
 
     def _baseline_dict(self, task: str) -> Dict[str, Any]:
@@ -155,6 +168,8 @@ class CallSession:
         elif question_id in ("feeling", "unusual"):
             self.answers[question_id] = str(value)[:2000]
         self._log("answer_recorded", question=question_id)
+        if question_id in self.answers:
+            self._rec("answer_selected", self, question_id, self.answers[question_id])
 
     # ---- events from the client / call service (synchronous: state first, then wake) -----------------
 
@@ -177,6 +192,7 @@ class CallSession:
         self.resources[ev.resource] = rules.ResourceInfo(ev.state, ev.reason, ev.event_id)
         self.event_version += 1
         self._log("resource_changed", resource=ev.resource, state=ev.state, reason=ev.reason, event_id=ev.event_id)
+        self._rec("resource_event", ev, self)
         if ev.state == "available":
             self._resource_back[ev.resource].set()
             return "applied"
@@ -210,6 +226,7 @@ class CallSession:
             return "ignored"
         attempt.mark_capture_started(self.clock.now())
         self._log("capture_started", attempt_id=attempt_id)
+        self._rec("attempt_state", attempt)
         self._wake.set()
         return "accepted"
 
@@ -241,6 +258,7 @@ class CallSession:
         attempt, rt = self._active, self._rt
         if attempt is not None and attempt.is_active:
             attempt.begin_stop(self.clock.now(), "cancelled", "call_ended")
+            self._rec("attempt_state", attempt)
         if rt is not None:
             rt.cancel_event.set()
             rt.cancel_ack.set()
@@ -263,6 +281,7 @@ class CallSession:
         if status != ACCEPTED:
             self._log("observation_ignored", reason=status, attempt_id=obs.attempt_id, sequence=obs.sequence)
             return status
+        self._rec("observation", attempt, obs)
         if not self.hung_up:
             self._spawn(self._send_progress(attempt, obs))
         self._wake.set()
@@ -331,6 +350,7 @@ class CallSession:
         rt = _Runtime(attempt)
         self._active, self._rt = attempt, rt
         self._log("attempt_created", attempt_id=attempt.attempt_id, task=task, line=attempt.line_id)
+        self._rec("attempt_created", attempt, self)
         self._wake.set()
         ticker = asyncio.ensure_future(self._ticker())
         rt.driver = asyncio.ensure_future(self._drive(attempt, rt))
@@ -405,6 +425,7 @@ class CallSession:
                 self._on_sample(attempt, rt, sample)
             if attempt.close_input(self.clock.now()):
                 self._log("input_closed", attempt_id=attempt.attempt_id, samples=attempt.samples_received)
+                self._rec("attempt_state", attempt)
                 await rt.queue.put(_END)
                 self._wake.set()
         except asyncio.CancelledError:
@@ -425,6 +446,7 @@ class CallSession:
         if status != ACCEPTED:
             self._log("sample_ignored", attempt_id=attempt.attempt_id, sequence=sequence, reason=status)
             return
+        self._rec("attempt_state", attempt)  # the first sample can start the capture; the recorder ignores repeats
         try:
             rt.queue.put_nowait(sample)
         except asyncio.QueueFull:
@@ -512,6 +534,7 @@ class CallSession:
             self.event_version += 1  # a decision made before this interruption is stale
         self._log("attempt_stopping", attempt_id=attempt.attempt_id, stop_kind=kind, code=code, why=why,
                   source_event_id=source_event_id)
+        self._rec("attempt_state", attempt)
         if interrupt is not None and code in ("camera_unavailable", "microphone_unavailable") and recoverable:
             self._recovery_open.add(code.split("_")[0])
         if self._rt is not None and self._rt.attempt is attempt:
@@ -640,6 +663,13 @@ class CallSession:
         self.results.append(d)
         self._log("attempt_finished", attempt_id=attempt.attempt_id, outcome=result.outcome, state=terminal,
                   interruption=result.interruption.code if result.interruption else None)
+        if self.recorder is not None:
+            per_hand = getattr(self.modules.get(attempt.task), "attempt_values", None) if attempt.task == "arms" else None
+            try:
+                values = per_hand(attempt.attempt_id) if callable(per_hand) else None
+            except Exception:
+                values = None
+            self._rec("attempt_finished", attempt, d, self, values)
         if usable and not self._change_published and self._confirmed_any():
             if self.safety_floor:
                 self._log("change_confirmed", attempt_id=attempt.attempt_id, task=attempt.task)
@@ -662,6 +692,7 @@ class CallSession:
             note = note[:limits.ALERT_NOTE_MAX_CHARS]
         self.concern = {"raised_by": "agent", "reason": reason, "note": note}
         self._log("concern_raised", reason=reason, note_chars=len(note))
+        self._rec("context", self)
         if not self._concern_published:
             if await self._publish("mid_call"):
                 self._concern_published = True
@@ -754,6 +785,7 @@ class CallSession:
             self._log("message_id_changed", expected=self.message_id, got=mid)
         self.published.append({"phase": phase, "message_id": mid, "status": summary["status"]})
         self._log("published", phase=phase, message_id=mid, status=summary["status"])
+        self._rec("summary", phase, summary, self)
         return True
 
     async def finish(self) -> Dict[str, Any]:
