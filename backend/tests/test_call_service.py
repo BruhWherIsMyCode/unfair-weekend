@@ -94,7 +94,7 @@ async def test_scripted_call_end_to_end_over_http():
     assert status["message"]["kind"] == "incomplete"
     assert status["message"]["text"].endswith("If she seems unwell, call 112.")
     samples = [e for e in status["log"] if e["kind"] == "scripted_task"]
-    assert [e["samples"] for e in samples] == [25, 60, 48]
+    assert [e["samples"] for e in samples] == [25, 75, 48]  # arms window 15 s since v11
     assert family
 
 

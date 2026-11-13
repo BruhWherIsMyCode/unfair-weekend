@@ -13,8 +13,15 @@ from .people import Person
 from .store import NoStore, Store
 
 THINGS = {"face": ("smile", "looks"), "arm": ("arm", "looks"), "speech": ("speech", "sounds")}
-KINDS = ("as_usual", "change_noticed", "learning", "incomplete", "no_answer")
+KINDS = ("as_usual", "change_noticed", "concern_raised", "learning", "incomplete", "no_answer")
 HANDOFF = "If {she} seems unwell, call 112."
+CONCERN_REASONS = {
+    "said_unwell": "said {she} does not feel well",
+    "asked_for_help": "asked for help",
+    "confused_answers": "seemed confused in {her} answers",
+    "reading_far_outside": "one check was far from {her} usual",
+    "other": "something worried the assistant",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,9 +43,15 @@ def words(person: Person) -> dict[str, str]:
     return {"name": person.name, "she": "she", "her": "her", "her_obj": "her"}
 
 
-def render(kind: str, person: Person, signs: list[dict] | None = None) -> str:
+def render(kind: str, person: Person, signs: list[dict] | None = None, concern: dict | None = None) -> str:
     w = words(person)
     handoff = HANDOFF.format(**w)
+    if kind == "concern_raised":
+        reason = CONCERN_REASONS.get((concern or {}).get("reason"), CONCERN_REASONS["other"]).format(**w)
+        return (
+            f"{w['name']} said or showed something during today's check-in that needs a look ({reason}). "
+            f"Please call {w['her_obj']}. {handoff}"
+        )
     if kind == "change_noticed":
         confirmed = [s for s in signs or [] if s.get("confirmed") is True]
         if not confirmed:
@@ -70,9 +83,18 @@ class FamilyDelivery:
         self._store = store if store is not None else NoStore()
         self._messages: dict[str, Message] = {}
         self._by_call: dict[str, str] = {}
+        self._sent: dict[tuple[str, str], int] = {}
 
-    def publish(self, call_id: str, person: Person, kind: str, phase: str, signs: list[dict] | None = None,
-                summary: dict | None = None) -> Message:
+    def publish(
+        self,
+        call_id: str,
+        person: Person,
+        kind: str,
+        phase: str,
+        signs: list[dict] | None = None,
+        concern: dict | None = None,
+        summary: dict | None = None,
+    ) -> Message:
         if kind not in KINDS:
             raise ValueError(f"Unknown message kind {kind}")
         if phase not in ("mid_call", "final"):
@@ -80,12 +102,14 @@ class FamilyDelivery:
         message_id = self._by_call.get(call_id)
         previous = self._messages.get(message_id) if message_id else None
         keep_change = previous is not None and previous.kind == "change_noticed"
-        if keep_change:
+        # A concern is replaced only by a confirmed change, never by a calmer summary.
+        keep_concern = previous is not None and previous.kind == "concern_raised" and kind != "change_noticed"
+        if keep_change or keep_concern:
             # A confirmed change is never replaced by a calmer final summary.
-            kind = "change_noticed"
+            kind = previous.kind
             text = previous.text
         else:
-            text = render(kind, person, signs)
+            text = render(kind, person, signs, concern)
         stamp = now_iso()
         message = Message(
             message_id=message_id or f"msg_{uuid4().hex[:16]}",
@@ -100,8 +124,12 @@ class FamilyDelivery:
         )
         self._messages[message.message_id] = message
         self._by_call[call_id] = message.message_id
+        sent = self._sent.get((message.message_id, phase), 0)
+        self._sent[(message.message_id, phase)] = sent + 1
+        suffix = "" if sent == 0 else f"_{sent + 1}"  # a second mid-call publish must not reuse the first event ID
         family_devices = self._hub.families_of(person.family_id)
-        self._hub.send_many(family_devices, "message.new", asdict(message), event_id=f"{message.message_id}_{phase}")
+        self._hub.send_many(family_devices, "message.new", asdict(message),
+                            event_id=f"{message.message_id}_{phase}{suffix}")
         self._store.record_message(call_id, person.family_id, asdict(message), phase, summary, family_devices)
         return message
 

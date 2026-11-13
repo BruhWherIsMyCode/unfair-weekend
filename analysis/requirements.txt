@@ -1,0 +1,16 @@
+mediapipe>=0.10
+opencv-python>=4.8
+numpy>=1.24
+pytest>=7
+# v7 PC version (client and server programs talk over a websocket; imported only in analysis/pc/link.py).
+websockets>=12
+# Optional: only for the real Claude call driver (analysis/session/claude_client.py, imported lazily).
+# Without it the call uses the fixed-order driver. Not needed by any test.
+# anthropic
+# Optional: Claude through your subscription login (analysis/session/claude_sub_client.py, imported lazily).
+# Needs the `claude` CLI logged in to your account. Not needed by any test.
+# claude-agent-sdk
+# Optional: spoken lines in the PC client (--tts system). Without it the client shows text only.
+# pyttsx3
+# Optional (v8): the PC client's microphone and ElevenLabs line playback. Without it answers are typed.
+# sounddevice

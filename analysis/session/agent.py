@@ -1,0 +1,260 @@
+"""ClaudeAgent: Claude chooses the next step of the call through six tools; the code guards every step.
+
+One action per turn. The history is a proper Messages API history: every assistant tool_use gets exactly one
+user tool_result with the same id. The first user message is a short plain state.
+
+Stale decisions. CallSession.event_version counts resource changes, interruptions and hang-up. It is recorded
+before each request; when it moved by the time the answer arrives, the answer was decided on an old state: its
+tool_use is answered with {"stale": true, "state": ...} and NOT executed, then a new request is made. Hang-up
+stops the loop at once with no further request.
+
+Fixed-order fallback, for the REST of the call (never switched back): the client could not be built; a request
+failed or timed out; a response without any tool_use (or malformed); a tool call failing its schema twice in a
+row (unknown tool counts); three refused steps in a row; more than CLAUDE_MAX_TURNS requests.
+
+The agent never reads or changes readings, confirmation or the family message: those stay in CallSession code, so
+a confirmed change is published even if Claude fails right after. Every decision goes to session.log: kinds
+agent_request, agent_tool, agent_refused, agent_stale, agent_fallback. The API key and the system prompt are never
+logged; a free-text answer is never logged.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+from analysis.session import limits
+from analysis.session.fallback import FixedOrderDriver
+
+PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "agent_system.md"
+FIRST_MESSAGE = "Call connected. Nothing done yet."
+# The lines Claude can cause (directly or through a tool); the code plays all of them.
+CAUSABLE_LINES = ("greet", "q_medicine", "q_feeling", "q_unusual", "setup_phone", "task_smile", "task_arms",
+                  "task_sentence", "repeat_smile", "repeat_arms", "repeat_sentence", "swap_hands",
+                  "camera_unavailable", "microphone_unavailable", "bye")
+
+
+class _RequestTimeout(Exception):
+    pass
+
+
+def build_system_prompt(name: str, script: Dict[str, str], prompt_path: Optional[Path] = None) -> str:
+    """agent_system.md with its two placeholders filled by str.replace: {lines} then {name}."""
+    template = Path(prompt_path or PROMPT_PATH).read_text("utf-8")
+    lines = "\n".join('- %s: "%s"' % (line_id, script[line_id]) for line_id in CAUSABLE_LINES if line_id in script)
+    return template.replace("{lines}", lines).replace("{name}", name)
+
+
+def _loggable(name: Any, args: Any) -> Dict[str, Any]:
+    """The tool input without anything she said: a free-text answer is omitted."""
+    if not isinstance(args, dict):
+        return {}
+    out: Dict[str, Any] = {}
+    for key, value in args.items():
+        if name == "alert_family" and key == "note":
+            out[key] = "<omitted>"  # the note may repeat her words
+        elif name == "record_answer" and key == "value":
+            medicine = args.get("question_id") == "q_medicine" and value in ("yes", "no", "unclear")
+            out[key] = value if medicine else "<omitted>"
+        elif isinstance(value, (str, int, float, bool)) or value is None:
+            out[key] = value[:40] if isinstance(value, str) else value
+        else:
+            out[key] = "<omitted>"
+    return out
+
+
+class ClaudeAgent:
+    def __init__(self, session: Any, handlers: Any, client: Any, clock: Any = None,
+                 prompt_path: Optional[Path] = None, unavailable_reason: Optional[str] = None,
+                 max_turns: int = limits.CLAUDE_MAX_TURNS, timeout_s: float = limits.CLAUDE_TIMEOUT_S,
+                 recorder: Any = None) -> None:
+        self.session = session
+        # Optional database recorder: defaults to the session's. None = no recording. Hooks never raise.
+        self.recorder = recorder if recorder is not None else getattr(session, "recorder", None)
+        self.handlers = handlers
+        self.client = client  # None when it could not be built
+        self.clock = clock or session.clock
+        self.prompt_path = prompt_path
+        self.unavailable_reason = unavailable_reason
+        self.max_turns = max_turns
+        self.timeout_s = timeout_s
+        self.turns = 0
+        self.using_fallback = False
+
+    # ---- the loop ---------------------------------------------------------------------------------------
+
+    async def run(self) -> None:
+        """Drive the call until it is finished or the client hung up. Never raises for a model failure."""
+        if self.client is None:
+            await self._fallback(self.unavailable_reason or "no_client")
+            return
+        system = build_system_prompt(self.session.person_name, self.handlers.script, self.prompt_path)
+        tools = self.handlers.tool_definitions()
+        messages: List[Dict[str, Any]] = [{"role": "user", "content": FIRST_MESSAGE}]
+        schema_streak = 0
+        refused_streak = 0
+        while True:
+            if self.handlers.ended:
+                return
+            if self.turns >= self.max_turns:
+                await self._fallback("turn_cap")
+                return
+            self.turns += 1
+            version = self.session.event_version
+            started = self.clock.now()
+            self._rec("turn_started")
+            try:
+                response = await self._request(system, messages, tools)
+            except _RequestTimeout:
+                self._record_turn("failed", messages, error_code="request_timeout")
+                await self._fallback("request_timeout")
+                return
+            except Exception as exc:
+                self._record_turn("failed", messages, error_code="request_error_%s" % type(exc).__name__)
+                await self._fallback("request_error_%s" % type(exc).__name__)
+                return
+            self.session.note("agent_request", turn=self.turns, latency_s=round(self.clock.now() - started, 3))
+            if self.handlers.ended:  # hang-up during the request: stop, no further request
+                self._record_turn("cancelled", messages, error_code="call_ended")
+                return
+            parsed = self._parse(response)
+            if parsed is None:
+                self._record_turn("failed", messages, error_code="malformed_response")
+                await self._fallback("malformed_response")
+                return
+            content, uses = parsed
+            stop_reason = response.get("stop_reason") if isinstance(response, dict) else None
+            if not uses:
+                self._record_turn("completed", messages, content, stop_reason)
+                await self._fallback("no_tool_use")
+                return
+            stale = self.session.event_version != version
+            self._record_turn("stale" if stale else "completed", messages, content, stop_reason,
+                              first=None if stale else uses[0])
+            messages.append({"role": "assistant", "content": content})
+
+            first = uses[0]
+            name, args = first["name"], first["raw_input"]
+            fallback_reason: Optional[str] = None
+            if stale:
+                self.session.note("agent_stale", turn=self.turns, tool=name)
+                payload: Dict[str, Any] = {"stale": True, "state": self.handlers.plain_state()}
+            else:
+                problem = self.handlers.validate(name, args)
+                if problem is not None:
+                    schema_streak += 1
+                    self.session.note("agent_refused", turn=self.turns, tool=name, reason="invalid input: %s" % problem)
+                    payload = {"error": "invalid input: %s" % problem}
+                    self._rec("tool_rejected", name, args, payload)
+                    if schema_streak >= 2:
+                        fallback_reason = "bad_tool_input_twice"
+                else:
+                    schema_streak = 0
+                    self.session.note("agent_tool", turn=self.turns, name=name, input=_loggable(name, args))
+                    payload = await self.handlers.execute(name, args)
+                    if self.session.hung_up or payload.get("error") == "call ended":
+                        return
+                    error = payload.get("error")
+                    if error is not None:
+                        refused_streak += 1
+                        self.session.note("agent_refused", turn=self.turns, tool=name, reason=str(error)[:120])
+                        if refused_streak >= 3:
+                            fallback_reason = "refused_3x"
+                    else:
+                        refused_streak = 0
+            results = [self._tool_result(first["id"], payload)]
+            for other in uses[1:]:
+                results.append(self._tool_result(other["id"], {"error": "one action at a time, not executed"}))
+            messages.append({"role": "user", "content": results})
+            if fallback_reason is not None:
+                await self._fallback(fallback_reason)
+                return
+            if self.handlers.ended:
+                return
+
+    # ---- recording (optional; never raises) -------------------------------------------------------------
+
+    def _rec(self, hook: str, *args: Any, **kwargs: Any) -> None:
+        if self.recorder is None:
+            return
+        try:
+            getattr(self.recorder, hook)(*args, **kwargs)
+        except Exception:
+            pass
+
+    def _record_turn(self, state: str, messages: List[Dict[str, Any]], content: Optional[List[Dict[str, Any]]] = None,
+                     stop_reason: Optional[str] = None, error_code: Optional[str] = None,
+                     first: Optional[Dict[str, Any]] = None) -> None:
+        """One finished model request for the database: the output with free text left out (`_loggable`)."""
+        if self.recorder is None:
+            return
+        blocks: Optional[List[Dict[str, Any]]] = None
+        if content is not None:
+            blocks = []
+            for block in content:
+                if block.get("type") == "tool_use":
+                    blocks.append({"type": "tool_use", "id": block["id"], "name": block["name"],
+                                   "input": _loggable(block["name"], block.get("input"))})
+                elif block.get("type") == "text":
+                    blocks.append({"type": "text", "text": str(block.get("text", ""))[:300]})
+        model_id = getattr(self.client, "model", None) or ("fake-claude" if self.client is not None else "none")
+        self._rec("model_turn", state=state, messages=messages, content=blocks, stop_reason=stop_reason,
+                  error_code=error_code, model_id=str(model_id),
+                  tool_use={"id": first["id"], "name": first["name"]} if first is not None else None)
+
+    # ---- pieces -----------------------------------------------------------------------------------------
+
+    async def _request(self, system: str, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]) -> Any:
+        """One model request with a timeout measured on the injected clock."""
+        req = asyncio.ensure_future(self.client.create(system, messages, tools))
+        sleeper = asyncio.ensure_future(self.clock.sleep(self.timeout_s))
+        try:
+            await asyncio.wait({req, sleeper}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            sleeper.cancel()
+            if not req.done():
+                req.cancel()
+            await asyncio.gather(sleeper, req, return_exceptions=True)
+        if req.cancelled():
+            raise _RequestTimeout()
+        return req.result()
+
+    @staticmethod
+    def _parse(response: Any) -> Optional[Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]]:
+        """(clean assistant content, tool_use list) or None for a malformed response."""
+        content = response.get("content") if isinstance(response, dict) else None
+        if not isinstance(content, list):
+            return None
+        clean: List[Dict[str, Any]] = []
+        uses: List[Dict[str, Any]] = []
+        for block in content:
+            if not isinstance(block, dict):
+                return None
+            kind = block.get("type")
+            if kind == "text":
+                text = block.get("text")
+                if isinstance(text, str) and text:
+                    clean.append({"type": "text", "text": text})
+            elif kind == "tool_use":
+                tool_id, name = block.get("id"), block.get("name")
+                if not isinstance(tool_id, str) or not tool_id or not isinstance(name, str):
+                    return None
+                raw = block.get("input")
+                clean.append({"type": "tool_use", "id": tool_id, "name": name,
+                              "input": raw if isinstance(raw, dict) else {}})
+                uses.append({"id": tool_id, "name": name, "raw_input": raw})
+        return clean, uses
+
+    @staticmethod
+    def _tool_result(tool_use_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        block: Dict[str, Any] = {"type": "tool_result", "tool_use_id": tool_use_id,
+                                 "content": json.dumps(payload, sort_keys=True)}
+        if "error" in payload:
+            block["is_error"] = True
+        return block
+
+    async def _fallback(self, reason: str) -> None:
+        self.using_fallback = True
+        self.session.note("agent_fallback", reason=reason, turn=self.turns)
+        await FixedOrderDriver(self.handlers).run()
