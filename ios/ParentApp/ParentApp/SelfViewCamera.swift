@@ -201,9 +201,9 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
         var rawHeight = 0
         var mirrored = false
         var angle: Double = 0
-        /// Landscape buffers, turned upright and mirrored: the one case checked on the phone.
+        /// Landscape buffers turned upright (by the one turn that matches their mirroring).
         var fixed = 0
-        /// Portrait buffers, sent as they came: not expected; if these appear, frames are not all alike.
+        /// Portrait buffers (the connection's rotation took): only un-mirrored if needed. Not seen on the iPhone yet.
         var asIs = 0
     }
 
@@ -219,19 +219,23 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
         let wanted = lock.withLock { capturing && now - lastEncode >= minEncodeInterval }
         guard wanted, let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         var image = CIImage(cvPixelBuffer: pixels)
-        // The frame output's connection keeps the front camera's default (landscape, mirrored): its rotation and
-        // mirroring settings did not take on the iPhone, and setting them again at capture start risked frames that
-        // differ between captures. So every frame is fixed here, one way: turn 90 degrees counter-clockwise, then
-        // mirror, which gives the un-mirrored upright picture the analysis expects (UW_MIRRORED off). Checked on an
-        // iPhone 18 Pro Max with the camera debug screen: clockwise gave her upside down, and unmirrored swapped hands.
+        // The analysis expects the upright, un-mirrored picture (UW_MIRRORED off). On the iPhone the frame connection
+        // ignores its 90-degree rotation, so buffers arrive landscape, and whether they are mirrored depends on the
+        // connection's mirroring (the camera default is mirrored). The turn that makes them upright depends on that,
+        // so it is chosen per frame from the connection that delivered it. Checked on an iPhone 18 Pro Max with the
+        // camera debug screen: un-mirrored buffers need counter-clockwise then a mirror (clockwise gave her upside
+        // down); mirrored buffers then need a plain clockwise turn (the counter-clockwise + mirror gave upside down).
         let landscape = image.extent.width > image.extent.height
+        let mirrored = connection.isVideoMirrored
         if landscape {
-            image = image.oriented(.left).oriented(.upMirrored)
+            image = mirrored ? image.oriented(.right) : image.oriented(.left).oriented(.upMirrored)
+        } else if mirrored {
+            image = image.oriented(.upMirrored)
         }
         lock.withLock {
             stats.rawWidth = CVPixelBufferGetWidth(pixels)
             stats.rawHeight = CVPixelBufferGetHeight(pixels)
-            stats.mirrored = connection.isVideoMirrored
+            stats.mirrored = mirrored
             stats.angle = connection.videoRotationAngle
             if landscape { stats.fixed += 1 } else { stats.asIs += 1 }
         }
