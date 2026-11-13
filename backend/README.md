@@ -1,6 +1,38 @@
-# Backend architecture, storage and greeting reference
+# Backend
 
 The [architecture decision](ARCHITECTURE_PLAN.md) places analyzers on the real parent client and keeps task policy, window timers, aggregation, baseline and final results in one Python backend. The [shared database guide](DATABASE_SCHEMA.md) and [initial SQLite migration](storage/migrations/0001_initial.sql) define persistence for the modules that will implement this flow. The old [OpenAPI 0.2 draft](proposals/README.md) is historical; its task sample-upload transport is superseded.
+
+## Python foundation
+
+Requires Python 3.12 or newer and [uv](https://docs.astral.sh/uv/). The local default is Python 3.12. From the repo root:
+
+```bash
+cd backend
+uv sync --locked --extra dev
+export DEMO_KEY='replace-with-your-local-demo-key'
+uv run --locked uvicorn checkin_backend.app:create_app --factory --host 127.0.0.1 --port 8000
+```
+
+In another terminal with the same `DEMO_KEY` exported:
+
+```bash
+curl --fail -H "X-Demo-Key: $DEMO_KEY" http://127.0.0.1:8000/v1/health
+```
+
+The response is `{"ok":true}`. A missing/incorrect key receives a 401 error. Missing `DEMO_KEY` prevents startup. Python reads exported environment variables; it does not automatically load `.env`. Provider credentials are not needed for this foundation.
+
+[CallService](checkin_backend/calls.py) is a local Python module, separate from Agent 3's conversation/measurement state. It creates call IDs, permits one active call per person, handles answer/decline/hang-up/connection loss, and resolves a terminal future once. Defaults are a 30-second ring timeout and a 180-second connected-call deadline, configurable with `RING_TIMEOUT_S` and `CALL_TIMEOUT_S`. Repeated answers do not extend the deadline. Shutdown ends active calls and joins their timers; cancelling a waiter does not cancel the shared result.
+
+Connection records are in memory for this process's lifetime; they are not persisted session history. Use one process/worker and call the service on its asyncio event loop. The app owns it at `app.state.calls` for later route/orchestrator integration.
+
+```bash
+uv run --locked --extra dev pytest -q
+uv build --out-dir .cache/python-dist
+```
+
+The tests cover app startup/shutdown, authentication, deadline/answer races, duplicate transitions, person isolation and cancelled waiters. The app uses FastAPI's [lifespan and TestClient context](https://fastapi.tiangolo.com/advanced/testing-events/) for resource cleanup checks. Tests do not contact providers or use people recordings.
+
+Built and locally tested: Python entrypoint, protected `/v1/health`, configuration and local connection lifecycle. Pending: registration/SSE and call HTTP routes, playback acknowledgments, Python provider adapters, observation ingress, Agent 3 integration, persistence wiring and family delivery. Revised client observation/start/stop schemas await canonical publication in [issue #10](https://github.com/BruhWherIsMyCode/unfair-weekend/issues/10); local records are not a replacement wire contract. The iOS stage shell remains mocked. This foundation does not yet demonstrate a joined call.
 
 ## Shared database
 
@@ -16,7 +48,7 @@ python3 -m storage --database .cache/checkin.sqlite3
 python3 -m unittest discover -s storage/tests -v
 ```
 
-Built here: migration tooling, schema constraints and synthetic storage tests. Runtime repositories, observation routes, CallSession, client analyzers, timers and notifications are not implemented by this change. The separate [Python foundation PR #8](https://github.com/BruhWherIsMyCode/unfair-weekend/pull/8) contains health/configuration and an in-memory CallService; this schema does not yet persist its state. [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) gives the transactions each writer must implement.
+Built here: migration tooling, schema constraints and synthetic storage tests. Runtime repositories, observation routes, CallSession, client analyzers, timers and notifications are not implemented by this change. The Python foundation above provides health/configuration and an in-memory CallService; the migration does not yet persist its records. [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) gives the transactions each writer must implement.
 
 ## Simli + ElevenLabs greeting reference
 

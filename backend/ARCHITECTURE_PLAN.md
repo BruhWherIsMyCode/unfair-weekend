@@ -4,7 +4,7 @@ Updated 13 Nov 2026 after the team discussion. **Decision:** the real parent cli
 
 This replaces the server-side JPEG/PCM analysis proposal and its version 0.2 transport. It does not restore the old Swift `CheckInCore` architecture: baseline, rules and conversation remain on the server. It does not assign real capture work to the current iOS stage shell.
 
-**Implementation status:** this change provides an executable [SQLite storage schema and guide](DATABASE_SCHEMA.md), migration tooling and synthetic constraint tests. It does not wire persistence into CallService or implement the network/runtime flow below. The Python entrypoint/local CallService foundation is in [PR #8](https://github.com/BruhWherIsMyCode/unfair-weekend/pull/8). The Node greeting reference has exercised real ElevenLabs TTS and Simli playback. Client capture/analyzers, observations ingress, CallSession, Claude tools, metric definitions, delivery and a joined call remain work to implement.
+**Implementation status:** this change provides an executable [SQLite storage schema and guide](DATABASE_SCHEMA.md), migration tooling and synthetic constraint tests. It does not wire persistence into CallService or implement the network/runtime flow below. The [Python foundation](README.md#python-foundation) implements protected health, configuration and the in-memory CallService lifecycle; it is merged into main. The Node greeting reference has exercised real ElevenLabs TTS and Simli playback. Client capture/analyzers, observations ingress, CallSession, Claude tools, metric definitions, delivery and a joined call remain work to implement.
 
 ## 1. Responsibilities and ownership
 

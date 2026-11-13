@@ -29,16 +29,15 @@ recordings, provider calls, seeded formulas or invented production thresholds.
 
 Not implemented here: application repositories, CallService persistence,
 CallSession, startup recovery, client endpoints, timers, outbox dispatch,
-task analyzers, metric formulas or end-to-end calls. The in-memory Python
-CallService foundation is a separate [PR #8](https://github.com/BruhWherIsMyCode/unfair-weekend/pull/8).
-This PR can be reviewed/merged independently because its tooling does not
-import that application. Writers must implement the transactions below before
-claiming persistence works in the running backend.
+task analyzers, metric formulas or end-to-end calls. The merged [Python foundation](README.md#python-foundation) provides an
+in-memory CallService. Schema tooling does not import that application or
+persist its records automatically. Writers must implement the transactions
+below before claiming persistence works in the running backend.
 
-The tooling is imported from the source checkout. When integrating the separate
-application package from PR #8, include `storage` and `storage/migrations/*.sql`
-in its package discovery/data; this standalone schema PR does not change that
-PR's packaging configuration.
+The tooling is imported from the source checkout. When integrating storage into the
+application package, include `storage` and `storage/migrations/*.sql`
+in its package discovery/data; storage is not yet included in the application
+wheel configuration.
 
 SQLite 3.38+ with JSON functions is required. Use one application process,
 short write transactions and a bounded database worker/connection owner. Do not
