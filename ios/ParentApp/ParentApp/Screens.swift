@@ -87,8 +87,8 @@ struct IncomingView: View {
     }
 }
 
-/// Design screen 9: "Thank you". The check pops in, then the text fades in. Goes back to waiting
-/// after about 4 s, or on a tap.
+/// Design screen 9: "Thank you". The check pops in, then the text fades in. After about 3 s, or on a tap,
+/// the app leaves to the iPhone home screen.
 struct DoneView: View {
     let onDismiss: () -> Void
 
@@ -135,7 +135,7 @@ struct DoneView: View {
             withAnimation(Motion.enter(0.7).delay(0.9)) { text = true }
         }
         .task {
-            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
             if !Task.isCancelled {
                 onDismiss()
             }

@@ -31,6 +31,11 @@
 	<string>The check-in call connects to the check-in service on this network.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>The check-in call listens to your answers.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+		<string>voip</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

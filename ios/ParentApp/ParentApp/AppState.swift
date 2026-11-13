@@ -58,6 +58,11 @@ final class AppState {
     let camera = SelfViewCamera()
     /// Plays the backend's prepared avatar clips; the call screen shows its video as the avatar.
     private(set) var clips: AvatarClips?
+    /// Simli's live avatar, tried first for every line; nil in the Simulator unless `-parent.liveAvatar YES`.
+    private(set) var live: SimliLiveAvatar?
+    /// Rings through the system call screen while the app is in the background.
+    let systemCalls = SystemCalls()
+    @ObservationIgnored private let keepAlive = BackgroundKeepAlive()
 
     @ObservationIgnored private var devices: ParentDevices?
     @ObservationIgnored private var connectTask: Task<Void, Never>?
@@ -73,17 +78,23 @@ final class AppState {
         // The Simulator has no front camera, and its voice-chat audio unit aborts on start
         // (AURemoteIO RPC timeout). Fake devices there, except the clip player (AVPlayer works there),
         // so the screens and the avatar clips can still be walked through.
+        // No keep-alive here either: it needs the same voice-chat audio session.
         let fake = FakeDevices.make()
         let clips = PhoneDevices.makeClips()
+        let live = UserDefaults.standard.bool(forKey: "parent.liveAvatar") ? SimliLiveAvatar() : nil
         devices = ParentDevices(player: fake.player, recorder: fake.recorder, camera: fake.camera,
-                                microphone: fake.microphone, clips: clips)
+                                microphone: fake.microphone, clips: clips, live: live)
         #else
-        let phone = PhoneDevices.make()
+        let live = SimliLiveAvatar()
+        let phone = PhoneDevices.make(live: live)
         let clips = phone.clips as? AvatarClips
         devices = ParentDevices(player: phone.player, recorder: phone.recorder, camera: camera,
-                                microphone: phone.microphone, clips: clips)
+                                microphone: phone.microphone, clips: clips, live: live)
+        // Keeps the app (and its event stream) alive in the background, so a call can ring there.
+        keepAlive.start()
         #endif
         self.clips = clips
+        self.live = live
         camera.setAvailabilityHandler { [weak self] available, problem in
             Task { @MainActor in
                 self?.model?.resourceChanged(.camera, available: available, problem: problem)

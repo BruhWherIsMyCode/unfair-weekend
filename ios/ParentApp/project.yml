@@ -13,6 +13,10 @@ settings:
 packages:
   ParentCallKit:
     path: ../ParentCallKit
+  # Simli's live avatar arrives over LiveKit (video and its voice).
+  LiveKit:
+    url: https://github.com/livekit/client-sdk-swift
+    exactVersion: 2.18.0
 targets:
   ParentApp:
     type: application
@@ -25,6 +29,8 @@ targets:
     dependencies:
       - package: ParentCallKit
         product: ParentCallKit
+      - package: LiveKit
+        product: LiveKit
     settings:
       base:
         TARGETED_DEVICE_FAMILY: "1"
@@ -42,6 +48,11 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         UIRequiresFullScreen: true
+        # Demo workaround, not for the App Store: a silent audio loop keeps the app running in the background,
+        # so the event stream stays open and an incoming call can ring through CallKit (no VoIP push needed).
+        UIBackgroundModes:
+          - audio
+          - voip
         NSCameraUsageDescription: "The check-in call shows you on screen and looks at your smile and arms."
         NSMicrophoneUsageDescription: "The check-in call listens to your answers."
         NSLocalNetworkUsageDescription: "The check-in call connects to the check-in service on this network."

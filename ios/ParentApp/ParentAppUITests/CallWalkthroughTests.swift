@@ -1,7 +1,7 @@
 import XCTest
 
 /// One whole call in the Simulator against a running backend: start the call, tap Accept, follow every
-/// screen to "Thank you", then back to waiting. Screenshots are attached to the result, and also written
+/// screen to "Thank you", then out to the home screen and, reopened, back to waiting. Screenshots are attached to the result, and also written
 /// to PARENT_SHOTS_DIR when set.
 ///
 ///     TEST_RUNNER_PARENT_BASE_URL=http://127.0.0.1:8000 TEST_RUNNER_PARENT_DEMO_KEY=... \
@@ -48,10 +48,18 @@ final class CallWalkthroughTests: XCTestCase {
         Thread.sleep(forTimeInterval: 1.5)
         snap("done")
 
-        // Done goes back to waiting by itself after about 4 s.
-        let gone = NSPredicate(format: "exists == false")
-        expectation(for: gone, evaluatedWith: thanks)
-        waitForExpectations(timeout: 10)
+        // After about 3 s Done leaves to the iPhone home screen; reopened, the app is waiting again.
+        // XCUIApplication.state does not notice a self-suspend, so look for the home screen's icon instead.
+        let icon = XCUIApplication(bundleIdentifier: "com.apple.springboard").icons["Check-in"]
+        let left = Date().addingTimeInterval(10)
+        while Date() < left && !(icon.exists && !icon.frame.isEmpty) {
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+        XCTAssertTrue(icon.exists && !icon.frame.isEmpty, "The app did not leave to the home screen after Done.")
+        snap("home-screen")
+        app.activate()
+        XCTAssertTrue(app.staticTexts["Daily check-in"].waitForExistence(timeout: 5))
+        XCTAssertFalse(thanks.exists)
         snap("idle-again")
     }
 

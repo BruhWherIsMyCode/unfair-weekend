@@ -1,4 +1,5 @@
 import AVFoundation
+import LiveKit
 import ParentCallKit
 import SwiftUI
 
@@ -8,6 +9,7 @@ struct InCallView: View {
     let title: String
     let camera: SelfViewCamera
     let clips: AVPlayer?
+    let live: LiveAvatarFeed?
     let onEnd: () -> Void
 
     /// Avatar settle 1.08 -> 1.0 and the late fade-in of self-view and End.
@@ -16,7 +18,7 @@ struct InCallView: View {
 
     var body: some View {
         ZStack {
-            AvatarBackground(clips: clips)
+            AvatarBackground(clips: clips, live: live)
                 .scaleEffect(settled ? 1 : 1.08)
                 .ignoresSafeArea()
 
@@ -239,33 +241,67 @@ struct CardContent: View {
     }
 }
 
-/// The full-screen avatar: the backend's prepared clip for the current line (Simli video with its voice),
-/// holding its last frame between lines. Before the first clip, or when the backend offers none, a local
+/// The avatar, framed like the other side of a video call. The live Simli stream when connected, otherwise the
+/// backend's prepared clip for the current line (holding its last frame between lines). Before either, a local
 /// loop or still from ios/ParentApp/LocalAssets (git-ignored), else the design's striped placeholder.
+///
+/// Simli video is square (768 x 768), the face filling about half of it. It is shown at the screen's width, not
+/// stretched to the screen's height (which made the face about 2.7 times larger than a real call), over a
+/// blurred, filled copy of itself so the rest of the screen matches it.
 struct AvatarBackground: View {
     let clips: AVPlayer?
+    let live: LiveAvatarFeed?
 
     var body: some View {
-        ZStack {
-            placeholder
-            if let clips {
-                GeometryReader { geometry in
-                    let side = Self.clipSide(for: geometry.size)
-                    ClipLayer(player: clips)
-                        .frame(width: side, height: side)
-                        .position(x: geometry.size.width / 2, y: geometry.size.height - side / 2)
+        GeometryReader { geometry in
+            let size = geometry.size
+            let frame = Self.avatarFrame(in: size)
+            ZStack(alignment: .topLeading) {
+                placeholder
+                    .frame(width: size.width, height: size.height)
+                    .clipped()
+                if let clips {
+                    framed(size: size, frame: frame,
+                           backdrop: ClipLayer(player: clips, blurred: true),
+                           video: ClipLayer(player: clips, blurred: false))
+                }
+                if let live, let track = live.track {
+                    framed(size: size, frame: frame,
+                           backdrop: SwiftUIVideoView(track, layoutMode: .fill).overlay(Blur()),
+                           video: SwiftUIVideoView(track, layoutMode: .fill,
+                                                   isRendering: Binding(get: { live.rendering },
+                                                                        set: { live.rendering = $0 })))
+                    .opacity(live.rendering ? 1 : 0)
+                    .animation(Motion.enter(0.4), value: live.rendering)
                 }
             }
         }
     }
 
-    /// Simli clips are square, with the mouth about 52% down the frame. Filled to the screen height, the mouth
-    /// would sit behind the card (220 pt tall, 300 pt above the bottom, lifted 44 pt during smile and arms).
-    /// Bottom-aligned at this size, the mouth stays just above even the lifted card on any phone height; the top
-    /// of the hair is cropped instead.
-    static func clipSide(for size: CGSize) -> CGFloat {
-        let mouthToBottom: CGFloat = 300 + 220 + 44 + 10
-        return max((mouthToBottom / (1 - 0.52)).rounded(), size.width, size.height)
+    /// The blurred video filling the screen behind, and the sharp video at `frame` with soft top and bottom edges.
+    private func framed(size: CGSize, frame: CGRect, backdrop: some View, video: some View) -> some View {
+        ZStack(alignment: .topLeading) {
+            backdrop
+                .frame(width: size.width, height: size.height)
+                .clipped()
+            video
+                .frame(width: frame.width, height: frame.height)
+                .mask(
+                    LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.08),
+                                           .init(color: .black, location: 0.86), .init(color: .clear, location: 1)],
+                                   startPoint: .top, endPoint: .bottom)
+                )
+                .offset(x: frame.minX, y: frame.minY)
+        }
+    }
+
+    /// Screen-wide square, placed so the chin (about 72% down the frame) clears the card even when it is lifted
+    /// for smile and arms (card 220 pt tall, 300 pt above the bottom, +44 pt). The top bar sits over the hair.
+    static func avatarFrame(in size: CGSize) -> CGRect {
+        let side = size.width
+        let liftedCardTop = size.height - (300 + 220 + 44)
+        let top = min(max(liftedCardTop - 0.72 * side, -0.12 * side), size.height * 0.12)
+        return CGRect(x: 0, y: top, width: side, height: side)
     }
 
     @ViewBuilder
@@ -280,6 +316,21 @@ struct AvatarBackground: View {
         } else {
             Stripes(a: Palette.stripeA, b: Palette.stripeB, period: 20)
         }
+    }
+}
+
+/// A dark blur over whatever is behind it.
+struct Blur: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIVisualEffectView {
+        Self.make()
+    }
+
+    func updateUIView(_ uiView: UIVisualEffectView, context: Context) {}
+
+    static func make() -> UIVisualEffectView {
+        let view = UIVisualEffectView(effect: UIBlurEffect(style: .systemThickMaterialDark))
+        view.contentView.backgroundColor = UIColor.black.withAlphaComponent(0.25)
+        return view
     }
 }
 
@@ -304,7 +355,7 @@ struct LoopingClip: UIViewRepresentable {
         uiView.playerLayer.player?.pause()
     }
 
-    final class PlayerView: UIView {
+    class PlayerView: UIView {
         var looper: AVPlayerLooper?
         override class var layerClass: AnyClass { AVPlayerLayer.self }
         var playerLayer: AVPlayerLayer {
@@ -314,18 +365,43 @@ struct LoopingClip: UIViewRepresentable {
     }
 }
 
-/// AVPlayerLayer for the avatar clips: aspect-filled, transparent until the first clip plays.
+/// AVPlayerLayer for the avatar clips: aspect-filled, optionally blurred, hidden until the first clip has a frame.
+/// An AVPlayer can drive several layers, so the backdrop and the framed avatar share one player.
 struct ClipLayer: UIViewRepresentable {
     let player: AVPlayer
+    let blurred: Bool
 
-    func makeUIView(context: Context) -> LoopingClip.PlayerView {
-        let view = LoopingClip.PlayerView()
+    func makeUIView(context: Context) -> ClipView {
+        let view = ClipView()
         view.backgroundColor = .clear
         view.playerLayer.backgroundColor = UIColor.clear.cgColor
         view.playerLayer.videoGravity = .resizeAspectFill
         view.playerLayer.player = player
+        if blurred {
+            let blur = Blur.make()
+            blur.frame = view.bounds
+            blur.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            view.addSubview(blur)
+        }
         return view
     }
 
-    func updateUIView(_ uiView: LoopingClip.PlayerView, context: Context) {}
+    func updateUIView(_ uiView: ClipView, context: Context) {}
+
+    final class ClipView: LoopingClip.PlayerView {
+        private var ready: NSKeyValueObservation?
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            alpha = 0
+            ready = playerLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak self] layer, _ in
+                let visible = layer.isReadyForDisplay
+                DispatchQueue.main.async { self?.alpha = visible ? 1 : 0 }
+            }
+        }
+
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) is not used")
+        }
+    }
 }
