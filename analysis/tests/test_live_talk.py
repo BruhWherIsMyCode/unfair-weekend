@@ -443,3 +443,16 @@ def test_selfcheck_is_ready_when_everything_is_there(tmp_path):
     model = tmp_path / "m.task"
     model.write_text("x")
     assert selfcheck.check(import_module=lambda name: None, model_paths=[("face", model), ("hand", model)]) == []
+
+
+def test_say_own_never_asks_a_question():
+    # acted phone run: "Good, thank you, Ona. Now, how are you feeling today?" and then ask() asked it again
+    async def scenario():
+        rig = CallRig()
+        await rig.greet()
+        refused = await rig.handlers.execute("say_own", {"text": "Good, thank you. How are you feeling today?"})
+        assert "never asks a question" in refused.get("error", "")
+        assert rig.adapter.own_said == []
+        assert "error" not in await rig.handlers.execute("say_own", {"text": "Good, thank you, Ona."})
+
+    asyncio.run(scenario())

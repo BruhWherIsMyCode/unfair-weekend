@@ -1,6 +1,8 @@
 """Whole calls: the server logic and a scripted fake client over MemoryTransport, FakeClock, fake readings."""
 from __future__ import annotations
 
+import pytest
+
 import asyncio
 import json
 
@@ -73,6 +75,7 @@ def test_five_calls_make_the_baseline_ready(tmp_path):
     assert statuses[:5] == ["learning"] * 5 and statuses[5] == "as_usual"
 
 
+@pytest.mark.usefixtures("alert_mid_call")
 def test_left_hand_sinking_twice_is_published_mid_call(tmp_path):
     server, client, [result], out = asyncio.run(play(tmp_path, calls=({"sinks": ({"left": 0.4},)},)))
     assert result["summary"]["status"] == "change_noticed"

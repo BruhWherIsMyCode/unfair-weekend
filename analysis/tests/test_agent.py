@@ -306,7 +306,7 @@ def test_a_client_that_could_not_be_built_goes_straight_to_the_fixed_order():
 
 # ---- Claude never decides a result -----------------------------------------------------------------------------
 
-@pytest.mark.usefixtures("two_readings")
+@pytest.mark.usefixtures("two_readings", "alert_mid_call")
 def test_a_confirmed_change_is_published_even_if_claude_fails_right_after():
     async def scenario():
         os.environ["ANTHROPIC_API_KEY"] = SECRET

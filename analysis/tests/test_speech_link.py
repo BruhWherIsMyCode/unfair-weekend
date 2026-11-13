@@ -323,7 +323,7 @@ def test_the_key_never_travels_over_the_link_or_into_the_record(tmp_path):
     assert KEY not in everything
 
 
-@pytest.mark.usefixtures("two_readings")
+@pytest.mark.usefixtures("two_readings", "alert_mid_call")
 def test_a_long_pause_both_times_is_a_confirmed_speech_change_published_mid_call(tmp_path):
     server, client, [result], out, eleven = asyncio.run(
         play(tmp_path, calls=({"sentences": ({"pause_before": 3, "pause_s": 2.5},)},)))

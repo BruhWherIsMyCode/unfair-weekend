@@ -367,7 +367,7 @@ class ToolHandlers:
                  "required": ["reason", "note"], "additionalProperties": False}},
             {"name": "say_own", "description": "Say one or two short sentences of your own to her: react to what she "
              "just said or to what just happened, or tell her in a few words why a check is repeated (use the "
-             "result's retry_hint). At most %d words, no digits, none of these words: %s. At most %d own lines in the "
+             "result's retry_hint). Never a question. At most %d words, no digits, none of these words: %s. At most %d own lines in the "
              "call (say_own and ask_followup together); not while a check runs."
              % (limits.OWN_LINE_MAX_WORDS, ", ".join(limits.OWN_LINE_BANNED_WORDS), limits.OWN_LINES_MAX),
              "input_schema": {"type": "object", "properties": {"text": {"type": "string",
@@ -459,6 +459,9 @@ class ToolHandlers:
             reason = self._own_refusal()
             if reason is None and name == "ask_followup":
                 reason = self._followup_refusal(args["question_id"])
+            if reason is None and name == "say_own" and "?" in str(args["text"]):
+                # v12b: its reactions asked the next question in its own words, then ask() asked it again
+                reason = "say_own never asks a question: the questions are ask() and ask_followup()"
             return reason or own_text_problem(args["text"])
         return None
 

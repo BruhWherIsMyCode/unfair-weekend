@@ -178,6 +178,7 @@ def test_a_learning_usual_says_learning_and_still_collects_values(tmp_path):
     assert BaselineStore(PERSON, tmp_path / "data", 2).load_baselines()["smile"]["sessions"] == 1
 
 
+@pytest.mark.usefixtures("alert_mid_call")
 def test_two_outside_smiles_publish_a_change_and_nothing_is_added(tmp_path):
     env = seeded_env(tmp_path)
     link = Link()

@@ -350,7 +350,7 @@ def test_hang_up_during_instruction_playback():
 
 # ---- confirmation and publishing -------------------------------------------------------------------
 
-@pytest.mark.usefixtures("two_readings")
+@pytest.mark.usefixtures("two_readings", "alert_mid_call")
 def test_two_outside_readings_publish_once_then_the_final_message_reuses_the_id():
     async def scenario():
         rig = Rig()

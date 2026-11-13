@@ -1,6 +1,8 @@
 """v7: the numbers Claude gets from run_task, the alert_family tool, the concern_raised status, the required tasks."""
 from __future__ import annotations
 
+import pytest
+
 import asyncio
 import json
 
@@ -144,6 +146,7 @@ def test_the_fixed_order_driver_never_alerts():
     asyncio.run(scenario())
 
 
+@pytest.mark.usefixtures("alert_mid_call")
 def test_a_confirmed_change_beats_a_concern_and_both_are_published():
     async def scenario():
         rig = CallRig(corners=(0.11, 0.09), required_tasks=("smile",))  # v12: no arms to wait for: the same-task repeat

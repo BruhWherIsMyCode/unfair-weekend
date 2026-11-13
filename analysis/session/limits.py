@@ -26,6 +26,10 @@ MAX_NOT_MEASURED_PER_TASK = 2
 # change and the family is told; no task is repeated to confirm. Only a try that measured nothing keeps its one
 # technical repeat. False restores the two-reading rule (the same task twice, or the face and an arm on one side).
 CONFIRM_FROM_ONE_READING = True
+# v12b (owner, demo): a confirmed change is told at the END of the call, not in the middle of the checks: the family
+# message goes out as the call finishes, then she hears ALERT_REASSURANCE, then goodbye. False tells both mid-call.
+# The agent's alert_family (she says she is unwell or asks for help) is always told at once.
+CHANGE_ALERT_AT_END = True
 # v12b (owner): when her family is told mid-call (a confirmed change or the agent's alert), she hears it at once from
 # the code, never from the model (which is not told about the alert). Spoken through say_text (live voice, no clip).
 ALERT_REASSURANCE = ("I've let your family know, so they can check on you. "

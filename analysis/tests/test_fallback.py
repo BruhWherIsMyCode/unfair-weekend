@@ -174,7 +174,7 @@ def test_re_ask_that_is_heard_the_second_time_is_recorded():
     asyncio.run(scenario())
 
 
-@pytest.mark.usefixtures("two_readings")
+@pytest.mark.usefixtures("two_readings", "alert_mid_call")
 def test_a_first_outside_smile_is_repeated_and_two_outside_smiles_publish_once():
     async def scenario():
         rig = CallRig(corners=(0.11, 0.09))
@@ -209,6 +209,7 @@ def test_left_then_right_hand_outside_is_not_confirmed():
     asyncio.run(scenario())
 
 
+@pytest.mark.usefixtures("alert_mid_call")
 def test_left_hand_outside_twice_is_confirmed_on_the_left():
     async def scenario():
         rig = CallRig(sinks=({"left": 0.4}, {"left": 0.3}))
@@ -221,7 +222,7 @@ def test_left_hand_outside_twice_is_confirmed_on_the_left():
     asyncio.run(scenario())
 
 
-@pytest.mark.usefixtures("two_readings")
+@pytest.mark.usefixtures("two_readings", "alert_mid_call")
 def test_face_and_arm_outside_on_the_same_side_confirm_each_other_with_no_repeat():
     # v12: corner height above her usual = her LEFT corner lower; with her left hand sinking that is one finding
     async def scenario():
@@ -269,13 +270,13 @@ def test_one_lopsided_smile_tells_the_family_with_no_repeat():
         await rig.drive(FixedOrderDriver(rig.handlers).run())
         assert len(rig.session.task_attempts["smile"]) == 1 and len(rig.session.task_attempts["arms"]) == 1
         assert "repeat_smile" not in rig.adapter.said and "repeat_arms" not in rig.adapter.said
-        mid = rig.adapter.published[0]
-        assert mid["phase"] == "mid_call" and mid["summary"]["status"] == "change_noticed"
-        face = next(s for s in mid["summary"]["signs"] if s["sign"] == "face")
+        # v12b: told at the END (limits.CHANGE_ALERT_AT_END): one final message, then she hears it, then goodbye
+        assert [p["phase"] for p in rig.adapter.published] == ["final"]
+        final = rig.adapter.published[0]["summary"]
+        face = next(s for s in final["signs"] if s["sign"] == "face")
+        assert final["status"] == "change_noticed"
         assert face["confirmed"] is True and face["side"] == "left" and len(face["attempts"]) == 1
-        assert rig.adapter.published[-1]["summary"]["status"] == "change_noticed"
-        # v12b: she hears at once that her family was told, with the 112 line, once
-        assert rig.adapter.own_said == [limits.ALERT_REASSURANCE]
+        assert rig.adapter.own_said == [limits.ALERT_REASSURANCE] and rig.adapter.said[-1] == "bye"
         assert "call 112" in limits.ALERT_REASSURANCE
 
     asyncio.run(scenario())

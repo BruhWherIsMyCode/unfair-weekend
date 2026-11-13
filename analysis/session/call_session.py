@@ -99,6 +99,7 @@ class CallSession:
         self.message_id: Optional[str] = None
         self.published: List[Dict[str, Any]] = []
         self._change_published = False
+        self._change_pending = False  # v12b: a confirmed change waiting for the end of the call (CHANGE_ALERT_AT_END)
         self._reassured = False  # v12b: she heard that her family was told (ALERT_REASSURANCE), once per call
 
         self._attempt_counter = 0
@@ -713,10 +714,12 @@ class CallSession:
             except Exception:
                 values = None
             self._rec("attempt_finished", attempt, d, self, values)
-        if usable and not self._change_published and self._confirmed_any():
+        if usable and not self._change_published and not self._change_pending and self._confirmed_any():
             if self.safety_floor:
                 self._log("change_confirmed", attempt_id=attempt.attempt_id, task=attempt.task)
-                if await self._publish("mid_call"):
+                if limits.CHANGE_ALERT_AT_END:
+                    self._change_pending = True  # told when the call finishes (finish())
+                elif await self._publish("mid_call"):
                     self._change_published = True
                     await self._reassure()
             else:
@@ -854,12 +857,18 @@ class CallSession:
             return self._final
         if self._active is not None:
             raise RuntimeError("finish() while a task is running")
+        published = False
+        if self._change_pending and not self.hung_up:
+            # v12b: the change is told at the end: the family first, then she hears it, then goodbye
+            published = await self._publish("final")
+            await self._reassure()
         if not self.hung_up:
             try:
                 await self.adapter.say("bye")
             except Exception as exc:
                 self._log("bye_failed", error=type(exc).__name__)
-        await self._publish("final")
+        if not published:
+            await self._publish("final")
         self.finished = True
         self._final = self.build_session_result().to_dict()
         self._log("call_finished", status=self._final["status"])
