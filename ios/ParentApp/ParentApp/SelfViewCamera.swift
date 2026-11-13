@@ -89,11 +89,10 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
             sessionQueue.async {
                 do {
                     try self.configure()
-                    // The frames for the analysis must be upright: set again at every capture start.
-                    self.uprightFrames()
                     self.lock.withLock {
                         self.latest = nil
                         self.capturing = true
+                        self.stats = FrameStats()
                     }
                     if !self.session.isRunning {
                         self.session.startRunning()
@@ -156,7 +155,6 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
                 self.session.addConnection(connection)
                 self.previewConnection = connection
             }
-            self.uprightFrames()
         }
     }
 
@@ -195,22 +193,24 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
             self.output = output
         }
         configured = true
-        uprightFrames()
     }
 
-    /// Portrait: 90 degrees makes the buffers 480 x 640 and upright for the front camera, not mirrored. Like the
-    /// preview's, the output's connection may not exist yet while the session is first configured, or may be
-    /// rebuilt when a connection is added; then the frames stayed landscape (the analysis saw her turned 90 degrees).
-    /// So this runs after configuring, after attaching a preview and at every capture start. sessionQueue only.
-    private func uprightFrames() {
-        guard let connection = output?.connection(with: .video) else { return }
-        if connection.isVideoRotationAngleSupported(90), connection.videoRotationAngle != 90 {
-            connection.videoRotationAngle = 90
-        }
-        if connection.isVideoMirroringSupported {
-            connection.automaticallyAdjustsVideoMirroring = false
-            connection.isVideoMirrored = false
-        }
+    /// What the camera delivered during the current capture, for the camera debug screen.
+    struct FrameStats: Equatable, Sendable {
+        var rawWidth = 0
+        var rawHeight = 0
+        var mirrored = false
+        var angle: Double = 0
+        /// Landscape buffers, turned upright and mirrored: the one case checked on the phone.
+        var fixed = 0
+        /// Portrait buffers, sent as they came: not expected; if these appear, frames are not all alike.
+        var asIs = 0
+    }
+
+    private var stats = FrameStats()
+
+    func frameStats() -> FrameStats {
+        lock.withLock { stats }
     }
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer,
@@ -219,12 +219,21 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
         let wanted = lock.withLock { capturing && now - lastEncode >= minEncodeInterval }
         guard wanted, let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         var image = CIImage(cvPixelBuffer: pixels)
-        if image.extent.width > image.extent.height {
-            // Still landscape: the connection's settings (90 degrees, not mirrored) did not take, so this is the
-            // front camera's default buffer. Turn it 90 degrees counter-clockwise, then mirror it. Checked on an
-            // iPhone 18 Pro Max with the camera debug screen: clockwise (.right) gave her upside down, and only the
-            // mirrored picture put her raised hand on the right side for the analysis.
+        // The frame output's connection keeps the front camera's default (landscape, mirrored): its rotation and
+        // mirroring settings did not take on the iPhone, and setting them again at capture start risked frames that
+        // differ between captures. So every frame is fixed here, one way: turn 90 degrees counter-clockwise, then
+        // mirror, which gives the un-mirrored upright picture the analysis expects (UW_MIRRORED off). Checked on an
+        // iPhone 18 Pro Max with the camera debug screen: clockwise gave her upside down, and unmirrored swapped hands.
+        let landscape = image.extent.width > image.extent.height
+        if landscape {
             image = image.oriented(.left).oriented(.upMirrored)
+        }
+        lock.withLock {
+            stats.rawWidth = CVPixelBufferGetWidth(pixels)
+            stats.rawHeight = CVPixelBufferGetHeight(pixels)
+            stats.mirrored = connection.isVideoMirrored
+            stats.angle = connection.videoRotationAngle
+            if landscape { stats.fixed += 1 } else { stats.asIs += 1 }
         }
         guard let space = CGColorSpace(name: CGColorSpace.sRGB),
               let jpeg = context.jpegRepresentation(
