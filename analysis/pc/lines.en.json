@@ -1,0 +1,7 @@
+{
+  "_comment": "PC version line texts. Owner-written. Lines not listed here come from contract/script.en.json unchanged. These are the one-hand wordings proposed in contract/README.md (not yet applied to the team contract).",
+  "setup_phone": "Hold the camera in front of your face. Keep your face in view.",
+  "task_arms": "When the timer starts, raise your left hand beside your face and hold it there until I say swap.",
+  "repeat_arms": "Let's try once more. Raise your left hand beside your face and hold it until I say swap.",
+  "swap_hands": "Now lower it, and raise your right hand beside your face. Hold it there."
+}
