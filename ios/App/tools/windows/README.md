@@ -23,8 +23,14 @@ from there. Your own checkout and branch stay as they are.
    `.\start-call.ps1 -CallId <id>`
 
 The demo key is made once and kept in `%LOCALAPPDATA%\checkin-backend\demo_key.txt`, outside the
-repo. To set your own key, set `DEMO_KEY` before you start. Without `ELEVENLABS_API_KEY` the
-avatar's lines are silent: you see captions only, and answers are not transcribed.
+repo. To set your own key, set `DEMO_KEY` before you start.
+
+On the first run the script asks for the ElevenLabs key (voice, transcription) and the Simli key
+(avatar clips). Typing is hidden, and Enter skips one. They are saved in
+`%LOCALAPPDATA%\checkin-backend\provider_keys.txt`, encrypted so only your Windows user on this PC
+can read them, never in the repo, and reused after that. `.\start-backend.ps1 -ResetKeys` asks again.
+A key already set in the environment wins. Without the ElevenLabs key the avatar's lines are silent:
+you see captions only, and answers are not transcribed.
 
 ## If the phone cannot connect
 

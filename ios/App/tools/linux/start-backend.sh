@@ -7,19 +7,23 @@
 # there. Your own checkout and branch are not touched.
 #
 # Usage: ./start-backend.sh [--port 8000] [--branch agent-4/call-service] [--runner auto|analysis|fake|scripted]
-# Environment: DEMO_KEY (else one is made once and kept in ~/.local/share/checkin-backend/demo_key),
-#              ELEVENLABS_API_KEY (optional: real voice and transcription).
+#                           [--reset-keys]
+# Keys: DEMO_KEY is made once. ELEVENLABS_API_KEY (voice, transcription) and SIMLI_API_KEY (avatar clips) are asked
+#       for on the first run (Enter skips) and stored in ~/.local/share/checkin-backend/ (mode 600), never in the repo.
+#       A key set in the environment wins; --reset-keys asks again.
 set -euo pipefail
 
 BRANCH="agent-4/call-service"
 PORT=8000
 RUNNER="auto"
+RESET_KEYS=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --port) PORT="$2"; shift 2 ;;
         --branch) BRANCH="$2"; shift 2 ;;
         --runner) RUNNER="$2"; shift 2 ;;
-        -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
+        --reset-keys) RESET_KEYS=1; shift ;;
+        -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
     esac
 done
@@ -65,17 +69,67 @@ step "Installing backend dependencies (the first run also downloads Python 3.12)
 cd "$BACKEND"
 uv sync --locked --extra dev || fail "uv sync failed. See the messages above."
 
-# ---------------------------------------------------------------- 3. demo key
-KEY_FILE="${XDG_DATA_HOME:-$HOME/.local/share}/checkin-backend/demo_key"
+# ---------------------------------------------------------------- 3. keys
+KEY_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/checkin-backend"
+KEY_FILE="$KEY_DIR/demo_key"
+PROVIDER_FILE="$KEY_DIR/keys.env"
+mkdir -p "$KEY_DIR" && chmod 700 "$KEY_DIR"
 if [ -z "${DEMO_KEY:-}" ]; then
     if [ -f "$KEY_FILE" ]; then
         DEMO_KEY="$(cat "$KEY_FILE")"
     else
         DEMO_KEY="$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')"
-        mkdir -p "$(dirname "$KEY_FILE")"
         (umask 077 && printf '%s' "$DEMO_KEY" > "$KEY_FILE")
     fi
 fi
+
+step "Provider keys"
+STORED_ELEVENLABS=""
+STORED_SIMLI=""
+if [ "$RESET_KEYS" = 0 ] && [ -f "$PROVIDER_FILE" ]; then
+    # Plain KEY=value lines; read, never sourced.
+    while IFS='=' read -r name value; do
+        case "$name" in
+            ELEVENLABS_API_KEY) STORED_ELEVENLABS="$value" ;;
+            SIMLI_API_KEY) STORED_SIMLI="$value" ;;
+        esac
+    done < "$PROVIDER_FILE"
+fi
+
+ask_key() {  # $1 label, $2 what it is for. Hidden typing; prints the answer (may be empty).
+    local answer=""
+    if [ -t 0 ]; then
+        read -r -s -p "$1 ($2; Enter to skip): " answer
+        echo >&2
+    fi
+    printf '%s' "$answer" | tr -d '[:space:]'
+}
+
+ASKED=0
+if [ -z "${ELEVENLABS_API_KEY:-}" ]; then
+    if [ -n "$STORED_ELEVENLABS" ]; then
+        ELEVENLABS_API_KEY="$STORED_ELEVENLABS"
+    elif [ "$RESET_KEYS" = 1 ] || [ ! -f "$PROVIDER_FILE" ]; then
+        ELEVENLABS_API_KEY="$(ask_key "ElevenLabs API key" "voice and transcription")"
+        ASKED=1
+    fi
+fi
+if [ -z "${SIMLI_API_KEY:-}" ]; then
+    if [ -n "$STORED_SIMLI" ]; then
+        SIMLI_API_KEY="$STORED_SIMLI"
+    elif [ "$RESET_KEYS" = 1 ] || [ ! -f "$PROVIDER_FILE" ]; then
+        SIMLI_API_KEY="$(ask_key "Simli API key" "avatar clips")"
+        ASKED=1
+    fi
+fi
+if [ "$ASKED" = 1 ]; then
+    (umask 077 && printf 'ELEVENLABS_API_KEY=%s\nSIMLI_API_KEY=%s\n' "${ELEVENLABS_API_KEY:-}" "${SIMLI_API_KEY:-}" \
+        > "$PROVIDER_FILE")
+    echo "Saved to $PROVIDER_FILE (only you can read it). Change them later with --reset-keys."
+fi
+for name in ELEVENLABS_API_KEY SIMLI_API_KEY; do
+    if [ -n "${!name:-}" ]; then echo "  $name: set"; else echo "  $name: not set"; fi
+done
 
 # ---------------------------------------------------------------- 4. firewall
 step "Firewall"
@@ -112,4 +166,6 @@ fi
 step "Running the backend on port $PORT (Ctrl+C to stop)"
 export DEMO_KEY
 export CALL_RUNNER="$RUNNER"
+if [ -n "${ELEVENLABS_API_KEY:-}" ]; then export ELEVENLABS_API_KEY; else unset ELEVENLABS_API_KEY; fi
+if [ -n "${SIMLI_API_KEY:-}" ]; then export SIMLI_API_KEY; else unset SIMLI_API_KEY; fi
 exec uv run --locked uvicorn checkin_backend.app:create_app --factory --host 0.0.0.0 --port "$PORT"

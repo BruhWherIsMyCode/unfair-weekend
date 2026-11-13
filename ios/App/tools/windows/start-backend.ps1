@@ -19,6 +19,10 @@
     %LOCALAPPDATA%\checkin-backend\demo_key.txt (never in the repo).
 .PARAMETER Runner
     CALL_RUNNER for the backend: auto, analysis, fake or scripted. Default: auto.
+.PARAMETER ResetKeys
+    Ask for the ElevenLabs and Simli keys again. They are asked for on the first run (Enter skips), stored
+    encrypted for this Windows user (DPAPI) in %LOCALAPPDATA%\checkin-backend\provider_keys.txt, never in the
+    repo, and reused after that. A key set in the environment always wins.
 .PARAMETER AllowPublicNetwork
     Also open the port when Windows calls the Wi-Fi "Public" (typical for event Wi-Fi). Anyone on that
     network can then reach the backend; the demo key is the only lock.
@@ -35,12 +39,30 @@ param(
     [string]$DemoKey = $env:DEMO_KEY,
     [ValidateSet("auto", "analysis", "fake", "scripted")]
     [string]$Runner = "auto",
-    [switch]$AllowPublicNetwork
+    [switch]$AllowPublicNetwork,
+    [switch]$ResetKeys
 )
 
 function Step([string]$text) {
     Write-Host ""
     Write-Host "== $text" -ForegroundColor Cyan
+}
+
+# DPAPI: only this Windows user on this PC can decrypt. An empty key stays empty (skipped).
+function Protect-Key([string]$plain) {
+    if (-not $plain) { return "" }
+    return ConvertTo-SecureString $plain -AsPlainText -Force | ConvertFrom-SecureString
+}
+
+function Unprotect-Key([string]$cipher) {
+    if (-not $cipher) { return "" }
+    try {
+        $secure = ConvertTo-SecureString $cipher -ErrorAction Stop
+        return (New-Object System.Net.NetworkCredential("", $secure)).Password
+    } catch {
+        Write-Host "A stored key could not be read (another user or PC?). Run with -ResetKeys." -ForegroundColor Yellow
+        return ""
+    }
 }
 
 function Fail([string]$text) {
@@ -112,6 +134,45 @@ try {
         }
     }
 
+    # ------------------------------------------------------------ provider keys
+    Step "Provider keys"
+    $providerFile = Join-Path (Split-Path $keyFile -Parent) "provider_keys.txt"
+    $stored = @{}
+    if (-not $ResetKeys -and (Test-Path $providerFile)) {
+        foreach ($line in Get-Content $providerFile) {
+            $name, $cipher = $line -split "=", 2
+            if ($name -and $null -ne $cipher) { $stored[$name] = $cipher }
+        }
+    }
+    $asked = $false
+    $providerKeys = [ordered]@{
+        "ELEVENLABS_API_KEY" = "ElevenLabs API key (voice and transcription; Enter to skip)"
+        "SIMLI_API_KEY" = "Simli API key (avatar clips; Enter to skip)"
+    }
+    $values = @{}
+    foreach ($name in $providerKeys.Keys) {
+        $fromEnvironment = [Environment]::GetEnvironmentVariable($name)
+        if ($fromEnvironment) {
+            $values[$name] = $fromEnvironment
+        } elseif ($stored.ContainsKey($name)) {
+            $values[$name] = Unprotect-Key $stored[$name]
+        } elseif ($ResetKeys -or -not (Test-Path $providerFile)) {
+            $secure = Read-Host -AsSecureString $providerKeys[$name]
+            $values[$name] = (New-Object System.Net.NetworkCredential("", $secure)).Password.Trim()
+            $asked = $true
+        } else {
+            $values[$name] = ""
+        }
+    }
+    if ($asked) {
+        $lines = foreach ($name in $providerKeys.Keys) { "$name=$(Protect-Key $values[$name])" }
+        Set-Content -Path $providerFile -Value $lines
+        Write-Host "Saved, encrypted for this Windows user, to $providerFile. Change them later with -ResetKeys."
+    }
+    foreach ($name in $providerKeys.Keys) {
+        if ($values[$name]) { Write-Host "  ${name}: set" } else { Write-Host "  ${name}: not set" }
+    }
+
     # ------------------------------------------------------------ 4. firewall
     Step "Windows firewall"
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -151,7 +212,7 @@ try {
     Write-Host "join this PC to the iPhone's Personal Hotspot and use the 172.20.10.x address above."
     Write-Host ""
     Write-Host "Start a call from another PowerShell window:  .\start-call.ps1"
-    if (-not $env:ELEVENLABS_API_KEY) {
+    if (-not $values["ELEVENLABS_API_KEY"]) {
         Write-Host "No ELEVENLABS_API_KEY set: the avatar's lines are silent (captions only) and answers are not transcribed." -ForegroundColor Yellow
     }
 
@@ -159,6 +220,10 @@ try {
     Step "Running the backend on port $Port (Ctrl+C to stop)"
     $env:DEMO_KEY = $DemoKey
     $env:CALL_RUNNER = $Runner
+    foreach ($name in $values.Keys) {
+        if ($values[$name]) { Set-Item -Path "env:$name" -Value $values[$name] }
+        else { Remove-Item -Path "env:$name" -ErrorAction SilentlyContinue }
+    }
     uv run --locked uvicorn checkin_backend.app:create_app --factory --host 0.0.0.0 --port $Port
 } finally {
     Pop-Location

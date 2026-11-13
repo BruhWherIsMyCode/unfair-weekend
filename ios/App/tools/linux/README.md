@@ -23,8 +23,13 @@ from there. Your own checkout and branch stay as they are.
 
 Options: `--port 8000`, `--branch agent-4/call-service`, `--runner auto|analysis|fake|scripted`.
 The demo key is made once and kept in `~/.local/share/checkin-backend/demo_key`, outside the repo.
-To set your own key, set `DEMO_KEY` before you start. Without `ELEVENLABS_API_KEY` the avatar's
-lines are silent: you see captions only, and answers are not transcribed.
+To set your own key, set `DEMO_KEY` before you start.
+
+On the first run the script asks for the ElevenLabs key (voice, transcription) and the Simli key
+(avatar clips). Typing is hidden, and Enter skips one. They are saved in
+`~/.local/share/checkin-backend/keys.env` (only you can read it, never in the repo) and reused after
+that. `--reset-keys` asks again. A key already set in the environment wins. Without the ElevenLabs
+key the avatar's lines are silent: you see captions only, and answers are not transcribed.
 
 ## If the phone cannot connect
 
