@@ -23,7 +23,7 @@ QUESTIONS = ("q_medicine", "q_feeling", "q_unusual")
 CAPTURE_SETTINGS = {
     "smile": {"media_kind": "video", "duration_ms": 5000, "prepare_ms": 0, "stop_on_silence_ms": None,
               "format": "jpeg", "sample_period_ms": 200},
-    "arms": {"media_kind": "video", "duration_ms": 12000, "prepare_ms": 2000, "stop_on_silence_ms": None,
+    "arms": {"media_kind": "video", "duration_ms": 15000, "prepare_ms": 2000, "stop_on_silence_ms": None,
              "format": "jpeg", "sample_period_ms": 200},
     "sentence": {"media_kind": "audio", "duration_ms": 12000, "prepare_ms": 0, "stop_on_silence_ms": 1500,
                  "format": "pcm_s16le_16000_mono", "sample_period_ms": 250},
