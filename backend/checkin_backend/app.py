@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .calls import Call, CallConflict, CallNotFound, CallService, CallState, EndReason
 from .avatar import ClipGateway
 from .config import Settings
+from .debug_probe import DebugDesk, DebugUnavailable
 from .delivery import FamilyDelivery
 from .hub import Device, DeviceHub, UnknownDevice
 from .link import ClientLink, LinkRejected
@@ -269,6 +270,8 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
         app.state.desk = desk
         app.state.store = store
         app.state.live = live_avatar
+        # Camera debug runs the analysis for the demo person; the phone's own person setting is not needed.
+        app.state.debug = DebugDesk(next(iter(directory.all())).person_id)
         try:
             log_event(log, logging.INFO, "application.started", voiced=gateway.voiced,
                       live_avatar=live_avatar.available)
@@ -285,6 +288,7 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
                 await avatar.aclose()
             if live is None:
                 await live_avatar.aclose()
+            app.state.debug.close()
             log.info("application.stopped")
 
     app = FastAPI(title="Check-in backend", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -501,6 +505,47 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
         if clip is None:
             raise ApiError(404, "not_found", "This clip does not exist or has expired.")
         return JSONResponse(clip.as_json(), headers={"Cache-Control": "no-store"})
+
+    class DebugRunIn(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        task: Literal["smile", "arms"]
+        mirrored: bool | None = None
+
+    class DebugSampleIn(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        sequence: int = Field(ge=0)
+        captured_ms: int = Field(ge=0, le=60000)
+        data_base64: str
+        since: int = Field(default=0, ge=0)
+
+    def debug_run(request: Request, run_id: str):
+        run = request.app.state.debug.get(run_id)
+        if run is None:
+            raise ApiError(404, "not_found", "Unknown or expired debug run.")
+        return run
+
+    @app.post("/v1/debug/runs", status_code=201, dependencies=auth)
+    async def debug_start(body: DebugRunIn, request: Request) -> dict[str, Any]:
+        # Camera debug: Agent 3's real module on the phone's frames, outside any call. Nothing is stored.
+        try:
+            run = request.app.state.debug.start(body.task, body.mirrored)
+        except DebugUnavailable as exc:
+            raise ApiError(503, "analysis_unavailable", str(exc)) from None
+        return {"run_id": run.run_id, "task": run.task, "capture": run.capture, "cues": run.cues}
+
+    @app.post("/v1/debug/runs/{run_id}/samples", dependencies=auth)
+    async def debug_sample(run_id: str, body: DebugSampleIn, request: Request) -> dict[str, Any]:
+        run = debug_run(request, run_id)
+        data = decode_base64(body.data_base64)
+        check_sample("jpeg", data)
+        run.add(body.sequence, body.captured_ms, data)
+        return run.snapshot(body.since)
+
+    @app.post("/v1/debug/runs/{run_id}/finish", dependencies=auth)
+    async def debug_finish(run_id: str, request: Request) -> dict[str, Any]:
+        run = debug_run(request, run_id)
+        await run.finish()
+        return run.snapshot()
 
     @app.get("/v1/families/{family_id}/messages", dependencies=auth)
     async def messages(family_id: str, request: Request) -> list[dict[str, Any]]:

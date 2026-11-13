@@ -60,6 +60,8 @@ final class AppState {
     private(set) var clips: AvatarClips?
     /// Simli's live avatar, tried first for every line; nil in the Simulator unless `-parent.liveAvatar YES`.
     private(set) var live: SimliLiveAvatar?
+    /// Frames for the camera debug screen: the front camera on a phone, the fake camera in the Simulator.
+    private(set) var debugFrames: CameraSource?
     /// Rings through the system call screen while the app is in the background.
     let systemCalls = SystemCalls()
     @ObservationIgnored private let keepAlive = BackgroundKeepAlive()
@@ -84,12 +86,14 @@ final class AppState {
         let live = UserDefaults.standard.bool(forKey: "parent.liveAvatar") ? SimliLiveAvatar() : nil
         devices = ParentDevices(player: fake.player, recorder: fake.recorder, camera: fake.camera,
                                 microphone: fake.microphone, clips: clips, live: live)
+        debugFrames = fake.camera
         #else
         let live = SimliLiveAvatar()
         let phone = PhoneDevices.make(live: live)
         let clips = phone.clips as? AvatarClips
         devices = ParentDevices(player: phone.player, recorder: phone.recorder, camera: camera,
                                 microphone: phone.microphone, clips: clips, live: live)
+        debugFrames = camera
         // Keeps the app (and its event stream) alive in the background, so a call can ring there.
         keepAlive.start()
         #endif
