@@ -9,6 +9,7 @@ description = "Python call, media and delivery modules for the check-in applicat
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.162.5,<1",
+    "httpx>=0.28.1,<1",
     "uvicorn>=0.54.0,<1",
 ]
 
@@ -20,6 +21,9 @@ dev = [
 
 [tool.setuptools.packages.find]
 include = ["checkin_backend*"]
+
+[tool.setuptools.package-data]
+checkin_backend = ["data/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
