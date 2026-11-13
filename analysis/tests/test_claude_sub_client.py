@@ -81,9 +81,15 @@ def test_create_returns_a_tool_use_block_and_numbers_the_ids():
                           '{"tool": "ask", "input": {"question_id": "q_medicine"}}'])
         a = await client.create("SYSTEM", [{"role": "user", "content": "Call connected."}], TOOLS)
         b = await client.create("SYSTEM", [{"role": "user", "content": "Call connected."}], TOOLS)
-        assert a == {"content": [{"type": "tool_use", "id": "toolu_sub_1", "name": "say", "input": {"line_id": "greet"}}],
+        id_a, id_b = a["content"][0]["id"], b["content"][0]["id"]
+        assert a == {"content": [{"type": "tool_use", "id": id_a, "name": "say", "input": {"line_id": "greet"}}],
                      "stop_reason": "tool_use"}
-        assert b["content"][0]["id"] == "toolu_sub_2" and b["content"][0]["name"] == "ask"
+        # one random prefix per client (the shared database keys tool calls across ALL calls: issue #24), then 1, 2
+        assert id_a.startswith("toolu_sub_") and id_a.endswith("_1") and id_b == id_a[:-1] + "2"
+        assert b["content"][0]["name"] == "ask"
+        other, _ = make(['{"tool": "say", "input": {"line_id": "greet"}}'])
+        c = await other.create("SYSTEM", [{"role": "user", "content": "Call connected."}], TOOLS)
+        assert c["content"][0]["id"] not in (id_a, id_b)  # a second call never reuses the first call's ids
 
     asyncio.run(scenario())
 
@@ -111,7 +117,7 @@ def test_only_new_messages_are_sent_after_the_first_request():
         first = [{"role": "user", "content": "Call connected."}]
         r1 = await client.create("S", first, TOOLS)
         history = first + [{"role": "assistant", "content": r1["content"]},
-                           {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_sub_1",
+                           {"role": "user", "content": [{"type": "tool_result", "tool_use_id": r1["content"][0]["id"],
                                                          "content": json.dumps({"said": "greet", "played": True})}]}]
         await client.create("S", history, TOOLS)
         prompts = holder["sdk"].prompts

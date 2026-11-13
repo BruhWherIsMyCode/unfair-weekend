@@ -366,3 +366,43 @@ def test_with_a_shared_writer_summaries_are_left_to_agent_2_and_learning_waits_f
         assert recorder.failures == 0 and other.failures == 0
     finally:
         other.close()
+
+
+
+def test_two_subscription_calls_in_one_database_get_their_own_tool_ids(env):
+    """Issue #24: the subscription client used to number tool ids toolu_sub_1, _2 ... again in every call, and the
+    shared database keys tool_calls (and answers) by that id across ALL calls."""
+    from analysis.tests.test_claude_sub_client import make
+
+    path, writer = env
+    replies = ['{"tool": "say", "input": {"line_id": "greet"}}',
+               '{"tool": "ask", "input": {"question_id": "q_medicine"}}',
+               '{"tool": "record_answer", "input": {"question_id": "q_medicine", "value": "yes"}}',
+               '{"tool": "finish_call", "input": {"reason": "she_asked_to_stop"}}']
+    for call_id in ("call_s1", "call_s2"):
+        add_call(path, call_id)
+        recorder = make_recorder(writer, call_id)
+        rig = CallRig(required_tasks=REQUIRED)
+        rig.session.call_id = call_id
+        rig.session.recorder = recorder
+        client, _ = make(list(replies))
+        agent = ClaudeAgent(rig.session, rig.handlers, client, rig.clock)
+
+        async def scenario():
+            recorder.begin(rig.session, {})
+            await rig.drive(agent.run())
+            recorder.finish_call(rig.session, rig.session.build_session_result().to_dict())
+
+        asyncio.run(scenario())
+        end_call(path, call_id)
+        settle(writer)
+        assert recorder.failures == 0
+    assert writer.failures == 0
+
+    tools = rows(path, "SELECT call_id, tool_call_id, tool_name, state FROM tool_calls ORDER BY created_at_ms, rowid")
+    names = {c: [t["tool_name"] for t in tools if t["call_id"] == c] for c in ("call_s1", "call_s2")}
+    assert names["call_s1"] == names["call_s2"] and "ask" in names["call_s2"] and "finish_call" in names["call_s2"]
+    assert len({t["tool_call_id"] for t in tools}) == len(tools)
+    answers = rows(path, "SELECT a.call_id, t.call_id AS tool_call FROM answers a JOIN tool_calls t USING (tool_call_id)")
+    assert sorted(a["call_id"] for a in answers) == ["call_s1", "call_s2"]
+    assert all(a["call_id"] == a["tool_call"] for a in answers)

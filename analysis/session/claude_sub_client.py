@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import uuid
 import shutil
 import tempfile
 from typing import Any, Callable, Dict, List, Optional
@@ -97,6 +98,9 @@ class ClaudeSubscriptionClient:
         self._cwd: Optional[str] = None
         self._sent = 0  # how many entries of the message list this session has already seen
         self._counter = 0
+        # tool_calls.tool_call_id is unique across ALL calls in the shared database: one random prefix per client
+        # (one client per call), then a counter, so ids never repeat across calls and stay readable within one.
+        self._id_prefix = "toolu_sub_%s_" % uuid.uuid4().hex[:12]
         self.last_excerpt = ""  # the first 200 characters of the last unparsable answer
 
     # ---- the one public request ------------------------------------------------------------------------
@@ -194,7 +198,7 @@ class ClaudeSubscriptionClient:
         if isinstance(name, str) and name:
             args = obj.get("input")
             self._counter += 1
-            return {"content": [{"type": "tool_use", "id": "toolu_sub_%d" % self._counter, "name": name,
+            return {"content": [{"type": "tool_use", "id": "%s%d" % (self._id_prefix, self._counter), "name": name,
                                  "input": args if isinstance(args, dict) else {}}], "stop_reason": "tool_use"}
         self.last_excerpt = text[:EXCERPT_CHARS]
         return {"content": [{"type": "text", "text": self.last_excerpt}], "stop_reason": "end_turn"}
