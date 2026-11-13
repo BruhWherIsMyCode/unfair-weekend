@@ -57,16 +57,17 @@ def analysis_available() -> bool:
     return True
 
 
-async def run_analysis_call(link: ClientLink, modules: str) -> dict[str, Any]:
-    """Agent 3's session over this link. All call settings are read by analysis.backend_entry (CALL_DRIVER, ...)."""
+async def run_analysis_call(link: ClientLink, modules: str, database_path: str | None = None) -> dict[str, Any]:
+    """Agent 3's session over this link. All call settings are read by analysis.backend_entry (CALL_DRIVER, ...).
+    `database_path` (DATABASE_PATH) turns on Agent 3's recording in the shared database; None leaves it off."""
     ensure_analysis_path()
     from analysis.backend_entry import run_backend_call
 
     if modules == "fake":
         from .fake_tasks import fake_modules
 
-        return await run_backend_call(link, modules=fake_modules())
-    return await run_backend_call(link, modules=None)
+        return await run_backend_call(link, modules=fake_modules(), database_path=database_path)
+    return await run_backend_call(link, modules=None, database_path=database_path)
 
 
 class ScriptedSession:
@@ -138,14 +139,14 @@ async def run_scripted_call(link: ClientLink) -> dict[str, Any]:
     return summary
 
 
-def choose_driver(kind: str) -> Callable[[ClientLink], Awaitable[dict[str, Any]]]:
+def choose_driver(kind: str, database_path: str | None = None) -> Callable[[ClientLink], Awaitable[dict[str, Any]]]:
     if kind == "auto":
         kind = "analysis" if analysis_available() else "scripted"
     if kind == "scripted":
         return run_scripted_call
     if kind in ("analysis", "fake"):
         modules = "fake" if kind == "fake" else "real"
-        return lambda link: run_analysis_call(link, modules)
+        return lambda link: run_analysis_call(link, modules, database_path)
     raise ValueError("CALL_RUNNER must be auto, analysis, fake or scripted")
 
 

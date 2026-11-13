@@ -47,6 +47,8 @@ Optional environment variables (all can stay empty; see `.env.example`). They ar
 - `UW_SAFETY_FLOOR`: only `off` turns off the mid-call message for two same-side readings outside her usual. Experiments only.
 - `UW_CALL_LOG`: `off` hides the live log (one plain line per step, prefixed `[call <id>]`). `UW_RUNS_DIR`: where the call record JSON is written (default `analysis/runs/calls`).
 
+`DATABASE_PATH` (default: unset, database off): the shared SQLite file of [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md). When set, the backend applies the migrations once at startup and passes the path to Agent 3's `run_backend_call`, which reads her usual from the database (the JSON store stays the fallback), records the call in the tables Agent 3 owns (`analysis/storage/README.md` lists them, the transactions they implement and what Agent 2's writers must provide) and adds a baseline snapshot after an eligible normal call. It needs the `calls` row of an answered call, written by the call service's own store; without that row (this branch has no such writer) recording switches itself off for the call with one log line and the call is unchanged. Added by Agent 3 for Agent 2's review.
+
 Required checks on the phone path are smile and arms; the sentence is not measured on the server yet. Four script lines changed text with the one-hand phone script (`setup_phone`, `task_arms`, `repeat_arms`, new `swap_hands`; `data/script.en.json` is a copy of `contract/script.en.json`), so run `python -m checkin_backend.prepare` again to speak them; unchanged lines are reused from the cache. This integration was written by Agent 3 for Agent 2's review. Never run: real phone frames, mediapipe on the server, Claude, real providers.
 
 ## Shared database

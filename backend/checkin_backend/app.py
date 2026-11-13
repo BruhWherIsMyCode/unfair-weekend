@@ -140,7 +140,7 @@ class CallDesk:
         self.links: dict[str, ClientLink] = {}
         self.results: dict[str, dict[str, Any] | None] = {}
         self.tasks: set[asyncio.Task[Any]] = set()
-        self.driver = choose_driver(settings.call_runner)
+        self.driver = choose_driver(settings.call_runner, settings.database_path)
 
     def _spawn(self, coro: Any) -> None:
         task = asyncio.create_task(coro)
@@ -220,6 +220,15 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        if settings.database_path:  # once, before any call: the shared schema (backend/storage)
+            from contextlib import closing
+            from pathlib import Path
+
+            from storage import apply_migrations, connect_database
+
+            Path(settings.database_path).parent.mkdir(parents=True, exist_ok=True)
+            with closing(connect_database(settings.database_path)) as db:
+                apply_migrations(db)
         calls = CallService(ring_timeout_s=settings.ring_timeout_s, call_timeout_s=settings.call_timeout_s)
         hub = DeviceHub()
         gateway = speech if speech is not None else SpeechGateway.from_environment()

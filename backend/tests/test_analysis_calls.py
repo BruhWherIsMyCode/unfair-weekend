@@ -164,6 +164,44 @@ async def test_a_learning_usual_gives_a_learning_message_and_collects_the_first_
 
 
 @pytest.mark.anyio
+async def test_a_database_path_without_a_calls_row_leaves_the_call_unchanged(monkeypatch, tmp_path):
+    """This branch has no Agent 2 writer, so the `calls` row of the answered call does not exist: Agent 3's recorder
+    switches itself off for the call (one log line) and the call, its message and her usual are as without a database."""
+    from contextlib import closing
+    import sqlite3
+
+    from analysis.storage import close_all_writers, shared_writer
+
+    data = install(monkeypatch, tmp_path)
+    database = tmp_path / "db" / "shared.sqlite3"
+    try:
+        async with Server("analysis", database_path=str(database)) as server:
+            sim = SimClient(base=server.base, key=KEY, time_scale=0.05)
+            status, family = await call_with_family(server, sim, 1)
+        await asyncio.to_thread(shared_writer(database).flush)
+    finally:
+        close_all_writers()
+    assert status["reason"] == "completed" and status["summary"]["status"] == "as_usual"
+    assert status["message"]["kind"] == "as_usual" and [m["phase"] for m in family] == ["final"]
+    assert usual(data)["smile"]["sessions"] == 3 and usual(data)["arms"]["sessions"] == 3  # the JSON store still learns
+    with closing(sqlite3.connect(database)) as db:  # migrated at startup, nothing recorded: there was no calls row
+        assert db.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == 1
+        for table in ("call_sessions", "task_attempts", "task_results", "model_turns", "session_summaries"):
+            assert db.execute("SELECT count(*) FROM %s" % table).fetchone()[0] == 0
+
+
+@pytest.mark.anyio
+async def test_without_a_database_path_no_database_file_is_made(monkeypatch, tmp_path):
+    install(monkeypatch, tmp_path)
+    monkeypatch.delenv("DATABASE_PATH", raising=False)
+    async with Server("analysis") as server:
+        sim = SimClient(base=server.base, key=KEY, time_scale=0.02)
+        status = await run_call(server, sim, timeout=90)
+    assert status["summary"]["status"] == "as_usual"
+    assert not list(tmp_path.rglob("*.sqlite3"))
+
+
+@pytest.mark.anyio
 async def test_a_bad_setting_ends_the_call_with_an_incomplete_family_message(monkeypatch, tmp_path):
     install(monkeypatch, tmp_path)
     monkeypatch.setenv("UW_BASELINE_NEEDED", "zero")
