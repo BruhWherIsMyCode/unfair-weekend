@@ -224,7 +224,8 @@ class SessionRecorder:
 
     def begin(self, session: Any, frozen_snapshots: Optional[Dict[str, str]] = None) -> None:
         """Publish the definitions, freeze one definition + baseline per task and create the session row.
-        `frozen_snapshots`: task -> database snapshot id the call's usual came from; any other task gets the empty
+        `frozen_snapshots`: task -> database source snapshot id the call's usual came from. A changed learning
+        target publishes a new snapshot from those same members before freezing; any other task gets the empty
         placeholder snapshot (its usual came from the JSON file)."""
         frozen_snapshots = dict(frozen_snapshots or {})
         rows = definitions.task_rows(session.modules)
@@ -239,8 +240,10 @@ class SessionRecorder:
             frozen: Dict[str, Any] = {}
             for task, row in rows.items():
                 definitions.publish_task_definition(db, row, stamp)
-                snapshot_id = frozen_snapshots.get(task) or repo.ensure_unseeded_snapshot(
-                    db, self.person_id, row["definition_id"], self.call_id, task, self.needed, stamp)
+                source_id = frozen_snapshots.get(task)
+                snapshot_id = repo.ensure_configured_snapshot(db, source_id, task, self.needed, stamp) if source_id \
+                    else repo.ensure_unseeded_snapshot(
+                        db, self.person_id, row["definition_id"], self.call_id, task, self.needed, stamp)
                 frozen[task] = (row["definition_id"], snapshot_id)
             repo.start_call_session(db, call_id=self.call_id, policy_version=policy_version,
                                     script_version=self.script_version, snapshot=snapshot, stamp=stamp, frozen=frozen)

@@ -7,8 +7,9 @@ returns, per task, the dict shape `analysis.pc.store.BaselineStore.load_baseline
     arms      {"snapshot_id", "sessions", "needed", "ready", "hand_left": ..., "hand_right": ...}
     sentence  like smile (seconds)
 
-plus the snapshot id the call will freeze. A task with no real snapshot (sessions = 0 is only a placeholder) is not in
-the result; `choose` then keeps the JSON baseline for it and says so in one line.
+plus the source snapshot id. A changed learning target is recomputed from that snapshot's members; the recorder
+publishes and freezes its new immutable snapshot before recording the call. A task with no real snapshot
+(sessions = 0 is only a placeholder) is not in the result; `choose` keeps the JSON baseline for it.
 """
 from __future__ import annotations
 
@@ -29,8 +30,8 @@ def _smile_like(row: sqlite3.Row, snapshot_id: str) -> Dict[str, Any]:
             "usual_high": row["usual_high"], "snapshot_id": snapshot_id}
 
 
-def _arms(db: sqlite3.Connection, row: sqlite3.Row, snapshot_id: str) -> Optional[Dict[str, Any]]:
-    members = [m["source_attempt_id"] for m in repo.snapshot_members(db, snapshot_id)]
+def _arms(db: sqlite3.Connection, row: Any, snapshot_id: str, source_id: str) -> Optional[Dict[str, Any]]:
+    members = [m["source_attempt_id"] for m in repo.snapshot_members(db, source_id)]
     values = repo.member_values(db, "arms", members)
     if len(values) != row["sessions"] or any(v["left"] is None or v["right"] is None for v in values):
         return None  # members without their per-hand values cannot give a usual range
@@ -41,20 +42,25 @@ def _arms(db: sqlite3.Connection, row: sqlite3.Row, snapshot_id: str) -> Optiona
             "ready": bool(left["ready"] and right["ready"]), "hand_left": left, "hand_right": right}
 
 
-def read_usual(database_path: Any, person_id: str, rows: Dict[str, Dict[str, Any]]
+def read_usual(database_path: Any, person_id: str, rows: Dict[str, Dict[str, Any]], needed: Optional[int] = None
                ) -> Dict[str, Tuple[str, Dict[str, Any]]]:
-    """task -> (snapshot_id, baseline dict) for every task that has a real snapshot of the person. `rows` is
-    `definitions.task_rows(modules)`."""
+    """task -> (source snapshot id, baseline dict), applying the current target when supplied.
+
+    `rows` is `definitions.task_rows(modules)`. The baseline's own snapshot_id identifies the recomputed snapshot;
+    SessionRecorder.begin publishes it from the source before freezing it. This function never writes.
+    """
     out: Dict[str, Tuple[str, Dict[str, Any]]] = {}
     with closing(connect(database_path)) as db:
         for task, row in rows.items():
             snap = repo.latest_snapshot(db, person_id, row["definition_id"], real_only=True)
             if snap is None:
                 continue
-            snapshot_id = snap["snapshot_id"]
-            usual = _arms(db, snap, snapshot_id) if task == "arms" else _smile_like(snap, snapshot_id)
+            source_id = snap["snapshot_id"]
+            configured = repo.retargeted_snapshot(db, snap, task, needed) if needed is not None else snap
+            snapshot_id = configured["snapshot_id"]
+            usual = _arms(db, configured, snapshot_id, source_id) if task == "arms" else _smile_like(configured, snapshot_id)
             if usual is not None:
-                out[task] = (snapshot_id, usual)
+                out[task] = (source_id, usual)
     return out
 
 

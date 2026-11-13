@@ -19,7 +19,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from analysis import baseline as baseline_mod
 from analysis.session import limits
-from analysis.storage.util import ConflictError, NotReady, StaleWrite, StorageError, dumps
+from analysis.storage.util import ConflictError, NotReady, StaleWrite, StorageError, dumps, fingerprint
 
 DB_TOOLS = ("say", "ask", "record_answer", "run_task", "recover_resource", "finish_call")  # alert_family has no row
 SUMMARY_STATUS = {"concern_raised": "incomplete"}  # the schema has no concern status (see README, "For Agent 2")
@@ -66,6 +66,56 @@ def member_values(db: sqlite3.Connection, task: str, attempt_ids: Sequence[str])
 
 
 # ---- baselines: placeholders and snapshots ----------------------------------------------------------------------------
+
+def retargeted_snapshot(db: sqlite3.Connection, row: Any, task: str, needed: int) -> Dict[str, Any]:
+    """Build a new snapshot from the same eligible members when the configured learning target changes.
+
+    This only reads. The recorder publishes the returned snapshot before freezing it for the next call.
+    Historical snapshots and their members are never changed.
+    """
+    snap = dict(row)
+    if snap["needed"] == needed:
+        return snap
+    members = snapshot_members(db, snap["snapshot_id"])
+    values = member_values(db, task, [member["source_attempt_id"] for member in members])
+    if len(members) != snap["sessions"]:
+        raise StorageError("baseline members do not match its session count")
+    ready, low, high = 0, None, None
+    if task == "arms":
+        if any(value["left"] is None or value["right"] is None for value in values):
+            raise StorageError("baseline has no complete hand readings")
+        # The schema has one range, so each hand's bounds are rebuilt by baselines._arms instead.
+    else:
+        if any(value is None for value in values):
+            raise StorageError("baseline has no complete readings")
+        kwargs: Dict[str, Any] = {"metric": "sentence_duration", "min_half_width": limits.SENTENCE_MIN_HALF_WIDTH_S} \
+            if task == "sentence" else {"metric": "corner_height"}
+        baseline = baseline_mod.make_baseline(values, needed=needed, **kwargs)
+        ready, low, high = int(baseline["ready"]), baseline["usual_low"], baseline["usual_high"]
+    snap.update(snapshot_id="retargeted_%s" % fingerprint([snap["snapshot_id"], needed], 24), needed=needed,
+                ready=ready, usual_low=low, usual_high=high)
+    return snap
+
+
+def ensure_configured_snapshot(db: sqlite3.Connection, snapshot_id: str, task: str, needed: int, stamp: int) -> str:
+    """Publish a target-adjusted immutable snapshot in the recorder's existing writer transaction."""
+    source = db.execute("SELECT * FROM baseline_snapshots WHERE snapshot_id = ?", (snapshot_id,)).fetchone()
+    if source is None:
+        raise StorageError("baseline snapshot does not exist")
+    snap = retargeted_snapshot(db, source, task, needed)
+    target = snap["snapshot_id"]
+    if target == snapshot_id or db.execute("SELECT 1 FROM baseline_snapshots WHERE snapshot_id = ?", (target,)).fetchone():
+        return target
+    db.execute("INSERT INTO baseline_snapshots (snapshot_id, person_id, definition_id, sessions, needed, ready, "
+               "usual_low, usual_high, created_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+               (target, snap["person_id"], snap["definition_id"], snap["sessions"], snap["needed"], snap["ready"],
+                snap["usual_low"], snap["usual_high"], stamp))
+    for member in snapshot_members(db, snapshot_id):
+        db.execute("INSERT INTO baseline_members (snapshot_id, source_attempt_id, source_call_id, definition_id) "
+                   "VALUES (?, ?, ?, ?)", (target, member["source_attempt_id"], member["source_call_id"],
+                                          snap["definition_id"]))
+    return target
+
 
 def ensure_unseeded_snapshot(db: sqlite3.Connection, person_id: str, definition_id: str, call_id: str, task: str,
                              needed: int, stamp: int) -> str:
