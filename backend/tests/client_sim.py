@@ -42,6 +42,7 @@ class SimClient:
     hang_up_after: str | None = None
     seen: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     said: list[str] = field(default_factory=list)
+    said_commands: list[dict[str, Any]] = field(default_factory=list)  # the whole say command of each line played
     call_id: str | None = None
     _event_n: int = 0
     _resource_seq: int = 0
@@ -124,6 +125,7 @@ class SimClient:
             audio = await http.get(command["audio_path"])
             audio.raise_for_status()
             self.said.append(command["line_id"])
+            self.said_commands.append(command)
             await asyncio.sleep(command["duration_ms"] / 1000 * self.time_scale)
             await self.post_event(http, type="playback.completed", command_id=cid)
             if self.hang_up_after == command["line_id"]:

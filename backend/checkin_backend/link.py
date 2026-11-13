@@ -1,7 +1,8 @@
 """ClientLink: one connected call's command channel to the parent client.
 
 It implements the CallAdapter protocol that Agent 3's CallSession expects (analysis/session/adapters.py):
-say, listen, start_capture, cancel_capture, samples, publish, send_progress. Commands go to the parent
+say, listen, start_capture, cancel_capture, samples, publish, send_progress, and the optional say_text (the call
+agent's own words, line_id `agent_remark`). Commands go to the parent
 device over SSE (`command.execute`, `command.cancel`, `task.progress`); acknowledgments, answer uploads and
 task samples come back through HTTP routes that call the `on_*` methods below.
 
@@ -207,7 +208,20 @@ class ClientLink:
     # ---- CallAdapter -----------------------------------------------------------------------------
 
     async def say(self, line_id: str) -> None:
-        text = render_line(self.script, line_id, self.person.name)
+        await self._say(line_id, render_line(self.script, line_id, self.person.name))
+
+    async def say_text(self, text: str) -> None:
+        """The call agent's own words (Agent 3's optional `say_text` capability, already checked by the call code).
+
+        Like `say`, but the line id is `agent_remark` and the caption is the given text. The speech gateway generates
+        the voice on the fly (cached by text like any other line; caption-only without a key). A video clip is
+        attached only if one is already ready, never generated during the call."""
+        text = " ".join(str(text).split())[:400]
+        if not text:
+            raise PlaybackFailed("empty text")
+        await self._say("agent_remark", text)
+
+    async def _say(self, line_id: str, text: str) -> None:
         try:
             prepared = await self.speech.prepare(text)
         except SpeechError as exc:
