@@ -27,7 +27,7 @@ async def test_speech_format_single_generation_private_cache_and_offline_replay(
         await gateway.aclose()
     assert len(requests) == 1
     request = requests[0]
-    assert str(request.url) == "https://api.elevenlabs.io/v1/text-to-speech/JBFqnCBsd6RMkjVDRZzb?output_format=pcm_16000"
+    assert str(request.url) == "https://api.elevenlabs.io/v1/text-to-speech/4ytNm4ZbEC9VLwa0Yy78?output_format=pcm_16000"
     assert json.loads(request.content) == {"text": "Hello, Ona.", "model_id": "eleven_flash_v2_5", "language_code": "en"}
     assert request.headers["xi-api-key"] == "provider-secret"
     assert all(line.audio == PCM and line.duration_ms == 100 and line.voiced for line in lines)
