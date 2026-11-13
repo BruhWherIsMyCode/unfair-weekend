@@ -80,6 +80,10 @@ def apply_migrations(
                 raise ValueError("Applied migration history differs from the checked-in files.")
         for version, name, checksum, script in migrations[len(history):]:
             for statement in _statements(script):
+                without_comments = re.sub(r"--[^\n]*|/\*.*?\*/", "", statement, flags=re.DOTALL)
+                keyword = without_comments.lstrip().split(maxsplit=1)[0].upper().rstrip(";")
+                if keyword in {"BEGIN", "COMMIT", "END", "ROLLBACK", "SAVEPOINT", "RELEASE"}:
+                    raise ValueError("Migration transaction control belongs to the runner.")
                 connection.execute(statement)
             connection.execute(
                 "INSERT INTO schema_migrations VALUES (?, ?, ?, ?)",

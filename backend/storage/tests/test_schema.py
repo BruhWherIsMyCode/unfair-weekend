@@ -57,6 +57,18 @@ class MigrationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Foreign keys"):
                 apply_migrations(db)
 
+    def test_pending_migration_cannot_commit_partial_changes(self):
+        with tempfile.TemporaryDirectory() as directory, closing(connect_database(":memory:")) as db:
+            path = Path(directory)
+            (path / "0001_base.sql").write_text("CREATE TABLE original (id TEXT);\n")
+            apply_migrations(db, path)
+            (path / "0002_bad.sql").write_text("CREATE TABLE partial (id TEXT);\n-- accidental transaction boundary\nCOMMIT;\n")
+            with self.assertRaisesRegex(ValueError, "transaction control"):
+                apply_migrations(db, path)
+            self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name = 'partial'").fetchone())
+            self.assertEqual(db.execute("SELECT count(*) FROM schema_migrations").fetchone()[0], 1)
+            self.assertIsNotNone(db.execute("SELECT name FROM sqlite_master WHERE name = 'original'").fetchone())
+
     def test_all_tables_use_strict_types(self):
         with closing(connect_database(":memory:")) as db:
             apply_migrations(db)
