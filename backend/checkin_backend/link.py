@@ -12,6 +12,7 @@ cancellation cannot interleave halfway.
 
 import asyncio
 import hashlib
+import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,9 +23,13 @@ from .delivery import FamilyDelivery
 from .avatar import ClipGateway
 from .hub import DeviceHub
 from .media import MAX_ATTEMPT_BYTES
+from .logging_config import log_event
 from .people import Person
 from .speech import SpeechError, SpeechGateway, load_script, render_line
 from .store import NoStore, Store
+from .session_logging import SessionEventLog
+
+log = logging.getLogger(__name__)
 
 ANSWER_CAPTURE = {
     "media_kind": "audio",
@@ -143,6 +148,9 @@ class ClientLink:
         entry = {"kind": kind}
         entry.update(fields)
         self.log.append(entry)
+        level = logging.WARNING if kind.endswith("_failed") or kind == "command_timeout" else logging.INFO
+        log_event(log, level, f"client.{kind}", call_id=self.call_id,
+                  **{key: value for key, value in fields.items() if key != "error"})
 
     def _devices(self) -> list[str]:
         return self.hub.parents_of(self.person.person_id)
@@ -165,6 +173,7 @@ class ClientLink:
         return command
 
     def _execute(self, command: Command, deadline_s: float) -> None:
+        self._note("command_sent", command_id=command.command_id, command_kind=command.kind, deadline_s=deadline_s)
         self.store.record_command(self.call_id, command.payload, deadline_s)
         self._push(
             "command.execute",
@@ -191,6 +200,8 @@ class ClientLink:
         try:
             return await asyncio.wait_for(asyncio.shield(command.done), timeout_s)
         except TimeoutError:
+            self._note("command_timeout", command_id=command.command_id, command_kind=command.kind,
+                       timeout_s=timeout_s)
             self._settle(command, error=PlaybackFailed("timeout"))
             self._cancel_on_client(command.command_id, "timeout")
             raise PlaybackFailed(f"{command.kind} {command.command_id} timed out") from None
@@ -232,7 +243,7 @@ class ClientLink:
         try:
             prepared = await self.speech.prepare(text)
         except SpeechError as exc:
-            self._note("speech_failed", line=line_id, error=str(exc))
+            self._note("speech_failed", line=line_id, error=str(exc), error_type=type(exc).__name__)
             raise PlaybackFailed(str(exc)) from None
         command = self._new_command("say", {})
         command.audio = prepared.audio
@@ -276,7 +287,8 @@ class ClientLink:
         try:
             text = await self.speech.transcribe(audio, content_type)
         except SpeechError as exc:
-            self._note("transcription_failed", command_id=command.command_id, error=str(exc))
+            self._note("transcription_failed", command_id=command.command_id, error=str(exc),
+                       error_type=type(exc).__name__)
             return None
         finally:
             del audio
@@ -383,7 +395,8 @@ class ClientLink:
             return
         self._events[event_id] = print_
         kind = event["type"]
-        self._note("client_event", type=kind, command_id=event.get("command_id"))
+        self._note("client_event", type=kind, command_id=event.get("command_id"),
+                   resource=event.get("resource"), state=event.get("state"))
         if kind == "client.ready":
             self.ready.set()
             return
@@ -434,6 +447,9 @@ class ClientLink:
 
     def attach(self, session: SessionEvents) -> None:
         self.session = session
+        previous = getattr(session, "log", None)
+        if isinstance(previous, list) and not isinstance(previous, SessionEventLog):
+            session.log = SessionEventLog(previous, self.call_id)
         pending = self._pending_resource_events
         self._pending_resource_events = []
         for event in pending:
@@ -498,6 +514,8 @@ class ClientLink:
         if last_sequence != capture.last_sequence:
             raise LinkRejected("conflict", "last_sequence does not match the last accepted sample.", 409)
         capture.finish_print = print_
+        self._note("capture_finished", attempt_id=attempt_id, samples=len(capture.prints),
+                   total_bytes=capture.total_bytes, captured_until_ms=captured_until_ms)
         self.store.record_command_done(self.call_id, attempt_id, "completed")
         self._close_capture(capture)
         command = self._commands.get(attempt_id)
