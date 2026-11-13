@@ -23,6 +23,7 @@ Telling her family:
   - she says she suddenly feels weak, numb, dizzy, cannot see well, has trouble speaking, or that something is badly wrong ("said_unwell");
   - she asks for help or for her family ("asked_for_help");
   - her answers do not make sense for the question ("confused_answers");
+  - when an answer mentions weakness, numbness, dizziness, trouble seeing or speaking, or feeling badly unwell, the reason is "said_unwell", never "confused_answers", even if the answer does not fit the question;
   - a reading was far outside her usual (distance 1 or more) and the repeat could not be measured ("reading_far_outside");
   - anything else that clearly worries you ("other").
   Give a short note (at most 20 words) of what you noticed, in plain words.
