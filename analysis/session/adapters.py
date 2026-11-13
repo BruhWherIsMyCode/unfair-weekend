@@ -54,8 +54,10 @@ CONCERN_WORDS = {"said_unwell": "she said she does not feel well", "asked_for_he
                  "reading_far_outside": "one check was far from her usual", "other": "something else"}
 
 
-def render_family_text(summary: Dict[str, Any], name: str) -> str:
-    """A stand-in for Agent 2's approved templates, used by the fake and the demo only."""
+def render_family_text(summary: Dict[str, Any], name: str, pronoun: str = "she") -> str:
+    """A stand-in for Agent 2's approved templates, used by the fake and the demo only. `pronoun` is she or he."""
+    he = pronoun == "he"
+    sub, poss, obj = ("he", "his", "him") if he else ("she", "her", "her")
     status = summary.get("status")
     if status == "change_noticed":
         things = [_THING[s["sign"]] for s in summary["signs"] if s["confirmed"]]
@@ -64,15 +66,21 @@ def render_family_text(summary: Dict[str, Any], name: str) -> str:
         else:  # v12: the face and an arm can confirm each other ("Ona's smile and arm look different ...")
             noun = " and ".join(n for n, _ in things)
             verb = "look" if all(v == "looks" for _, v in things) else "seem"
-        return "%s's %s %s different from her usual. Call her now. If she seems unwell, call 112." % (name, noun, verb)
+        return "%s's %s %s different from %s usual. Call %s now. If %s seems unwell, call 112." % (
+            name, noun, verb, poss, obj, sub)
     if status == "concern_raised":
         reason = (summary.get("concern") or {}).get("reason", "other")
-        return ("%s said or showed something during today's check-in that needs a look (%s). Please call her. "
-                "If she seems unwell, call 112." % (name, CONCERN_WORDS.get(reason, CONCERN_WORDS["other"])))
+        words = CONCERN_WORDS.get(reason, CONCERN_WORDS["other"])
+        if he:
+            words = words.replace("she said she does", "he said he does").replace("she asked", "he asked") \
+                .replace("her answers", "his answers").replace("her usual", "his usual")
+        return ("%s said or showed something during today's check-in that needs a look (%s). Please call %s. "
+                "If %s seems unwell, call 112." % (name, words, obj, sub))
     if status == "incomplete":
-        return "%s's check-in could not be finished. Please call her. If she seems unwell, call 112." % name
+        return "%s's check-in could not be finished. Please call %s. If %s seems unwell, call 112." % (name, obj, sub)
     if status == "learning":
-        return "%s's check-in is done. We are still learning her usual, so there is nothing to compare yet." % name
+        return ("%s's check-in is done. We are still learning %s usual, so there is nothing to compare yet."
+                % (name, poss))
     return "%s's check-in today looked as usual." % name
 
 

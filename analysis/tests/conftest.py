@@ -15,6 +15,7 @@ def two_readings(monkeypatch):
 
 @pytest.fixture
 def alert_mid_call(monkeypatch):
-    """A confirmed change is told mid-call (limits.CHANGE_ALERT_AT_END off). The demo default since v12b tells it
-    when the call finishes."""
+    """A confirmed change and the agent's concern are told mid-call (limits.CHANGE_ALERT_AT_END and
+    CONCERN_ALERT_AT_END off). The demo default since v12b/v14 tells both when the call finishes."""
     monkeypatch.setattr(limits, "CHANGE_ALERT_AT_END", False)
+    monkeypatch.setattr(limits, "CONCERN_ALERT_AT_END", False)

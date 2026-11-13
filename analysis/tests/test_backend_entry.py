@@ -230,6 +230,33 @@ def test_a_crash_inside_run_call_gives_the_session_result(tmp_path, monkeypatch)
     assert any(e["kind"] == "call_crashed" for e in record["session_log"])
 
 
+def test_a_crash_still_publishes_one_final_message_with_a_pending_concern(tmp_path, monkeypatch):
+    async def boom_after_concern(session, adapter, *args, **kwargs):
+        await session.raise_concern("said_unwell", "n")
+        raise RuntimeError("driver bug")
+
+    monkeypatch.setattr(backend_entry, "run_call", boom_after_concern)
+    link = Link()
+    summary = run(link, seeded_env(tmp_path))
+    assert summary["status"] == "concern_raised"
+    assert [p["phase"] for p in link.published] == ["final"]  # nothing mid-call, one final
+    assert link.own_said == [limits.ALERT_REASSURANCE]
+
+
+def test_the_persons_profile_reaches_the_session(tmp_path, monkeypatch):
+    seen: Dict[str, Any] = {}
+
+    async def fake_run_call(session, adapter, mode=None, client=None, script=None, agent_clock=None, backend="api"):
+        seen.update(pronoun=session.person_pronoun, age=session.person_age, about=session.person_about)
+        return session.build_session_result().to_dict()
+
+    monkeypatch.setattr(backend_entry, "run_call", fake_run_call)
+    link = Link()
+    link.person = SimpleNamespace(person_id=PERSON, name="Feodor", label="live", pronoun="he", age=21, about=("Tea.",))
+    run(link, seeded_env(tmp_path))
+    assert seen == {"pronoun": "he", "age": 21, "about": ("Tea.",)}
+
+
 def test_a_failing_baseline_store_is_logged_not_raised(tmp_path, monkeypatch):
     class Broken:
         def load_baselines(self):

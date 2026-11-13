@@ -50,8 +50,14 @@ class CallSession:
                  baselines: Optional[Dict[str, Dict[str, Any]]] = None, clock: Any = None, label: str = "live",
                  required_tasks: Sequence[str] = limits.REQUIRED_TASKS,
                  initial_resources: Optional[Dict[str, str]] = None,
-                 safety_floor: bool = limits.SAFETY_FLOOR_DEFAULT, recorder: Any = None, debug: Any = None) -> None:
+                 safety_floor: bool = limits.SAFETY_FLOOR_DEFAULT, recorder: Any = None, debug: Any = None,
+                 person_pronoun: str = "she", person_age: Optional[int] = None,
+                 person_about: Sequence[str] = ()) -> None:
         self.call_id = call_id
+        # v14: the call person's profile, used to fill the call prompt (agent.build_system_prompt)
+        self.person_pronoun = person_pronoun if person_pronoun in ("she", "he") else "she"
+        self.person_age = person_age
+        self.person_about = tuple(str(a) for a in (person_about or ()))
         # Debug mode (UW_DEBUG=on): a debug_view.DebugView or None. It only reports; None = exactly the normal call.
         self.debug = debug
         # Optional database recorder (analysis/storage). None = exactly the behaviour without a database. Its hooks
@@ -100,6 +106,7 @@ class CallSession:
         self.published: List[Dict[str, Any]] = []
         self._change_published = False
         self._change_pending = False  # v12b: a confirmed change waiting for the end of the call (CHANGE_ALERT_AT_END)
+        self._concern_pending = False  # v14: an agent concern waiting for the end of the call (CONCERN_ALERT_AT_END)
         self._reassured = False  # v12b: she heard that her family was told (ALERT_REASSURANCE), once per call
 
         self._attempt_counter = 0
@@ -729,7 +736,8 @@ class CallSession:
 
     async def raise_concern(self, reason: str, note: str) -> bool:
         """The call agent tells the family something worries it (v7 alert_family). The concern is kept in the
-        summary and published mid-call at once, once; the final publish updates the same message.
+        summary; with CONCERN_ALERT_AT_END (v14, default) it is told once when the call finishes, otherwise it is
+        published mid-call at once, once, and the final publish updates the same message.
         Returns True when the concern is recorded."""
         if self.hung_up or reason not in limits.ALERT_REASONS:
             return False
@@ -740,7 +748,12 @@ class CallSession:
         self.concern = {"raised_by": "agent", "reason": reason, "note": note}
         self._log("concern_raised", reason=reason, note_chars=len(note))
         self._rec("context", self)
-        if not self._concern_published:
+        if limits.CONCERN_ALERT_AT_END:
+            # v14: kept now, told once when the call finishes (finish())
+            if not self._concern_pending:
+                self._concern_pending = True
+                self._log("concern_pending", reason=reason)
+        elif not self._concern_published:
             if await self._publish("mid_call"):
                 self._concern_published = True
                 await self._reassure()
@@ -858,8 +871,9 @@ class CallSession:
         if self._active is not None:
             raise RuntimeError("finish() while a task is running")
         published = False
-        if self._change_pending and not self.hung_up:
-            # v12b: the change is told at the end: the family first, then she hears it, then goodbye
+        if (self._change_pending or self._concern_pending) and not self.hung_up:
+            # v12b/v14: a change or a concern is told at the end: the family first (one final publish carrying
+            # both), then she hears it, then goodbye
             published = await self._publish("final")
             await self._reassure()
         if not self.hung_up:

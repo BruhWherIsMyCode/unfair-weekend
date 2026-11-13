@@ -39,14 +39,27 @@ class _RequestTimeout(Exception):
     pass
 
 
+PRONOUN_WORDS = {"she": ("she", "her", "her"), "he": ("he", "his", "him")}  # {she} {her} {her_obj}
+
+
 def build_system_prompt(name: str, script: Dict[str, str], prompt_path: Optional[Path] = None,
-                        checks: Sequence[str] = ("smile", "arms", "sentence")) -> str:
-    """agent_system.md with its placeholders filled by str.replace: {lines}, {checks} (the checks of THIS call, in
-    order: on the phone the sentence is not one, and announcing it cost the call a line and a step), then {name}."""
+                        checks: Sequence[str] = ("smile", "arms", "sentence"), pronoun: str = "she",
+                        age: Optional[int] = None, about: Sequence[str] = ()) -> str:
+    """agent_system.md with its placeholders filled by str.replace (the prompt has JSON-like braces, never
+    str.format): {lines}, {checks} (the checks of THIS call, in order: on the phone the sentence is not one, and
+    announcing it cost the call a line and a step), {about} (one "- " line per fact), {she} {her} {her_obj}
+    (she/her/her or he/his/him), then {name}."""
     template = Path(prompt_path or PROMPT_PATH).read_text("utf-8")
     lines = "\n".join('- %s: "%s"' % (line_id, script[line_id]) for line_id in CAUSABLE_LINES if line_id in script)
     order = ", then ".join(checks) if checks else "none"
-    return template.replace("{lines}", lines).replace("{checks}", order).replace("{name}", name)
+    facts = []
+    if age:
+        facts.append("- Age: %d." % age)
+    facts.extend("- %s" % str(a).strip() for a in (about or ()) if str(a).strip())
+    about_text = "\n".join(facts) if facts else "- Nothing else is known."
+    she, her, her_obj = PRONOUN_WORDS.get(pronoun, PRONOUN_WORDS["she"])
+    return (template.replace("{lines}", lines).replace("{checks}", order).replace("{about}", about_text)
+            .replace("{her_obj}", her_obj).replace("{her}", her).replace("{she}", she).replace("{name}", name))
 
 
 def _loggable(name: Any, args: Any) -> Dict[str, Any]:
@@ -95,7 +108,10 @@ class ClaudeAgent:
             await self._fallback(self.unavailable_reason or "no_client")
             return
         checks = [t for t in limits.TASKS if t in self.session.required_tasks]
-        system = build_system_prompt(self.session.person_name, self.handlers.script, self.prompt_path, checks)
+        system = build_system_prompt(self.session.person_name, self.handlers.script, self.prompt_path, checks,
+                                     getattr(self.session, "person_pronoun", "she"),
+                                     getattr(self.session, "person_age", None),
+                                     getattr(self.session, "person_about", ()))
         tools = self.handlers.tool_definitions()
         messages: List[Dict[str, Any]] = [{"role": "user", "content": FIRST_MESSAGE}]
         schema_streak = 0

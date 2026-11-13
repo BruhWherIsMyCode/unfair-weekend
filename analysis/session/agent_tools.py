@@ -358,7 +358,11 @@ class ToolHandlers:
              "check still has attempts and no settled result. If she asked to stop, pass reason she_asked_to_stop.",
              "input_schema": {"type": "object", "properties": {"reason": {"type": "string", "enum": [STOP_REASON]}},
                               "additionalProperties": False}},
-            {"name": "alert_family", "description": "Tell her family something worries you, now. At most %d times "
+            {"name": "alert_family", "description": "Record something that worries you. The family is told when the "
+             "call finishes, not now. At most %d times per call, after the greeting. Give a short plain note (at most "
+             "20 words) of what you noticed. The code keeps it; you carry on with the call." % limits.ALERT_MAX_PER_CALL
+             if limits.CONCERN_ALERT_AT_END else
+             "Tell her family something worries you, now. At most %d times "
              "per call, after the greeting. Give a short plain note (at most 20 words) of what you noticed. The code "
              "sends it; you carry on with the call." % limits.ALERT_MAX_PER_CALL,
              "input_schema": {"type": "object", "properties": {
@@ -667,6 +671,8 @@ class ToolHandlers:
             note = note[:limits.ALERT_NOTE_MAX_CHARS]
         self.alerts += 1
         await self.session.raise_concern(args["reason"], note)
+        if limits.CONCERN_ALERT_AT_END:
+            return {"recorded": True, "family_told": "when_the_call_finishes"}
         return {"sent": True}
 
     async def _do_recover_resource(self, args: Dict[str, Any]) -> Dict[str, Any]:

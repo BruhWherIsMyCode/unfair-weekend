@@ -188,6 +188,7 @@ def test_a_failed_request_and_refused_and_rejected_steps_are_recorded(env):
     assert rows(path, "SELECT phase FROM call_sessions")[0]["phase"] == "finished"
 
 
+@pytest.mark.usefixtures("alert_mid_call")
 def test_alert_family_has_no_tool_row_but_its_turn_and_the_summary_status_are_kept(env):
     path, writer = env
     script = [tu("say", {"line_id": "greet"}, "toolu_1"),
