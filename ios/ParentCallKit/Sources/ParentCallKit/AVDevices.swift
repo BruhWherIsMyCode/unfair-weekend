@@ -5,16 +5,22 @@ import UIKit
 /// Real phone devices. Written for iOS 17; NOT compiled or run yet (built on Linux without AVFoundation).
 /// Check on a device: playback end timing, frame orientation/mirroring, PCM conversion and permissions.
 public enum PhoneDevices {
-    public static func make() -> ParentDevices {
-        let audio = AudioSessionBox()
+    public static func make(live: LiveAvatarPlayer? = nil) -> ParentDevices {
+        let audio = AudioSessionBox.shared
         return ParentDevices(player: PCMPlayer(audio: audio), recorder: WAVRecorder(audio: audio),
                              camera: FrontCamera(), microphone: PCMMicrophone(audio: audio),
-                             clips: AvatarClips(audio: audio))
+                             clips: AvatarClips(audio: audio), live: live)
     }
 
-    /// Only the clip player, with its own audio session handling (for the Simulator, whose other devices are fake).
+    /// Only the clip player (for the Simulator, whose other devices are fake).
     public static func makeClips() -> AvatarClips {
-        AvatarClips(audio: AudioSessionBox())
+        AvatarClips(audio: AudioSessionBox.shared)
+    }
+
+    /// Configures and activates the call's audio session (play and record, speaker, mixes with other audio).
+    /// For players outside this package, such as the live avatar, that need it active before they play.
+    public static func activateAudio() throws {
+        try AudioSessionBox.shared.activate()
     }
 
     public static func requestPermissions() async -> (camera: Bool, microphone: Bool) {
@@ -25,19 +31,91 @@ public enum PhoneDevices {
 }
 
 final class AudioSessionBox: @unchecked Sendable {
+    static let shared = AudioSessionBox()
+
     private let lock = NSLock()
     private var configured = false
 
+    /// Sets the category once; activates every time, because an interruption or CallKit may have deactivated it.
+    /// `.mixWithOthers` keeps the silent keep-alive (and so the app) running when another app plays audio.
     func activate() throws {
         lock.lock()
         defer { lock.unlock() }
-        if configured {
-            return
-        }
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])
+        if !configured {
+            try session.setCategory(.playAndRecord, mode: .voiceChat,
+                                    options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
+            configured = true
+        }
         try session.setActive(true)
-        configured = true
+    }
+}
+
+/// Demo workaround, not for the App Store. A silent loop on the call's audio session (with the "audio" background
+/// mode) keeps the app running in the background. The event stream stays open, so a call can still ring through
+/// CallKit with no VoIP push. iOS may still end the app (low memory, a restart): then she must open it again.
+public final class BackgroundKeepAlive: @unchecked Sendable {
+    private var player: AVAudioPlayer?
+    private var observers: [NSObjectProtocol] = []
+
+    public init() {}
+
+    /// Main thread. Safe to call again; restarts the loop after an interruption or a media-services reset.
+    public func start() {
+        do {
+            try AudioSessionBox.shared.activate()
+            if player == nil {
+                player = try AVAudioPlayer(data: Self.silentWAV(seconds: 2))
+                player?.numberOfLoops = -1
+                player?.prepareToPlay()
+                observe()
+            }
+            if player?.isPlaying == false {
+                player?.play()
+            }
+        } catch {
+            // Without the loop the app still works in the foreground; it just will not ring in the background.
+        }
+    }
+
+    private func observe() {
+        let center = NotificationCenter.default
+        observers = [
+            center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) {
+                [weak self] note in
+                guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                      AVAudioSession.InterruptionType(rawValue: raw) == .ended else { return }
+                self?.start()
+            },
+            center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil,
+                               queue: .main) { [weak self] _ in
+                self?.player = nil
+                self?.start()
+            },
+        ]
+    }
+
+    /// 16 kHz mono 16-bit WAV of zeros.
+    static func silentWAV(seconds: Int) -> Data {
+        let rate = 16000
+        let dataBytes = rate * 2 * seconds
+        var wav = Data()
+        func add(_ value: UInt32) { withUnsafeBytes(of: value.littleEndian) { wav.append(contentsOf: $0) } }
+        func add16(_ value: UInt16) { withUnsafeBytes(of: value.littleEndian) { wav.append(contentsOf: $0) } }
+        wav.append(contentsOf: Array("RIFF".utf8))
+        add(UInt32(36 + dataBytes))
+        wav.append(contentsOf: Array("WAVEfmt ".utf8))
+        add(16)
+        add16(1)
+        add16(1)
+        add(UInt32(rate))
+        add(UInt32(rate * 2))
+        add16(2)
+        add16(16)
+        wav.append(contentsOf: Array("data".utf8))
+        add(UInt32(dataBytes))
+        wav.append(Data(count: dataBytes))
+        return wav
     }
 }
 

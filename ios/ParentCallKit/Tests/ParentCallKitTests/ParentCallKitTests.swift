@@ -53,6 +53,20 @@ final class CommandDecodingTests: XCTestCase {
         XCTAssertEqual(command.audioPath, "/v1/calls/call_1/speech/c2")
     }
 
+    func testDecodesLiveAvatarSession() throws {
+        let body = #"{"session_token":"tok","ws_url":"wss://api.simli.ai/compose/webrtc/livekit"}"#
+        let session = try JSON.decoder.decode(LiveAvatarSession.self, from: Data(body.utf8))
+        XCTAssertEqual(session, LiveAvatarSession(sessionToken: "tok", wsUrl: "wss://api.simli.ai/compose/webrtc/livekit"))
+    }
+
+    #if canImport(AVFoundation) && canImport(UIKit)
+    func testKeepAliveSilenceIsAValidWAV() {
+        let wav = BackgroundKeepAlive.silentWAV(seconds: 1)
+        XCTAssertEqual(wav.count, 44 + 32000)
+        XCTAssertEqual(String(decoding: wav.prefix(4), as: UTF8.self), "RIFF")
+    }
+    #endif
+
     func testFakeMediaIsWellFormed() {
         let jpeg = FakeDevices.tinyJPEG(width: 640, height: 480)
         XCTAssertEqual(Array(jpeg.prefix(2)), [0xFF, 0xD8])

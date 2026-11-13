@@ -117,6 +117,17 @@ public struct AnswerResponse: Decodable, Sendable {
     public let voiced: Bool
 }
 
+/// A Simli live session from `POST /v1/calls/{id}/avatar/live`: a short-lived token and the WebSocket to open with it.
+public struct LiveAvatarSession: Decodable, Sendable, Equatable {
+    public let sessionToken: String
+    public let wsUrl: String
+
+    public init(sessionToken: String, wsUrl: String) {
+        self.sessionToken = sessionToken
+        self.wsUrl = wsUrl
+    }
+}
+
 /// What the parent screen shows. It never carries a measurement or a verdict.
 public enum CallPhase: Sendable, Equatable {
     case idle

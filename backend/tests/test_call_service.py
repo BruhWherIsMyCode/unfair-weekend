@@ -29,12 +29,13 @@ def free_port() -> int:
 
 
 class Server:
-    def __init__(self, runner: str, *, speech=None, clips=None, **settings) -> None:
+    def __init__(self, runner: str, *, speech=None, clips=None, live=None, **settings) -> None:
         self.port = free_port()
         self.base = f"http://127.0.0.1:{self.port}"
         self.speech = speech if speech is not None else SpeechGateway(api_key="")
         self.clips = clips
-        app = create_app(Settings(demo_key=KEY, call_runner=runner, **settings), speech=self.speech, clips=clips)
+        app = create_app(Settings(demo_key=KEY, call_runner=runner, **settings), speech=self.speech, clips=clips,
+                         live=live)
         self.app = app
         self.server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=self.port, log_level="warning"))
 

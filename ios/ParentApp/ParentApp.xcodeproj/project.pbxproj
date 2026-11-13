@@ -14,9 +14,12 @@
 		3CF0A189D52B98D3F1BC34CF /* ParentCallKit in Frameworks */ = {isa = PBXBuildFile; productRef = C3846808B94198C651907EA7 /* ParentCallKit */; };
 		6D4FA369244C2396BF03D1D7 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = F72C4DA9F7E577361265643B /* Theme.swift */; };
 		71584DBEA61F9FA073E677EF /* CallWalkthroughTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C5578A0571874269900DC5F /* CallWalkthroughTests.swift */; };
+		79E7445B89DF3854C4C9C9D8 /* LiveAvatar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A74C0FEF6DF838D7D47C153E /* LiveAvatar.swift */; };
 		80842A3FB1D27121D292A5C9 /* Screens.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE144CCFE495A004BF074600 /* Screens.swift */; };
 		8C035AD0BCF330FD10D45EFC /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = BB238408FCA87666D8C978C7 /* Assets.xcassets */; };
+		CA97905CB0C301F348A530AA /* SystemCalls.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB8CDDB52B0AFEFC6F52DB89 /* SystemCalls.swift */; };
 		D20B56B842FD56D566192915 /* CallComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EFC03CFE1263E702B386BC0 /* CallComponents.swift */; };
+		D5CE7750267F839840D11599 /* LiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = C7B23293F9AA5DE763A0C526 /* LiveKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -38,9 +41,11 @@
 		58C60194AAA8D180C426459F /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		851499AFEB7F3993CC924E90 /* ParentApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParentApp.swift; sourceTree = "<group>"; };
 		8EFC03CFE1263E702B386BC0 /* CallComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallComponents.swift; sourceTree = "<group>"; };
+		A74C0FEF6DF838D7D47C153E /* LiveAvatar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveAvatar.swift; sourceTree = "<group>"; };
 		B356EBF1BACD8BF09068D288 /* ParentCallKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ParentCallKit; path = ../ParentCallKit; sourceTree = SOURCE_ROOT; };
 		BB238408FCA87666D8C978C7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		CE144CCFE495A004BF074600 /* Screens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Screens.swift; sourceTree = "<group>"; };
+		EB8CDDB52B0AFEFC6F52DB89 /* SystemCalls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCalls.swift; sourceTree = "<group>"; };
 		F6F6637610645BBD2E786519 /* App.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = App.xcconfig; sourceTree = "<group>"; };
 		F72C4DA9F7E577361265643B /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -51,6 +56,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				3CF0A189D52B98D3F1BC34CF /* ParentCallKit in Frameworks */,
+				D5CE7750267F839840D11599 /* LiveKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -91,9 +97,11 @@
 				BB238408FCA87666D8C978C7 /* Assets.xcassets */,
 				8EFC03CFE1263E702B386BC0 /* CallComponents.swift */,
 				18D14F330415274907728F54 /* InCallView.swift */,
+				A74C0FEF6DF838D7D47C153E /* LiveAvatar.swift */,
 				851499AFEB7F3993CC924E90 /* ParentApp.swift */,
 				CE144CCFE495A004BF074600 /* Screens.swift */,
 				4E099E3676BF6DE1389F35DB /* SelfViewCamera.swift */,
+				EB8CDDB52B0AFEFC6F52DB89 /* SystemCalls.swift */,
 				F72C4DA9F7E577361265643B /* Theme.swift */,
 			);
 			path = ParentApp;
@@ -153,6 +161,7 @@
 			name = ParentApp;
 			packageProductDependencies = (
 				C3846808B94198C651907EA7 /* ParentCallKit */,
+				C7B23293F9AA5DE763A0C526 /* LiveKit */,
 			);
 			productName = ParentApp;
 			productReference = 1E81CB9AD2785BCBE6BD2427 /* ParentApp.app */;
@@ -186,6 +195,7 @@
 			mainGroup = 25666FBC68ECC276048CE807;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				5A9264FA07BE536454FADCB9 /* XCRemoteSwiftPackageReference "client-sdk-swift" */,
 				C477D56B27BB1DC0491E81AF /* XCLocalSwiftPackageReference "../ParentCallKit" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -248,9 +258,11 @@
 				30F1B5DBE7B64217FB9F1751 /* AppState.swift in Sources */,
 				D20B56B842FD56D566192915 /* CallComponents.swift in Sources */,
 				3BBE10E25A3849AFF646B8A9 /* InCallView.swift in Sources */,
+				79E7445B89DF3854C4C9C9D8 /* LiveAvatar.swift in Sources */,
 				1F031DC315903AAF7F33EF69 /* ParentApp.swift in Sources */,
 				80842A3FB1D27121D292A5C9 /* Screens.swift in Sources */,
 				17909E4E993695A13F500700 /* SelfViewCamera.swift in Sources */,
+				CA97905CB0C301F348A530AA /* SystemCalls.swift in Sources */,
 				6D4FA369244C2396BF03D1D7 /* Theme.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -498,10 +510,26 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		5A9264FA07BE536454FADCB9 /* XCRemoteSwiftPackageReference "client-sdk-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/livekit/client-sdk-swift";
+			requirement = {
+				kind = exactVersion;
+				version = 2.18.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		C3846808B94198C651907EA7 /* ParentCallKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ParentCallKit;
+		};
+		C7B23293F9AA5DE763A0C526 /* LiveKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5A9264FA07BE536454FADCB9 /* XCRemoteSwiftPackageReference "client-sdk-swift" */;
+			productName = LiveKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

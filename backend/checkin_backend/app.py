@@ -17,8 +17,10 @@ from .config import Settings
 from .delivery import FamilyDelivery
 from .hub import Device, DeviceHub, UnknownDevice
 from .link import ClientLink, LinkRejected
+from .live_avatar import LiveAvatarGateway
 from .media import MAX_ANSWER_BYTES, MediaRejected, check_answer, check_sample, decode_base64
 from .people import Directory
+from .provider_io import ProviderError
 from .runner import choose_driver, run_answered_call
 from .speech import SpeechGateway
 from .store import NoStore, Store
@@ -224,7 +226,8 @@ class CallDesk:
 
 
 def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None = None,
-               people: Directory | None = None, clips: ClipGateway | None = None) -> FastAPI:
+               people: Directory | None = None, clips: ClipGateway | None = None,
+               live: LiveAvatarGateway | None = None) -> FastAPI:
     settings = settings if settings is not None else Settings.from_environment()
 
     @asynccontextmanager
@@ -233,6 +236,8 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
         hub = DeviceHub()
         gateway = speech if speech is not None else SpeechGateway.from_environment()
         avatar = clips if clips is not None else ClipGateway.from_environment()
+        live_avatar = live if live is not None else LiveAvatarGateway.from_environment(
+            call_timeout_s=settings.call_timeout_s)
         directory = people if people is not None else Directory.from_environment()
         store = Store(settings.database_path) if settings.database_path else NoStore()
         await asyncio.to_thread(store.open, directory.all())
@@ -242,6 +247,7 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
         app.state.hub = hub
         app.state.desk = desk
         app.state.store = store
+        app.state.live = live_avatar
         try:
             yield
         finally:
@@ -253,6 +259,8 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
                 await gateway.aclose()
             if clips is None:
                 await avatar.aclose()
+            if live is None:
+                await live_avatar.aclose()
 
     app = FastAPI(title="Check-in backend", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -416,6 +424,22 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
     async def video_clip(call_id: str, command_id: str, request: Request) -> FileResponse:
         path = desk_of(request).link(call_id).video_asset(command_id)
         return FileResponse(path, media_type="video/mp4", headers={"Cache-Control": "no-store"})
+
+    @app.post("/v1/calls/{call_id}/avatar/live", dependencies=auth)
+    async def live_avatar_session(call_id: str, request: Request) -> JSONResponse:
+        # Provisional extension: a Simli live session for the answered call. The phone falls back to prepared
+        # clips and voice on any error here, so 503 is an ordinary answer, not a failed call.
+        link = desk_of(request).link(call_id)
+        if link.ended:
+            raise ApiError(410, "call_ended", "The call has ended.")
+        gateway: LiveAvatarGateway = request.app.state.live
+        if not gateway.available:
+            raise ApiError(503, "avatar_unavailable", "The live avatar is not enabled.")
+        try:
+            session = await gateway.session()
+        except ProviderError:
+            raise ApiError(503, "avatar_unavailable", "The live avatar could not be started.") from None
+        return JSONResponse(session, headers={"Cache-Control": "no-store"})
 
     @app.post("/v1/calls/{call_id}/captures/{command_id}", status_code=204, dependencies=auth)
     async def answer_upload(call_id: str, command_id: str, request: Request) -> Response:

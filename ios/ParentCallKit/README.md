@@ -18,6 +18,12 @@ camera or microphone is lost. The design team builds the screens on top of `Call
   `AvatarClips.player` full screen). `playback.completed` is sent only on `AVPlayerItemDidPlayToEndTime`. A failed
   download or playback stops the clip and falls back to the PCM `audio_path`, so both are never heard together.
   Cancel, hang-up and teardown stop the clip and cancel its download. Without a clip player, lines play as PCM.
+- Live avatar: `devices.live` (`LiveAvatarPlayer`, implemented in the app as `SimliLiveAvatar` over LiveKit). After
+  answering, `CallClient` asks `POST /v1/calls/{id}/avatar/live` for a Simli session and connects in the background.
+  Each line then streams its PCM to Simli and completes on Simli's `SPEAK` then `SILENT`. Any live failure drops to
+  clips and PCM for the rest of the call (backend/VOICE_VIDEO.md).
+- `BackgroundKeepAlive`: demo workaround, not for the App Store. A silent audio loop keeps the app running in the
+  background so the event stream stays open; the app then rings through CallKit (no VoIP push).
   - `FakeDevices.make()`: synthetic input for tests, previews and the simulator executable.
 - `parent-call-sim`: a command-line run of the real client against a backend, using fake devices.
 
