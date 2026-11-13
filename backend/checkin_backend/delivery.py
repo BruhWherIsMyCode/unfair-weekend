@@ -39,8 +39,10 @@ def render(kind: str, person: Person, signs: list[dict] | None = None) -> str:
     w = words(person)
     handoff = HANDOFF.format(**w)
     if kind == "change_noticed":
-        confirmed = [s for s in signs or [] if s.get("confirmed")]
-        sign = confirmed[0]["sign"] if confirmed else "face"
+        confirmed = [s for s in signs or [] if s.get("confirmed") is True]
+        if not confirmed:
+            raise ValueError("A change message requires a confirmed sign")
+        sign = confirmed[0]["sign"]
         thing, verb = THINGS.get(sign, THINGS["face"])
         return f"{w['name']}'s {thing} {verb} different from {w['her']} usual. Call {w['her_obj']} now. {handoff}"
     if kind == "incomplete":

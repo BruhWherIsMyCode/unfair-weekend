@@ -13,10 +13,12 @@ import asyncio
 import hashlib
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
 
 from .delivery import FamilyDelivery
+from .avatar import ClipGateway
 from .hub import DeviceHub
 from .media import MAX_ATTEMPT_BYTES
 from .people import Person
@@ -68,6 +70,7 @@ class Command:
     audio: bytes | None = None
     upload_print: str | None = None
     finished: bool = False
+    video: Path | None = None
 
 
 @dataclass(slots=True)
@@ -104,12 +107,14 @@ class ClientLink:
         speech: SpeechGateway,
         delivery: FamilyDelivery,
         script: dict[str, str] | None = None,
+        clips: ClipGateway | None = None,
     ) -> None:
         self.call_id = call_id
         self.person = person
         self.hub = hub
         self.speech = speech
         self.delivery = delivery
+        self.clips = clips
         self.script = script if script is not None else load_script()
         self.session: SessionEvents | None = None
         self.ready = asyncio.Event()
@@ -205,6 +210,8 @@ class ClientLink:
             raise PlaybackFailed(str(exc)) from None
         command = self._new_command("say", {})
         command.audio = prepared.audio
+        if prepared.voiced and self.clips is not None:
+            command.video = self.clips.ready(prepared.audio)
         command.payload = {
             "command_id": command.command_id,
             "kind": "say",
@@ -213,6 +220,8 @@ class ClientLink:
             "audio_path": f"/v1/calls/{self.call_id}/speech/{command.command_id}",
             "duration_ms": prepared.duration_ms,
         }
+        if command.video is not None:
+            command.payload["video_path"] = f"/v1/calls/{self.call_id}/video/{command.command_id}"
         self._note("say", line=line_id, command_id=command.command_id, voiced=prepared.voiced)
         self._execute(command)
         await self._await(command, prepared.duration_ms / 1000 + PLAYBACK_GRACE_S)
@@ -299,12 +308,21 @@ class ClientLink:
     # ---- client input ---------------------------------------------------------------------------
 
     def speech_audio(self, command_id: str) -> bytes:
+        return self.playback_command(command_id).audio
+
+    def playback_command(self, command_id: str) -> Command:
         command = self._commands.get(command_id)
         if command is None or command.kind != "say":
             raise LinkRejected("not_found", "No such speech command.", 404)
         if command.finished or command.audio is None:
             raise LinkRejected("expired", "This line is no longer active.", 410)
-        return command.audio
+        return command
+
+    def video_asset(self, command_id: str) -> Path:
+        command = self.playback_command(command_id)
+        if command.video is None:
+            raise LinkRejected("not_found", "This line has no prepared video.", 404)
+        return command.video
 
     def on_event(self, event: dict[str, Any]) -> None:
         event_id = event["event_id"]
@@ -337,6 +355,8 @@ class ClientLink:
         if command is None:
             raise LinkRejected("not_found", "Unknown command for this call.", 404)
         if kind == "playback.completed":
+            if command.kind != "say":
+                raise LinkRejected("invalid_request", "Only a speech command can finish playback.", 400)
             self._settle(command, True)
             return
         if kind == "capture.started":

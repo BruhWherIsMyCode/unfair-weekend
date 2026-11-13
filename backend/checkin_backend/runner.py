@@ -150,12 +150,17 @@ async def run_answered_call(link: ClientLink, driver: Callable[[ClientLink], Awa
             await link.ready.wait()
     except TimeoutError:
         link.log.append({"kind": "client_not_ready"})
+        if not link.ended:
+            await link.publish({"status": "incomplete", "signs": []}, "final")
+        return None
     if link.ended:
         return None
     try:
         return await driver(link)
     except (CallEnded, PlaybackFailed) as exc:
         link.log.append({"kind": "call_stopped", "error": type(exc).__name__})
+        if not link.ended:
+            await link.publish({"status": "incomplete", "signs": []}, "final")
         return None
     except Exception as exc:  # a driver crash must still end the call and tell the family
         link.log.append({"kind": "driver_crashed", "error": type(exc).__name__})

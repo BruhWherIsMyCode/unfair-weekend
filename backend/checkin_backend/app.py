@@ -8,15 +8,16 @@ from secrets import compare_digest
 from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, Header, Request
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .calls import Call, CallConflict, CallNotFound, CallService, CallState, EndReason
+from .avatar import ClipGateway
 from .config import Settings
 from .delivery import FamilyDelivery
 from .hub import Device, DeviceHub, UnknownDevice
 from .link import ClientLink, LinkRejected
-from .media import MediaRejected, check_answer, check_sample, decode_base64
+from .media import MAX_ANSWER_BYTES, MediaRejected, check_answer, check_sample, decode_base64
 from .people import Directory
 from .runner import choose_driver, run_answered_call
 from .speech import SpeechGateway
@@ -128,13 +129,14 @@ class CallDesk:
     """Glue between connection state, client links and the session runner. One per app."""
 
     def __init__(self, settings: Settings, calls: CallService, hub: DeviceHub, people: Directory,
-                 speech: SpeechGateway, delivery: FamilyDelivery) -> None:
+                 speech: SpeechGateway, delivery: FamilyDelivery, clips: ClipGateway) -> None:
         self.settings = settings
         self.calls = calls
         self.hub = hub
         self.people = people
         self.speech = speech
         self.delivery = delivery
+        self.clips = clips
         self.links: dict[str, ClientLink] = {}
         self.results: dict[str, dict[str, Any] | None] = {}
         self.tasks: set[asyncio.Task[Any]] = set()
@@ -168,7 +170,7 @@ class CallDesk:
         person = self.people.get(call.person_id)
         if call_id not in self.links:
             link = ClientLink(call_id=call_id, person=person, hub=self.hub, speech=self.speech,
-                              delivery=self.delivery)
+                              delivery=self.delivery, clips=self.clips)
             self.links[call_id] = link
             self._spawn(self._run(link))
         return {"call_id": call_id, "person_name": person.name, "voiced": self.speech.voiced,
@@ -179,7 +181,7 @@ class CallDesk:
         self.results[link.call_id] = result
         call = self.calls.get(link.call_id)
         if not call.terminal:
-            self.calls.end(link.call_id, EndReason.COMPLETED)
+            self.calls.end(link.call_id, EndReason.COMPLETED if result is not None else EndReason.CONNECTION_LOST)
 
     async def _watch(self, call: Call) -> None:
         ended = await self.calls.wait_ended(call.call_id)
@@ -213,7 +215,7 @@ class CallDesk:
 
 
 def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None = None,
-               people: Directory | None = None) -> FastAPI:
+               people: Directory | None = None, clips: ClipGateway | None = None) -> FastAPI:
     settings = settings if settings is not None else Settings.from_environment()
 
     @asynccontextmanager
@@ -221,9 +223,10 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
         calls = CallService(ring_timeout_s=settings.ring_timeout_s, call_timeout_s=settings.call_timeout_s)
         hub = DeviceHub()
         gateway = speech if speech is not None else SpeechGateway.from_environment()
+        avatar = clips if clips is not None else ClipGateway.from_environment()
         directory = people if people is not None else Directory.from_environment()
         delivery = FamilyDelivery(hub)
-        desk = CallDesk(settings, calls, hub, directory, gateway, delivery)
+        desk = CallDesk(settings, calls, hub, directory, gateway, delivery, avatar)
         app.state.calls = calls
         app.state.hub = hub
         app.state.desk = desk
@@ -235,11 +238,13 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
             await calls.aclose()
             if speech is None:
                 await gateway.aclose()
+            if clips is None:
+                await avatar.aclose()
 
     app = FastAPI(title="Check-in backend", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
     async def require_demo_key(request: Request) -> None:
-        candidate = request.headers.get("X-Demo-Key") or request.query_params.get("key")
+        candidate = request.headers.get("X-Demo-Key")
         if candidate is None or not compare_digest(candidate.encode("utf-8"), settings.demo_key.encode("utf-8")):
             raise DemoKeyRequired
 
@@ -383,10 +388,20 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
         return Response(content=audio, media_type="application/octet-stream",
                         headers={"Cache-Control": "no-store", "X-Sample-Rate": "16000"})
 
+    @app.get("/v1/calls/{call_id}/video/{command_id}", dependencies=auth)
+    async def video_clip(call_id: str, command_id: str, request: Request) -> FileResponse:
+        path = desk_of(request).link(call_id).video_asset(command_id)
+        return FileResponse(path, media_type="video/mp4", headers={"Cache-Control": "no-store"})
+
     @app.post("/v1/calls/{call_id}/captures/{command_id}", status_code=204, dependencies=auth)
     async def answer_upload(call_id: str, command_id: str, request: Request) -> Response:
         link = desk_of(request).link(call_id)
-        data = await request.body()
+        data = bytearray()
+        async for chunk in request.stream():
+            if len(data) + len(chunk) > MAX_ANSWER_BYTES:
+                raise ApiError(413, "too_large", "Answer audio is larger than 10 MiB.")
+            data.extend(chunk)
+        data = bytes(data)
         media_type = check_answer(request.headers.get("content-type"), data)
         link.on_answer_upload(command_id, data, media_type)
         return Response(status_code=204)

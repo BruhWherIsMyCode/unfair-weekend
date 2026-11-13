@@ -16,7 +16,21 @@ The merged [Python foundation PR #8](https://github.com/BruhWherIsMyCode/unfair-
 
 ## Python foundation
 
-The app factory in `checkin_backend/app.py` owns a `CallService` during FastAPI lifespan. `DEMO_KEY` is required; no provider credential is needed for health or local lifecycle tests. The existing v0 health sketch supplies `/v1/health` and `{ok: true}`; other client network routes await Agent 3's revised canonical publication under issue #10. Local immutable call records do not define client payloads.
+### Voice/video integration, 13 Nov
+
+The human authorized reuse of `backend/` from PR #9 on `agent-2/backend` before canonical contracts have landed, and selected English. Only backend files were taken; the SQLite schema and current architecture decision were retained. The parent's native client is still owned separately.
+
+The service now runs registration/SSE, call commands, answer upload/transcription and an in-memory family feed. ElevenLabs generates PCM16 little-endian, 16 kHz mono; Scribe v2 transcribes ordinary answers in English. Speech generation is bounded, coalesced and cached privately on disk. Cached audio is read before credentials are checked, so prepared speech remains available when the voice provider is off. Uncached audio without a key remains an explicitly unvoiced demo.
+
+For the first joined voice/video path, choose **clips**: explicitly prepare Simli MP4s from each exact ElevenLabs line before a call. The server offers optional `video_path` on a speech command only for a locally ready MP4; otherwise the existing PCM command works. No video generation or provider URL expiry sits in the call path. Simli static-video request/response fields were verified against its current official OpenAPI, including `audioFormat: pcm16` and `mp4_url`. Remote assets are downloaded only from the documented HTTPS host/path, without the account key, bounded in size/time, container-checked and stored locally. Provider redirects and error bodies are not forwarded.
+
+This choice gives the client a media-player completion signal. The continuous Simli stream's `speaking`/`silent` events do not identify a line or prove device playout; the old Node experiment remains separate. The video speaks an instruction; it does not visually demonstrate the smile/arms task.
+
+Built and locally tested: provider adapters/cache/shutdown, preparation command, optional video delivery/authentication/byte ranges, real HTTP/SSE call transport with synthetic provider responses and three returned answer transcripts. The fixed-script driver has no measuring and honestly finishes `incomplete`. Agent 3 integration tests skip without its package; no analysis code was taken from another branch. Provider credentials are absent in this worktree: no real TTS/STT/video generation or iPhone video playback was tested here, and no new latency/quality figures are claimed. [VOICE_VIDEO.md](VOICE_VIDEO.md) is the operator setup and native playback handoff.
+
+The optional video field/route are a provisional extension for Agent 3 publication. The inherited PR #9 task-media routes remain compatibility/demo code, not implementation of the revised observations protocol in issue #10. Runtime SQLite wiring, SMS, deployment and native video playback remain outstanding.
+
+The foundation app factory in `checkin_backend/app.py` owns a `CallService` during FastAPI lifespan. `DEMO_KEY` is required; no provider credential is needed for health or local lifecycle tests. The existing v0 health sketch supplies `/v1/health` and `{ok: true}`. The later voice/video integration above reuses PR #9's provisional client routes; canonical publication of the revised boundary remains with Agent 3 under issue #10. Local immutable call records do not define client payloads.
 
 Connection state is confined to one process and one asyncio event loop, separate from CallSession's conversation/measurement state. Ring timeout defaults to 30 seconds; connected-call duration defaults to 180 seconds from the first answer. Monotonic time governs deadlines. Late answers cannot revive expired calls, repeated transitions cannot extend deadlines, and closing the app ends active calls and joins deadline tasks. A cancelled consumer does not cancel the shared terminal result. Records are held in memory until process exit. The shared SQLite schema is available, but runtime persistence/recovery remain future work.
 
