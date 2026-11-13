@@ -190,3 +190,114 @@ def test_the_backend_script_has_the_one_hand_phone_lines():
     for line in ("setup_phone", "task_arms", "repeat_arms", "swap_hands"):
         assert line in script
     assert "table" not in script["setup_phone"] and "both arms" not in script["task_arms"]
+
+
+# ---- v14: the family device hears nothing until the call ends -------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_with_the_switches_on_the_family_device_gets_no_message_until_the_call_ends():
+    from checkin_backend.link import ClientLink
+
+    runner.ensure_analysis_path()
+    call_session = pytest.importorskip("analysis.session.call_session")
+    limits = pytest.importorskip("analysis.session.limits")
+    assert limits.CONCERN_ALERT_AT_END and limits.CHANGE_ALERT_AT_END
+
+    hub, delivery = desk()
+    link = ClientLink(call_id="call_1", person=person("he"), hub=hub, speech=None, delivery=delivery)
+
+    class Adapter:
+        """The real ClientLink for the family message; no playback in this test."""
+
+        async def say(self, line_id):
+            return None
+
+        async def say_text(self, text):
+            return None
+
+        async def publish(self, summary, phase, message_id=None):
+            return await link.publish(summary, phase, message_id)
+
+    session = call_session.CallSession("call_1", "p_demo", "Ona", Adapter(), {}, person_pronoun="he")
+    assert await session.raise_concern("said_unwell", "n") is True
+    assert events(hub) == [] and delivery.for_call("call_1") is None  # kept, not told
+    await session.finish()
+    assert len(events(hub)) == 1
+    message = delivery.for_call("call_1")
+    assert message.kind == "concern_raised" and message.text.endswith("If he seems unwell, call 112.")
+
+
+# ---- v14: the call person comes from data/person.json ---------------------------------------------------------------
+
+from checkin_backend import people as people_module  # noqa: E402
+from checkin_backend.people import Directory  # noqa: E402
+
+
+def write_profile(tmp_path, content) -> Path:
+    path = tmp_path / "person.json"
+    path.write_text(content if isinstance(content, str) else json.dumps(content), "utf-8")
+    return path
+
+
+@pytest.fixture
+def clean_person_env(monkeypatch):
+    for name in ("DEMO_PERSON_FILE", "DEMO_PERSON_NAME", "DEMO_PERSON_PRONOUN", "DEMO_PERSON_ID", "DEMO_FAMILY_ID",
+                 "DEMO_SESSION_LABEL"):
+        monkeypatch.delenv(name, raising=False)
+    return monkeypatch
+
+
+def test_the_shipped_profile_loads_as_feodor_he_21(clean_person_env):
+    person = Directory.from_environment().all()[0]
+    assert (person.name, person.pronoun, person.age) == ("Feodor", "he", 21)
+    assert person.about and all(isinstance(item, str) and item for item in person.about)
+    assert (person.person_id, person.family_id, person.label) == ("p_demo", "f_demo", "live")
+
+
+def test_the_file_wins_over_the_environment_and_a_differing_env_value_logs_one_warning(
+        clean_person_env, tmp_path, caplog):
+    path = write_profile(tmp_path, {"name": "Marta", "pronoun": "she", "age": 80, "about": ["Likes tea."]})
+    clean_person_env.setenv("DEMO_PERSON_FILE", str(path))
+    clean_person_env.setenv("DEMO_PERSON_NAME", "Ona")
+    clean_person_env.setenv("DEMO_PERSON_PRONOUN", "she")  # same as the file: no warning for it
+    with caplog.at_level("WARNING", logger=people_module.log.name):
+        person = Directory.from_environment().all()[0]
+    assert (person.name, person.pronoun, person.age, person.about) == ("Marta", "she", 80, ("Likes tea.",))
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1 and "DEMO_PERSON_NAME" in warnings[0].getMessage()
+
+
+def test_the_environment_fills_only_a_field_the_file_lacks(clean_person_env, tmp_path):
+    path = write_profile(tmp_path, {"name": "Marta"})
+    clean_person_env.setenv("DEMO_PERSON_FILE", str(path))
+    clean_person_env.setenv("DEMO_PERSON_PRONOUN", "he")
+    person = Directory.from_environment().all()[0]
+    assert (person.name, person.pronoun, person.age, person.about) == ("Marta", "he", None, ())
+
+
+def test_a_missing_file_falls_back_to_the_environment_then_the_defaults(clean_person_env, tmp_path):
+    clean_person_env.setenv("DEMO_PERSON_FILE", str(tmp_path / "nothing.json"))
+    person = Directory.from_environment().all()[0]
+    assert (person.name, person.pronoun, person.age, person.about) == ("Ona", "she", None, ())
+    clean_person_env.setenv("DEMO_PERSON_NAME", "Ivan")
+    clean_person_env.setenv("DEMO_PERSON_PRONOUN", "he")
+    person = Directory.from_environment().all()[0]
+    assert (person.name, person.pronoun) == ("Ivan", "he")
+
+
+@pytest.mark.parametrize("content,problem", [
+    ("{not json", "not valid JSON"),
+    ("[1, 2]", "one JSON object"),
+    ({"name": "  "}, "name"),
+    ({"name": 5}, "name"),
+    ({"name": "A", "pronoun": "they"}, "pronoun"),
+    ({"name": "A", "age": 0}, "age"),
+    ({"name": "A", "age": "21"}, "age"),
+    ({"name": "A", "age": True}, "age"),
+    ({"name": "A", "about": "one sentence"}, "about"),
+    ({"name": "A", "about": ["ok", 3]}, "about"),
+])
+def test_a_broken_profile_file_raises_a_clear_error_at_startup(clean_person_env, tmp_path, content, problem):
+    clean_person_env.setenv("DEMO_PERSON_FILE", str(write_profile(tmp_path, content)))
+    with pytest.raises(ValueError, match=problem):
+        Directory.from_environment()

@@ -28,6 +28,12 @@ uv build --out-dir .cache/python-dist
 
 Tests exercise a complete HTTP/SSE call with mocked voice, transcripts and video transport, plus lifecycle, cache, cancellation, authentication and provider-error paths. The Simli readiness fix reproduces delayed 404/429 responses and the permitted CDN redirect, with bounded retries and cancellation. One real ElevenLabs/Simli greeting was generated, downloaded and decoded successfully; [VOICE_VIDEO.md](VOICE_VIDEO.md#verification-and-limits) records that trial and its limits. Real answer STT and iPhone audio/video playback remain untested by Agent 2. No provider credits are used by the automated tests. The separate iOS family stage shell remains mocked.
 
+## The call person's profile
+
+The person who is called lives in `checkin_backend/data/person.json`: `name`, `pronoun` (`she` or `he`), `age` (positive whole number) and `about` (a list of short sentences). The call agent's prompt and the family text use it. The file's values win; `DEMO_PERSON_NAME` and `DEMO_PERSON_PRONOUN` only fill a field the file lacks or stand in when the file is missing (a warning is logged when they differ from the file). `DEMO_PERSON_FILE` points at another file. A broken file (bad JSON, empty name, pronoun not she/he, age not a positive whole number, `about` not a list of strings) stops the start-up with a clear error. The start-up log has one line such as `person: Feodor (he, 21) from data/person.json`.
+
+The prepared voice lines are cached by their exact text, and two lines contain the name (`greet` and `bye`). After a name change run the start script's prepare step, or `python -m checkin_backend.prepare --only-line greet` and `--only-line bye`. A line that was not prepared is not fatal: the call generates its voice on the fly (or plays the caption without a key); only a provider error fails that one line.
+
 ## Python logging
 
 The normal Uvicorn factory command above enables JSON lines on stderr and in two files under
