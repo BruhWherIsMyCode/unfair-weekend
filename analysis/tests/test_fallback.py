@@ -282,6 +282,7 @@ def test_one_lopsided_smile_tells_the_family_with_no_repeat():
     asyncio.run(scenario())
 
 
+@pytest.mark.usefixtures("alert_mid_call")
 def test_an_agent_alert_is_also_told_to_her_once():
     async def scenario():
         rig = CallRig()

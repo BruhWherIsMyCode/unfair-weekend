@@ -13,6 +13,9 @@ def isolated_analysis_files(tmp_path, monkeypatch):
     monkeypatch.setenv("LOG_FILE", str(tmp_path / "logs" / "backend.log"))
     monkeypatch.setenv("LOG_ERROR_FILE", str(tmp_path / "logs" / "errors.log"))
     monkeypatch.setenv("LOG_CONSOLE", "off")
+    # v14: the shipped data/person.json (Feodor, he) is not read by older tests, which pin the env person
+    # (Ona, she); the profile tests set or clear DEMO_PERSON_FILE themselves.
+    monkeypatch.setenv("DEMO_PERSON_FILE", str(tmp_path / "no_person_profile.json"))
 
 
 @pytest.fixture(autouse=True)

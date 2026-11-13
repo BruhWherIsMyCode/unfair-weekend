@@ -198,7 +198,9 @@ async def run_backend_call(link: Any, modules: Optional[Dict[str, Any]] = None, 
     session = CallSession(link.call_id, person.person_id, person.name, link, modules, baselines,
                           label=person.label, required_tasks=limits.REQUIRED_TASKS,
                           initial_resources=link.initial_resources(), safety_floor=settings.safety_floor,
-                          recorder=recorder, debug=debug_view)
+                          recorder=recorder, debug=debug_view,
+                          person_pronoun=getattr(person, "pronoun", "she"), person_age=getattr(person, "age", None),
+                          person_about=getattr(person, "about", ()))
     if settings.call_log:
         def show(entry: Dict[str, Any]) -> None:
             line = format_terminal_line(entry, session)
@@ -227,7 +229,11 @@ async def run_backend_call(link: Any, modules: Optional[Dict[str, Any]] = None, 
         summary = await run_call(session, link, settings.mode, backend=settings.claude_backend)
     except Exception as exc:  # the call is lost, the backend is not
         session.note("call_crashed", error=type(exc).__name__)
-        summary = session.build_session_result().to_dict()
+        try:  # v14: a pending concern or change is told once, even when the call is lost (finish is idempotent)
+            summary = await session.finish()
+        except Exception as exc2:
+            session.note("crash_finish_failed", error=type(exc2).__name__)
+            summary = session.build_session_result().to_dict()
 
     if session.recorder is not None:  # session finished, new baseline snapshot when eligible (never raises)
         try:
@@ -243,7 +249,7 @@ async def run_backend_call(link: Any, modules: Optional[Dict[str, Any]] = None, 
         session.note("baseline_store_failed", error=type(exc).__name__)
 
     try:
-        family_text = render_family_text(summary, person.name)
+        family_text = render_family_text(summary, person.name, getattr(person, "pronoun", "she"))
         record = build_record(link.call_id, settings.person_key, person.label, settings.mode, settings.safety_floor,
                               summary, family_text, session.log, started_wall)
         write_record(settings.runs_dir, link.call_id, record, log.error)
