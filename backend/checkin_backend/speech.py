@@ -1,23 +1,30 @@
 """Speech gateway: fixed lines to PCM, and answer audio to text.
 
-ElevenLabs is used when ELEVENLABS_API_KEY is set. Without it, lines become silence of an estimated length so
-the call still runs with captions only, and answers are never transcribed. Provider error bodies are never
-forwarded, and keys never reach the client.
+Prepared speech is read from disk before contacting ElevenLabs. Without a key or cached speech, the demo
+uses labelled caption-only playback. Answer audio is sent temporarily to ElevenLabs for transcription.
+Provider response bodies and credentials never reach the client.
 """
 
 import asyncio
 import hashlib
 import json
 import os
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
+
+from .provider_io import PendingAssets, ProviderError, private_write, provider_bytes
 
 SAMPLE_RATE = 16000
 BYTES_PER_SECOND = SAMPLE_RATE * 2
 MAX_LINE_SECONDS = 30
 MAX_LINE_BYTES = BYTES_PER_SECOND * MAX_LINE_SECONDS
+MAX_TEXT_CHARS = 600
+MAX_TRANSCRIPT_BYTES = 128 * 1024
+MAX_ANSWER_BYTES = 10 * 1024 * 1024
 WORDS_PER_SECOND = 2.5
 PROVIDER_TIMEOUT_S = 25.0
 STT_TIMEOUT_S = 20.0
@@ -26,14 +33,14 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_CANDIDATES = (
     ROOT / "contract" / "script.en.json",
     ROOT / "backend" / "proposals" / "script.en.json",
+    Path(__file__).with_name("data") / "script.en.json",
 )
 PROPOSED_LINES = {
     "swap_hands": "Now swap: hold the phone in your other hand and raise the free one.",
 }
 
 
-class SpeechError(RuntimeError):
-    pass
+SpeechError = ProviderError
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,7 +57,7 @@ def load_script() -> dict[str, str]:
             lines = dict(PROPOSED_LINES)
             lines.update(json.loads(path.read_text("utf-8")))
             return lines
-    raise FileNotFoundError("No script.en.json found in contract/ or backend/proposals/")
+    raise FileNotFoundError("No English script found")
 
 
 def render_line(script: dict[str, str], line_id: str, name: str) -> str:
@@ -72,6 +79,13 @@ def duration_ms(audio: bytes) -> int:
     return max(1, round(len(audio) * 1000 / BYTES_PER_SECOND))
 
 
+def check_pcm(audio: bytes) -> None:
+    if not audio or len(audio) % 2 or audio[:4] == b"RIFF":
+        raise SpeechError("ElevenLabs returned an unexpected audio format")
+    if len(audio) > MAX_LINE_BYTES:
+        raise SpeechError("Line is longer than 30 seconds")
+
+
 class SpeechGateway:
     def __init__(
         self,
@@ -79,7 +93,7 @@ class SpeechGateway:
         api_key: str = "",
         voice_id: str = "JBFqnCBsd6RMkjVDRZzb",
         model_id: str = "eleven_flash_v2_5",
-        stt_model_id: str = "scribe_v1",
+        stt_model_id: str = "scribe_v2",
         cache_dir: Path | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
@@ -88,8 +102,8 @@ class SpeechGateway:
         self._model_id = model_id
         self._stt_model_id = stt_model_id
         self._cache_dir = cache_dir
-        self._memory: dict[str, bytes] = {}
-        self._pending: dict[str, asyncio.Task[bytes]] = {}
+        self._memory: OrderedDict[str, bytes] = OrderedDict()
+        self._pending = PendingAssets()
         self._client = httpx.AsyncClient(timeout=PROVIDER_TIMEOUT_S, transport=transport)
 
     @property
@@ -103,90 +117,85 @@ class SpeechGateway:
             api_key=os.environ.get("ELEVENLABS_API_KEY", ""),
             voice_id=os.environ.get("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb"),
             model_id=os.environ.get("ELEVENLABS_MODEL_ID", "eleven_flash_v2_5"),
+            stt_model_id=os.environ.get("ELEVENLABS_STT_MODEL_ID", "scribe_v2"),
             cache_dir=cache,
         )
 
     async def aclose(self) -> None:
+        await self._pending.aclose()
         await self._client.aclose()
 
-    async def prepare(self, text: str) -> PreparedLine:
-        if not self._key:
+    async def prepare(self, text: str, *, require_voice: bool = False) -> PreparedLine:
+        if not isinstance(text, str) or not text.strip() or len(text) > MAX_TEXT_CHARS:
+            raise SpeechError("A line must contain between 1 and 600 characters")
+        # Read prepared audio before checking credentials: the voice fallback works offline.
+        key = hashlib.sha256(json.dumps([self._voice_id, self._model_id, "en", text, "pcm_16000"]).encode()).hexdigest()
+        audio = await self._pending.get(key, lambda: self._cached(key, text))
+        if audio is None:
+            if require_voice:
+                raise SpeechError("ELEVENLABS_API_KEY is required to prepare uncached speech")
             audio = silence_for(text)
             return PreparedLine(text, audio, duration_ms(audio), False)
-        key = hashlib.sha256(json.dumps([self._voice_id, self._model_id, text, "pcm_16000"]).encode()).hexdigest()
-        audio = await self._cached(key, text)
         return PreparedLine(text, audio, duration_ms(audio), True)
 
-    async def _cached(self, key: str, text: str) -> bytes:
+    async def _cached(self, key: str, text: str) -> bytes | None:
         if key in self._memory:
+            self._memory.move_to_end(key)
             return self._memory[key]
         path = None
         if self._cache_dir is not None:
             path = self._cache_dir / f"{key}.pcm"
-            if path.exists():
-                audio = path.read_bytes()
-                self._memory[key] = audio
-                return audio
-        if key not in self._pending:
-            self._pending[key] = asyncio.create_task(self._generate(text))
-        try:
-            audio = await asyncio.shield(self._pending[key])
-        finally:
-            done = self._pending.get(key)
-            if done is not None and done.done():
-                self._pending.pop(key, None)
-        self._memory[key] = audio
+            if path.exists() and 0 < path.stat().st_size <= MAX_LINE_BYTES:
+                audio = await asyncio.to_thread(path.read_bytes)
+                try:
+                    check_pcm(audio)
+                except SpeechError:
+                    pass  # An interrupted or invalid cache entry is regenerated.
+                else:
+                    self._remember(key, audio)
+                    return audio
+        if not self._key:
+            return None
+        audio = await self._generate(text)
         if path is not None:
-            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            temporary = path.with_suffix(".tmp")
-            temporary.write_bytes(audio)
-            temporary.replace(path)
+            await asyncio.to_thread(private_write, path, audio)
+        self._remember(key, audio)
         return audio
 
+    def _remember(self, key: str, audio: bytes) -> None:
+        self._memory[key] = audio
+        if len(self._memory) > 64:
+            self._memory.popitem(last=False)
+
     async def _generate(self, text: str) -> bytes:
-        url = f"https://api.elevenlabs.io/v1/text-to-speech/{self._voice_id}"
-        try:
-            response = await self._client.post(
-                url,
-                params={"output_format": "pcm_16000"},
-                headers={"xi-api-key": self._key},
-                json={"text": text, "model_id": self._model_id},
-            )
-        except httpx.HTTPError:
-            raise SpeechError("ElevenLabs could not be reached") from None
-        if response.status_code != 200:
-            raise SpeechError(f"ElevenLabs returned HTTP {response.status_code}")
-        audio = response.content
-        if len(audio) == 0:
-            raise SpeechError("ElevenLabs returned no audio")
-        if len(audio) % 2 != 0:
-            raise SpeechError("ElevenLabs returned an unexpected audio format")
-        if audio[:4] == b"RIFF":
-            raise SpeechError("ElevenLabs returned an unexpected audio format")
-        if len(audio) > MAX_LINE_BYTES:
-            raise SpeechError("Line is longer than 30 seconds")
+        audio = await provider_bytes(
+            self._client, "POST", f"https://api.elevenlabs.io/v1/text-to-speech/{quote(self._voice_id, safe='')}",
+            provider="ElevenLabs", limit=MAX_LINE_BYTES, timeout_s=PROVIDER_TIMEOUT_S,
+            params={"output_format": "pcm_16000"}, headers={"xi-api-key": self._key},
+            json={"text": text, "model_id": self._model_id, "language_code": "en"},
+        )
+        check_pcm(audio)
         return audio
 
     async def transcribe(self, audio: bytes, content_type: str) -> str | None:
         """Her words, or None when nothing could be heard or no provider is configured."""
         if not self._key:
             return None
-        suffix = content_type.split("/")[-1]
+        suffix = {"audio/mp4": "m4a", "audio/webm": "webm", "audio/wav": "wav"}.get(content_type)
+        if suffix is None or not audio or len(audio) > MAX_ANSWER_BYTES:
+            raise SpeechError("Answer audio has an unsupported type or size")
+        body = await provider_bytes(
+            self._client, "POST", "https://api.elevenlabs.io/v1/speech-to-text",
+            provider="ElevenLabs", limit=MAX_TRANSCRIPT_BYTES, timeout_s=STT_TIMEOUT_S,
+            headers={"xi-api-key": self._key},
+            data={"model_id": self._stt_model_id, "language_code": "en", "diarize": "false",
+                  "tag_audio_events": "false", "timestamps_granularity": "none"},
+            files={"file": (f"answer.{suffix}", audio, content_type)},
+        )
         try:
-            response = await self._client.post(
-                "https://api.elevenlabs.io/v1/speech-to-text",
-                headers={"xi-api-key": self._key},
-                data={"model_id": self._stt_model_id},
-                files={"file": (f"answer.{suffix}", audio, content_type)},
-                timeout=STT_TIMEOUT_S,
-            )
-        except httpx.HTTPError:
-            raise SpeechError("ElevenLabs could not be reached") from None
-        if response.status_code != 200:
-            raise SpeechError(f"ElevenLabs returned HTTP {response.status_code}")
-        try:
-            text = response.json().get("text")
-        except ValueError:
+            result = json.loads(body)
+            text = result.get("text") if isinstance(result, dict) else None
+        except (ValueError, UnicodeError):
             raise SpeechError("ElevenLabs returned an unexpected transcript") from None
         if not isinstance(text, str):
             return None
