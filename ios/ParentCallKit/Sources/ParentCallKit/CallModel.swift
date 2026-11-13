@@ -49,6 +49,13 @@ public final class CallModel {
         }
     }
 
+    /// Stops listening for calls and releases the devices, e.g. before switching to another backend.
+    /// Without this, the old client keeps its event stream open and would also run the next call.
+    public func stop() async {
+        await client?.stop()
+        client = nil
+    }
+
     public func answer() {
         Task {
             do {
