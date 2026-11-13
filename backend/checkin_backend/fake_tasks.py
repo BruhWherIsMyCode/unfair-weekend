@@ -9,6 +9,9 @@ from typing import Any
 
 from .media import jpeg_size
 
+# Same cue lines as Agent 3's real modules (runner.CUES), so the phone's timer follows the same parts.
+CUES = {"smile": [{"at_ms": 1500, "line_id": "smile_now"}], "arms": [{"at_ms": 6500, "line_id": "swap_hands"}]}
+
 WINDOW_MS = {"smile": 6000, "arms": 15000, "sentence": 12000}
 SIGN = {"smile": "face", "arms": "arm", "sentence": "speech"}
 RESOURCE = {"smile": "camera", "arms": "camera", "sentence": "microphone"}
@@ -38,6 +41,7 @@ class InputOnlyTask:
             "observation_period_ms": 1000,
             "metric_id": "input_check_v0",
             "metric_unit": "none",
+            "cues": [dict(cue) for cue in CUES.get(self.name, [])],
         }
 
     async def run(self, context: Any, samples: Any, emit_observation: Any) -> Any:

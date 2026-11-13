@@ -41,13 +41,28 @@ public struct CallScreen: Equatable, Sendable {
         }
     }
 
+    /// The ring shows only while she has to hold something, and counts the time left of that part.
     public enum Timer: Equatable, Sendable {
-        /// Instruction still playing: show the full ring, not counting.
-        case waiting(totalSeconds: Int)
-        /// Counting down to `endsAt`.
-        case running(endsAt: Date, totalSeconds: Int)
+        /// No ring: the instruction is playing, or she is still relaxing before "Now smile!".
+        case hidden
+        /// Counting down to `endsAt`; the ring starts full at `total` seconds.
+        case running(endsAt: Date, total: TimeInterval)
         /// Ring turns green, number becomes a check mark.
         case finished
+    }
+
+    /// What she is doing inside a task, following the backend's cue lines (`smile_now`, `swap_hands`).
+    public enum TaskPart: String, Equatable, Sendable {
+        /// Smile, before "Now smile!": face relaxed, no timer.
+        case relax
+        /// Smile, after "Now smile!": counts down to the end of the capture.
+        case smile
+        /// Arms, first half: counts down to the swap.
+        case leftHand
+        /// Arms, after "Now swap": counts down to the end of the capture.
+        case rightHand
+        /// A task this app does not know: one countdown for the whole capture.
+        case other
     }
 
     public enum Card: Equatable, Sendable {
@@ -55,8 +70,8 @@ public struct CallScreen: Equatable, Sendable {
         case assistant(Subtitle)
         /// "Question n of 3" + subtitles; Listening indicator on the right while `listening`.
         case question(number: Int, total: Int, subtitle: Subtitle, listening: Bool)
-        /// "Step n of 3", fixed title/subtitle text, timer ring on the right. `hint` is a neutral framing hint.
-        case task(step: Int, total: Int, task: String, timer: Timer, hint: String?)
+        /// "Step n of 3", title/subtitle for `part`, timer ring on the right. `hint` is a neutral framing hint.
+        case task(step: Int, total: Int, task: String, part: TaskPart, timer: Timer, hint: String?)
         /// "Step 3 of 3", the sentence in quotes, "Say it out loud", Listening on the right while capturing.
         case sentence(step: Int, total: Int, sentence: String, listening: Bool)
     }
@@ -85,10 +100,22 @@ public struct CallScreenReducer: Sendable {
     public private(set) var screen = CallScreen()
     private var lastSubtitle: CallScreen.Subtitle?
     private var task: String?
+    /// When the current capture ends, from `captureStarted`; the smile and right-hand countdowns end here.
+    private var captureEndsAt: Date?
 
     static let questions = ["q_medicine": 1, "q_feeling": 2, "q_unusual": 3]
     static let taskSteps = ["smile": 1, "arms": 2, "sentence": 3]
     static let stages: [String: CallScreen.Stage] = ["smile": .smile, "arms": .arms, "sentence": .sentence]
+    /// Cue lines the backend plays during a capture: they move the task on and keep its card.
+    static let cues: [String: (task: String, part: CallScreen.TaskPart)] = [
+        "smile_now": ("smile", .smile),
+        "swap_hands": ("arms", .rightHand),
+    ]
+    /// When the arms swap cue plays, after the capture starts. The phone is not told, so this mirrors
+    /// analysis/session/limits.py ARMS_PHASES ("swap" starts at 6500 ms). The swap cue itself always takes over.
+    static let armsSwapMs = 6500
+    /// Smile time left if the cue arrives before the capture's start is known (6000 ms window, cue at 1500 ms).
+    static let smileFallbackMs = 4500
 
     public init() {}
 
@@ -97,6 +124,7 @@ public struct CallScreenReducer: Sendable {
         screen.mode = .ringing(callId: callId, title: title)
         lastSubtitle = nil
         task = nil
+        captureEndsAt = nil
     }
 
     public mutating func connected() {
@@ -108,6 +136,10 @@ public struct CallScreenReducer: Sendable {
         let words = text.split(whereSeparator: { $0 == " " }).map(String.init)
         let subtitle = CallScreen.Subtitle(lineId: lineId, text: text, words: words, startedAt: now, durationMs: durationMs)
         lastSubtitle = subtitle
+        if let cue = Self.cues[lineId], cue.task == task, case .task = screen.card {
+            enterPart(cue.part, at: now)
+            return
+        }
         if let number = Self.questions[lineId] {
             screen.stage = .questions
             screen.selfViewLarge = false
@@ -115,7 +147,7 @@ public struct CallScreenReducer: Sendable {
             return
         }
         if let taskName = Self.taskName(of: lineId) {
-            enterTask(taskName, totalMs: nil, instruction: text)
+            enterTask(taskName, instruction: text)
             return
         }
         if lineId == "bye" {
@@ -130,21 +162,38 @@ public struct CallScreenReducer: Sendable {
         screen.card = .question(number: number, total: total, subtitle: subtitle, listening: true)
     }
 
+    /// The capture is on its way: still no ring until it has really started.
     public mutating func captureCommanded(task taskName: String, durationMs: Int) {
         if task != taskName {
-            enterTask(taskName, totalMs: durationMs, instruction: nil)
+            enterTask(taskName, instruction: nil)
         }
-        if case .task(let step, let total, let name, _, let hint) = screen.card {
-            screen.card = .task(step: step, total: total, task: name, timer: .waiting(totalSeconds: durationMs / 1000), hint: hint)
+        captureEndsAt = nil
+        updateTask { part, timer, _ in
+            part = Self.firstPart(of: taskName)
+            timer = .hidden
         }
     }
 
     public mutating func captureStarted(durationMs: Int, at now: Date) {
+        let ends = now.addingTimeInterval(Double(durationMs) / 1000)
+        captureEndsAt = ends
         switch screen.card {
-        case .task(let step, let total, let name, _, let hint):
-            screen.card = .task(step: step, total: total, task: name,
-                                timer: .running(endsAt: now.addingTimeInterval(Double(durationMs) / 1000),
-                                                totalSeconds: durationMs / 1000), hint: hint)
+        case .task(_, _, let name, _, _, _):
+            switch Self.firstPart(of: name) {
+            case .relax:
+                updateTask { part, timer, _ in
+                    part = .relax
+                    timer = .hidden
+                }
+            case .leftHand:
+                let swap = min(ends, now.addingTimeInterval(Double(Self.armsSwapMs) / 1000))
+                updateTask { part, timer, _ in
+                    part = .leftHand
+                    timer = .running(endsAt: swap, total: swap.timeIntervalSince(now))
+                }
+            default:
+                updateTask { _, timer, _ in timer = .running(endsAt: ends, total: ends.timeIntervalSince(now)) }
+            }
         case .sentence(let step, let total, let sentence, _):
             screen.card = .sentence(step: step, total: total, sentence: sentence, listening: true)
         default:
@@ -152,16 +201,18 @@ public struct CallScreenReducer: Sendable {
         }
     }
 
-    public mutating func hint(_ hint: String?) {
-        if case .task(let step, let total, let name, let timer, _) = screen.card {
-            screen.card = .task(step: step, total: total, task: name, timer: timer, hint: hint)
-        }
+    public mutating func hint(_ newHint: String?) {
+        updateTask { _, _, hint in hint = newHint }
     }
 
     public mutating func captureFinished() {
+        captureEndsAt = nil
         switch screen.card {
-        case .task(let step, let total, let name, _, _):
-            screen.card = .task(step: step, total: total, task: name, timer: .finished, hint: nil)
+        case .task:
+            updateTask { _, timer, hint in
+                timer = .finished
+                hint = nil
+            }
         case .sentence(let step, let total, let sentence, _):
             screen.card = .sentence(step: step, total: total, sentence: sentence, listening: false)
         default:
@@ -171,6 +222,7 @@ public struct CallScreenReducer: Sendable {
 
     public mutating func ended(reason: String?) {
         task = nil
+        captureEndsAt = nil
         screen.selfViewLarge = false
         if reason == "completed" {
             screen.mode = .done
@@ -183,9 +235,28 @@ public struct CallScreenReducer: Sendable {
         self = CallScreenReducer()
     }
 
-    private mutating func enterTask(_ taskName: String, totalMs: Int?, instruction: String?) {
+    /// A cue line: the next part starts now and counts down to the end of the capture.
+    private mutating func enterPart(_ next: CallScreen.TaskPart, at now: Date) {
+        let fallback = now.addingTimeInterval(Double(Self.smileFallbackMs) / 1000)
+        let ends = max(now, captureEndsAt ?? fallback)
+        updateTask { part, timer, hint in
+            part = next
+            timer = .running(endsAt: ends, total: ends.timeIntervalSince(now))
+            hint = nil
+        }
+    }
+
+    private mutating func updateTask(_ change: (inout CallScreen.TaskPart, inout CallScreen.Timer, inout String?) -> Void) {
+        guard case .task(let step, let total, let name, var part, var timer, var hint) = screen.card else { return }
+        change(&part, &timer, &hint)
+        screen.card = .task(step: step, total: total, task: name, part: part, timer: timer, hint: hint)
+    }
+
+    /// The instruction line (or a capture for a new task): the task card, no ring yet.
+    private mutating func enterTask(_ taskName: String, instruction: String?) {
         let changed = task != taskName
         task = taskName
+        captureEndsAt = nil
         screen.stage = Self.stages[taskName] ?? screen.stage
         let step = Self.taskSteps[taskName] ?? 1
         if taskName == "sentence" {
@@ -201,13 +272,19 @@ public struct CallScreenReducer: Sendable {
             return
         }
         screen.selfViewLarge = true
-        let seconds = (totalMs ?? Self.defaultMs[taskName] ?? 5000) / 1000
         if changed || instruction != nil {
-            screen.card = .task(step: step, total: 3, task: taskName, timer: .waiting(totalSeconds: seconds), hint: nil)
+            screen.card = .task(step: step, total: 3, task: taskName, part: Self.firstPart(of: taskName),
+                                timer: .hidden, hint: nil)
         }
     }
 
-    static let defaultMs = ["smile": 6000, "arms": 15000, "sentence": 12000]
+    static func firstPart(of task: String) -> CallScreen.TaskPart {
+        switch task {
+        case "smile": return .relax
+        case "arms": return .leftHand
+        default: return .other
+        }
+    }
 
     static func taskName(of lineId: String) -> String? {
         for prefix in ["task_", "repeat_"] where lineId.hasPrefix(prefix) {
