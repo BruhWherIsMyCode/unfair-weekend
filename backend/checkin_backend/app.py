@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from secrets import compare_digest
@@ -19,15 +20,18 @@ from .delivery import FamilyDelivery
 from .hub import Device, DeviceHub, UnknownDevice
 from .link import ClientLink, LinkRejected
 from .live_avatar import LiveAvatarGateway
+from .logging_config import configure_logging, log_context, log_event
 from .media import MAX_ANSWER_BYTES, MediaRejected, check_answer, check_sample, decode_base64
 from .people import Directory
 from .provider_io import ProviderError
 from .runner import choose_driver, run_answered_call
+from .request_logging import RequestLoggingMiddleware
 from .speech import SpeechGateway
 from .store import NoStore, Store
 
 IdStr = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,128}$")]
 KEEPALIVE_S = 15.0
+log = logging.getLogger(__name__)
 
 
 class DemoKeyRequired(Exception):
@@ -148,10 +152,17 @@ class CallDesk:
         self.tasks: set[asyncio.Task[Any]] = set()
         self.driver = choose_driver(settings.call_runner, settings.database_path)
 
-    def _spawn(self, coro: Any) -> None:
+    def _spawn(self, coro: Any, call_id: str) -> None:
         task = asyncio.create_task(coro)
         self.tasks.add(task)
-        task.add_done_callback(self.tasks.discard)
+
+        def finished(done: asyncio.Task[Any]) -> None:
+            self.tasks.discard(done)
+            if not done.cancelled() and (exc := done.exception()) is not None:
+                log.error("call.background_failed", extra={"event_fields": {"call_id": call_id}},
+                          exc_info=(type(exc), exc, exc.__traceback__))
+
+        task.add_done_callback(finished)
 
     def start(self, person_id: str) -> Call:
         person = self.people.get(person_id)
@@ -172,7 +183,7 @@ class CallDesk:
             still_active=lambda: self.calls.get(call.call_id).state == CallState.RINGING,
         )
         self.store.record_ring_sent(call.call_id, devices)
-        self._spawn(self._watch(call))
+        self._spawn(self._watch(call), call.call_id)
         return call
 
     def answer(self, call_id: str) -> dict[str, Any]:
@@ -183,12 +194,14 @@ class CallDesk:
             link = ClientLink(call_id=call_id, person=person, hub=self.hub, speech=self.speech,
                               delivery=self.delivery, clips=self.clips, store=self.store)
             self.links[call_id] = link
-            self._spawn(self._run(link))
+            self._spawn(self._run(link), call_id)
         return {"call_id": call_id, "person_name": person.name, "voiced": self.speech.voiced,
                 "deadline_s": self.settings.call_timeout_s}
 
     async def _run(self, link: ClientLink) -> None:
-        result = await run_answered_call(link, self.driver)
+        # These tasks outlive the answer HTTP request. Subsequent logs belong to the call.
+        with log_context(request_id=None, call_id=link.call_id):
+            result = await run_answered_call(link, self.driver)
         self.results[link.call_id] = result
         call = self.calls.get(link.call_id)
         if not call.terminal:
@@ -232,11 +245,15 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
                people: Directory | None = None, clips: ClipGateway | None = None,
                live: LiveAvatarGateway | None = None) -> FastAPI:
     settings = settings if settings is not None else Settings.from_environment()
+    if settings.logging is not None:
+        configure_logging(settings.logging, secrets=(settings.demo_key,))
     if settings.call_runner == "analysis":
         choose_driver("analysis")  # refuses now, with the problems block, when measuring is not ready (not mid-call)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        log_event(log, logging.INFO, "application.starting", call_runner=settings.call_runner,
+                  database_enabled=bool(settings.database_path))
         calls = CallService(ring_timeout_s=settings.ring_timeout_s, call_timeout_s=settings.call_timeout_s)
         hub = DeviceHub()
         gateway = speech if speech is not None else SpeechGateway.from_environment()
@@ -256,8 +273,11 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
         # Camera debug runs the analysis for the demo person; the phone's own person setting is not needed.
         app.state.debug = DebugDesk(next(iter(directory.all())).person_id)
         try:
+            log_event(log, logging.INFO, "application.started", voiced=gateway.voiced,
+                      live_avatar=live_avatar.available)
             yield
         finally:
+            log.info("application.stopping")
             hub.close()
             await desk.aclose()
             await calls.aclose()
@@ -269,8 +289,10 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
             if live is None:
                 await live_avatar.aclose()
             app.state.debug.close()
+            log.info("application.stopped")
 
     app = FastAPI(title="Check-in backend", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+    app.add_middleware(RequestLoggingMiddleware)
 
     async def require_demo_key(request: Request) -> None:
         candidate = request.headers.get("X-Demo-Key")
@@ -335,6 +357,7 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
         desk.hub.register(Device(body.device_id, body.role, body.person_id, body.family_id))
         family_id = desk.people.get(body.person_id).family_id if body.role == "parent" else body.family_id
         desk.store.record_device(body.device_id, body.role, body.person_id, family_id)
+        log_event(log, logging.INFO, "device.registered", device_id=body.device_id, role=body.role)
         return Response(status_code=204)
 
     @app.get("/v1/devices/{device_id}/events", dependencies=auth)
@@ -446,6 +469,7 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
         try:
             session = await gateway.session()
         except ProviderError:
+            log_event(log, logging.WARNING, "avatar.live_unavailable", call_id=call_id, exc_info=True)
             raise ApiError(503, "avatar_unavailable", "The live avatar could not be started.") from None
         return JSONResponse(session, headers={"Cache-Control": "no-store"})
 

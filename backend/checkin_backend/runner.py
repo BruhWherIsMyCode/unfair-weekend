@@ -10,6 +10,7 @@ a reading and always reports the session as incomplete.
 
 import asyncio
 import importlib.util
+import logging
 import os
 import sys
 from collections.abc import Awaitable, Callable
@@ -17,6 +18,9 @@ from pathlib import Path
 from typing import Any
 
 from .link import CallEnded, ClientLink, PlaybackFailed
+from .logging_config import log_event
+
+log = logging.getLogger(__name__)
 
 READY_TIMEOUT_S = 15.0
 TASKS = ("smile", "arms", "sentence")
@@ -189,7 +193,7 @@ def problems_block(problems: list[str], consequence: str) -> str:
 
 
 def _print_block(block: str) -> None:
-    print(block, flush=True)
+    log.warning(block)
 
 
 def choose_driver(
@@ -216,10 +220,12 @@ def choose_driver(
 
 
 async def run_answered_call(link: ClientLink, driver: Callable[[ClientLink], Awaitable[dict[str, Any]]]) -> dict[str, Any] | None:
+    log_event(log, logging.INFO, "call.waiting_for_client", call_id=link.call_id, timeout_s=READY_TIMEOUT_S)
     try:
         async with asyncio.timeout(READY_TIMEOUT_S):
             await link.ready.wait()
     except TimeoutError:
+        log_event(log, logging.WARNING, "call.client_not_ready", call_id=link.call_id)
         link.log.append({"kind": "client_not_ready"})
         if not link.ended:
             await link.publish({"status": "incomplete", "signs": []}, "final")
@@ -227,17 +233,22 @@ async def run_answered_call(link: ClientLink, driver: Callable[[ClientLink], Awa
     if link.ended:
         return None
     try:
-        return await driver(link)
+        log_event(log, logging.INFO, "call.driver_started", call_id=link.call_id)
+        result = await driver(link)
+        log_event(log, logging.INFO, "call.driver_completed", call_id=link.call_id, status=result.get("status"))
+        return result
     except (CallEnded, PlaybackFailed) as exc:
+        log_event(log, logging.WARNING, "call.driver_stopped", call_id=link.call_id, error_type=type(exc).__name__)
         link.log.append({"kind": "call_stopped", "error": type(exc).__name__})
         if not link.ended:
             await link.publish({"status": "incomplete", "signs": []}, "final")
         return None
     except Exception as exc:  # a driver crash must still end the call and tell the family
+        log_event(log, logging.ERROR, "call.driver_failed", call_id=link.call_id, exc_info=True)
         link.log.append({"kind": "driver_crashed", "error": type(exc).__name__})
         if not link.ended:
             try:
                 await link.publish({"status": "incomplete", "signs": []}, "final")
             except Exception:
-                pass
+                log_event(log, logging.ERROR, "call.fallback_publish_failed", call_id=link.call_id, exc_info=True)
         return None

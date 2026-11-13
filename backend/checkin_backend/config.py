@@ -4,6 +4,8 @@ import math
 import os
 from dataclasses import dataclass, field
 
+from .logging_config import LoggingSettings
+
 
 def positive_seconds(value: float, name: str) -> None:
     if isinstance(value, bool) or not math.isfinite(value) or value <= 0:
@@ -18,6 +20,8 @@ class Settings:
     call_runner: str = "auto"
     # SQLite file for durable call records (storage/migrations). None or "" keeps everything in memory.
     database_path: str | None = None
+    # Embedders can keep their existing logging; the environment factory enables our process logging.
+    logging: LoggingSettings | None = None
 
     def __post_init__(self) -> None:
         if not self.demo_key or self.demo_key.isspace():
@@ -35,4 +39,5 @@ class Settings:
             call_timeout_s=float(os.environ.get("CALL_TIMEOUT_S", "180")),
             call_runner=os.environ.get("CALL_RUNNER", "auto"),
             database_path=os.environ.get("DATABASE_PATH", ".cache/checkin.sqlite3"),
+            logging=LoggingSettings.from_environment(),
         )

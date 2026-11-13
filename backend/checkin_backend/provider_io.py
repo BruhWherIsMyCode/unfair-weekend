@@ -1,13 +1,19 @@
 """Bounded provider requests and private, atomic generated-asset writes."""
 
 import asyncio
+import logging
 import os
 import tempfile
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from time import monotonic
 from typing import Any, TypeVar
 
 import httpx
+
+from .logging_config import log_event
+
+log = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -37,6 +43,8 @@ async def provider_bytes(
     timeout_s: float,
     **kwargs: Any,
 ) -> bytes:
+    started = monotonic()
+    log_event(log, logging.DEBUG, "provider.request_started", provider=provider, method=method)
     try:
         async with asyncio.timeout(timeout_s):
             async with client.stream(method, url, **kwargs) as response:
@@ -51,8 +59,18 @@ async def provider_bytes(
                     if len(chunks) + len(chunk) > limit:
                         raise ProviderError(f"{provider} response exceeds the size limit")
                     chunks.extend(chunk)
+                log_event(log, logging.INFO, "provider.request_completed", provider=provider, method=method,
+                          status=200, response_bytes=len(chunks), duration_ms=round((monotonic() - started) * 1000, 2))
                 return bytes(chunks)
+    except ProviderError as exc:
+        status = getattr(exc, "status_code", None)
+        level = logging.DEBUG if provider == "Simli video" and status in (307, 404, 429) else logging.ERROR
+        log_event(log, level, "provider.request_failed", provider=provider, method=method, status=status,
+                  error_type=type(exc).__name__, duration_ms=round((monotonic() - started) * 1000, 2))
+        raise
     except (httpx.HTTPError, TimeoutError):
+        log_event(log, logging.ERROR, "provider.connection_failed", provider=provider, method=method, exc_info=True,
+                  duration_ms=round((monotonic() - started) * 1000, 2))
         raise ProviderError(f"{provider} could not be reached within the time limit") from None
 
 

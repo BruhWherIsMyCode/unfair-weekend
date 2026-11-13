@@ -8,6 +8,7 @@ Provider response bodies and credentials never reach the client.
 import asyncio
 import hashlib
 import json
+import logging
 import os
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -17,6 +18,9 @@ from urllib.parse import quote
 import httpx
 
 from .provider_io import PendingAssets, ProviderError, private_write, provider_bytes
+from .logging_config import log_event
+
+log = logging.getLogger(__name__)
 
 SAMPLE_RATE = 16000
 BYTES_PER_SECOND = SAMPLE_RATE * 2
@@ -135,11 +139,13 @@ class SpeechGateway:
             if require_voice:
                 raise SpeechError("ELEVENLABS_API_KEY is required to prepare uncached speech")
             audio = silence_for(text)
+            log_event(log, logging.WARNING, "speech.caption_fallback", duration_ms=duration_ms(audio))
             return PreparedLine(text, audio, duration_ms(audio), False)
         return PreparedLine(text, audio, duration_ms(audio), True)
 
     async def _cached(self, key: str, text: str) -> bytes | None:
         if key in self._memory:
+            log_event(log, logging.DEBUG, "speech.cache_hit", cache="memory")
             self._memory.move_to_end(key)
             return self._memory[key]
         path = None
@@ -150,8 +156,9 @@ class SpeechGateway:
                 try:
                     check_pcm(audio)
                 except SpeechError:
-                    pass  # An interrupted or invalid cache entry is regenerated.
+                    log.warning("speech.cache_invalid")  # Regenerate an interrupted or invalid cache entry.
                 else:
+                    log_event(log, logging.DEBUG, "speech.cache_hit", cache="disk")
                     self._remember(key, audio)
                     return audio
         if not self._key:
@@ -180,6 +187,7 @@ class SpeechGateway:
     async def transcribe(self, audio: bytes, content_type: str) -> str | None:
         """Her words, or None when nothing could be heard or no provider is configured."""
         if not self._key:
+            log.info("speech.transcription_unconfigured")
             return None
         suffix = {"audio/mp4": "m4a", "audio/webm": "webm", "audio/wav": "wav"}.get(content_type)
         if suffix is None or not audio or len(audio) > MAX_ANSWER_BYTES:

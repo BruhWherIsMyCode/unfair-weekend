@@ -6,6 +6,7 @@ records are immutable snapshots, not HTTP payloads. Times use a monotonic clock.
 """
 
 import asyncio
+import logging
 import re
 import time
 from collections.abc import Callable
@@ -14,6 +15,9 @@ from enum import StrEnum
 from uuid import uuid4
 
 from .config import positive_seconds
+from .logging_config import log_event
+
+log = logging.getLogger(__name__)
 
 
 class CallState(StrEnum):
@@ -102,6 +106,8 @@ class CallService:
         self._active_by_person[person_id] = call.call_id
         self._ended[call.call_id] = loop.create_future()
         self._arm_timer(call)
+        log_event(log, logging.INFO, "call.started", call_id=call.call_id, state=call.state,
+                  ring_timeout_s=self._ring_timeout_s)
         return call
 
     def get(self, call_id: str) -> Call:
@@ -120,6 +126,8 @@ class CallService:
         call = replace(call, state=CallState.CONNECTED, answered_at=self._clock())
         self._calls[call_id] = call
         self._arm_timer(call)
+        log_event(log, logging.INFO, "call.answered", call_id=call_id,
+                  ring_duration_ms=round((call.answered_at - call.created_at) * 1000, 2))
         return call
 
     def decline(self, call_id: str) -> Call:
@@ -192,4 +200,7 @@ class CallService:
             if timer is not asyncio.current_task():
                 timer.cancel()
         self._ended[call.call_id].set_result(call)
+        level = logging.WARNING if reason in (EndReason.DEADLINE, EndReason.CONNECTION_LOST) else logging.INFO
+        log_event(log, level, "call.ended", call_id=call.call_id, state=state, reason=reason,
+                  duration_ms=round((call.ended_at - call.created_at) * 1000, 2))
         return call
