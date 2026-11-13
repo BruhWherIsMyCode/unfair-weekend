@@ -96,6 +96,10 @@ struct CameraDebugView: View {
     private var facts: some View {
         if let frame = model.frame {
             section("Latest frame (\(frame.ms) ms)") {
+                if let w = frame.width, let h = frame.height {
+                    row("Frame", "\(Int(w)) × \(Int(h))" + (w > h ? " landscape: turned sideways!" : " portrait"),
+                        ok: h >= w)
+                }
                 row("Face", frame.face ? (frame.faceSmall == true ? "found, too small: come closer" : "found")
                                        : "not found", ok: frame.face && frame.faceSmall != true)
                 if frame.task == "arms" {

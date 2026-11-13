@@ -26,6 +26,7 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
     private var configured = false
     /// Session state below is touched only on sessionQueue.
     private var input: AVCaptureDeviceInput?
+    private var output: AVCaptureVideoDataOutput?
     private var previewConnection: AVCaptureConnection?
     private var lastEncode: CFTimeInterval = 0
     private var onAvailability: (@Sendable (Bool, ResourceProblem?) -> Void)?
@@ -88,6 +89,8 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
             sessionQueue.async {
                 do {
                     try self.configure()
+                    // The frames for the analysis must be upright: set again at every capture start.
+                    self.uprightFrames()
                     self.lock.withLock {
                         self.latest = nil
                         self.capturing = true
@@ -153,6 +156,7 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
                 self.session.addConnection(connection)
                 self.previewConnection = connection
             }
+            self.uprightFrames()
         }
     }
 
@@ -188,18 +192,25 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
         output.setSampleBufferDelegate(self, queue: frameQueue)
         if session.canAddOutput(output) {
             session.addOutput(output)
-        }
-        if let connection = output.connection(with: .video) {
-            // Portrait: 90 degrees makes the buffers 480 x 640 and upright for the front camera.
-            if connection.isVideoRotationAngleSupported(90) {
-                connection.videoRotationAngle = 90
-            }
-            if connection.isVideoMirroringSupported {
-                connection.automaticallyAdjustsVideoMirroring = false
-                connection.isVideoMirrored = false
-            }
+            self.output = output
         }
         configured = true
+        uprightFrames()
+    }
+
+    /// Portrait: 90 degrees makes the buffers 480 x 640 and upright for the front camera, not mirrored. Like the
+    /// preview's, the output's connection may not exist yet while the session is first configured, or may be
+    /// rebuilt when a connection is added; then the frames stayed landscape (the analysis saw her turned 90 degrees).
+    /// So this runs after configuring, after attaching a preview and at every capture start. sessionQueue only.
+    private func uprightFrames() {
+        guard let connection = output?.connection(with: .video) else { return }
+        if connection.isVideoRotationAngleSupported(90), connection.videoRotationAngle != 90 {
+            connection.videoRotationAngle = 90
+        }
+        if connection.isVideoMirroringSupported {
+            connection.automaticallyAdjustsVideoMirroring = false
+            connection.isVideoMirrored = false
+        }
     }
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer,
@@ -207,7 +218,12 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
         let now = CACurrentMediaTime()
         let wanted = lock.withLock { capturing && now - lastEncode >= minEncodeInterval }
         guard wanted, let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        let image = CIImage(cvPixelBuffer: pixels)
+        var image = CIImage(cvPixelBuffer: pixels)
+        if image.extent.width > image.extent.height {
+            // Still landscape (the rotation did not take): turn it 90 degrees clockwise, the same turn as the
+            // connection's 90-degree angle that keeps the preview upright.
+            image = image.oriented(.right)
+        }
         guard let space = CGColorSpace(name: CGColorSpace.sRGB),
               let jpeg = context.jpegRepresentation(
                 of: image, colorSpace: space,
