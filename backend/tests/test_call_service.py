@@ -29,10 +29,12 @@ def free_port() -> int:
 
 
 class Server:
-    def __init__(self, runner: str, **settings) -> None:
+    def __init__(self, runner: str, *, speech=None, clips=None, **settings) -> None:
         self.port = free_port()
         self.base = f"http://127.0.0.1:{self.port}"
-        app = create_app(Settings(demo_key=KEY, call_runner=runner, **settings), speech=SpeechGateway(api_key=""))
+        self.speech = speech if speech is not None else SpeechGateway(api_key="")
+        self.clips = clips
+        app = create_app(Settings(demo_key=KEY, call_runner=runner, **settings), speech=self.speech, clips=clips)
         self.app = app
         self.server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=self.port, log_level="warning"))
 
@@ -45,6 +47,9 @@ class Server:
     async def __aexit__(self, *exc) -> None:
         self.server.should_exit = True
         await asyncio.wait_for(self.task, 10)
+        await self.speech.aclose()
+        if self.clips is not None:
+            await self.clips.aclose()
 
 
 async def run_call(server: Server, sim: SimClient, timeout: float = 60) -> dict:

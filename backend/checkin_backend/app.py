@@ -8,19 +8,19 @@ from secrets import compare_digest
 from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, Header, Request
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .calls import Call, CallConflict, CallNotFound, CallService, CallState, EndReason
+from .avatar import ClipGateway
 from .config import Settings
 from .delivery import FamilyDelivery
 from .hub import Device, DeviceHub, UnknownDevice
 from .link import ClientLink, LinkRejected
-from .media import MediaRejected, check_answer, check_sample, decode_base64
+from .media import MAX_ANSWER_BYTES, MediaRejected, check_answer, check_sample, decode_base64
 from .people import Directory
 from .runner import choose_driver, run_answered_call
 from .speech import SpeechGateway
-from .store import NoStore, Store
 
 IdStr = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,128}$")]
 KEEPALIVE_S = 15.0
@@ -129,14 +129,14 @@ class CallDesk:
     """Glue between connection state, client links and the session runner. One per app."""
 
     def __init__(self, settings: Settings, calls: CallService, hub: DeviceHub, people: Directory,
-                 speech: SpeechGateway, delivery: FamilyDelivery, store: Store | None = None) -> None:
+                 speech: SpeechGateway, delivery: FamilyDelivery, clips: ClipGateway) -> None:
         self.settings = settings
-        self.store = store if store is not None else NoStore()
         self.calls = calls
         self.hub = hub
         self.people = people
         self.speech = speech
         self.delivery = delivery
+        self.clips = clips
         self.links: dict[str, ClientLink] = {}
         self.results: dict[str, dict[str, Any] | None] = {}
         self.tasks: set[asyncio.Task[Any]] = set()
@@ -154,18 +154,14 @@ class CallDesk:
         if not self.hub.parents_of(person_id):
             raise ApiError(503, "client_unavailable", "No parent device is registered for this person.")
         call = self.calls.start(person_id)
-        devices = self.hub.parents_of(person_id)
-        ring = {"event_id": f"ring_{call.call_id}", "call_id": call.call_id, "caller_name": "Daily check-in",
-                "person_name": person.name, "ring_timeout_s": self.settings.ring_timeout_s}
-        self.store.record_call_started(call.call_id, person, devices, self.settings.ring_timeout_s, ring)
         self.hub.send_many(
-            devices,
+            self.hub.parents_of(person_id),
             "call.incoming",
-            ring,
+            {"event_id": f"ring_{call.call_id}", "call_id": call.call_id, "caller_name": "Daily check-in",
+             "person_name": person.name, "ring_timeout_s": self.settings.ring_timeout_s},
             event_id=f"ring_{call.call_id}",
             still_active=lambda: self.calls.get(call.call_id).state == CallState.RINGING,
         )
-        self.store.record_ring_sent(call.call_id, devices)
         self._spawn(self._watch(call))
         return call
 
@@ -173,9 +169,8 @@ class CallDesk:
         call = self.calls.answer(call_id)
         person = self.people.get(call.person_id)
         if call_id not in self.links:
-            self.store.record_call_answered(call_id, self.settings.call_timeout_s)
             link = ClientLink(call_id=call_id, person=person, hub=self.hub, speech=self.speech,
-                              delivery=self.delivery, store=self.store)
+                              delivery=self.delivery, clips=self.clips)
             self.links[call_id] = link
             self._spawn(self._run(link))
         return {"call_id": call_id, "person_name": person.name, "voiced": self.speech.voiced,
@@ -186,11 +181,10 @@ class CallDesk:
         self.results[link.call_id] = result
         call = self.calls.get(link.call_id)
         if not call.terminal:
-            self.calls.end(link.call_id, EndReason.COMPLETED)
+            self.calls.end(link.call_id, EndReason.COMPLETED if result is not None else EndReason.CONNECTION_LOST)
 
     async def _watch(self, call: Call) -> None:
         ended = await self.calls.wait_ended(call.call_id)
-        self.store.record_call_ended(call.call_id, ended.state.value, ended.reason.value if ended.reason else None)
         person = self.people.get(call.person_id)
         devices = self.hub.parents_of(call.person_id)
         self.hub.send_many(devices, "call.ended",
@@ -221,7 +215,7 @@ class CallDesk:
 
 
 def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None = None,
-               people: Directory | None = None) -> FastAPI:
+               people: Directory | None = None, clips: ClipGateway | None = None) -> FastAPI:
     settings = settings if settings is not None else Settings.from_environment()
 
     @asynccontextmanager
@@ -229,29 +223,28 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
         calls = CallService(ring_timeout_s=settings.ring_timeout_s, call_timeout_s=settings.call_timeout_s)
         hub = DeviceHub()
         gateway = speech if speech is not None else SpeechGateway.from_environment()
+        avatar = clips if clips is not None else ClipGateway.from_environment()
         directory = people if people is not None else Directory.from_environment()
-        store = Store(settings.database_path) if settings.database_path else NoStore()
-        await asyncio.to_thread(store.open, directory.all())
-        delivery = FamilyDelivery(hub, store)
-        desk = CallDesk(settings, calls, hub, directory, gateway, delivery, store)
+        delivery = FamilyDelivery(hub)
+        desk = CallDesk(settings, calls, hub, directory, gateway, delivery, avatar)
         app.state.calls = calls
         app.state.hub = hub
         app.state.desk = desk
-        app.state.store = store
         try:
             yield
         finally:
             hub.close()
             await desk.aclose()
             await calls.aclose()
-            await asyncio.to_thread(store.close)
             if speech is None:
                 await gateway.aclose()
+            if clips is None:
+                await avatar.aclose()
 
     app = FastAPI(title="Check-in backend", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
     async def require_demo_key(request: Request) -> None:
-        candidate = request.headers.get("X-Demo-Key") or request.query_params.get("key")
+        candidate = request.headers.get("X-Demo-Key")
         if candidate is None or not compare_digest(candidate.encode("utf-8"), settings.demo_key.encode("utf-8")):
             raise DemoKeyRequired
 
@@ -311,8 +304,6 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
         if body.role == "family" and body.family_id is None:
             raise ApiError(400, "invalid_request", "A family device needs a family_id.")
         desk.hub.register(Device(body.device_id, body.role, body.person_id, body.family_id))
-        family_id = desk.people.get(body.person_id).family_id if body.role == "parent" else body.family_id
-        desk.store.record_device(body.device_id, body.role, body.person_id, family_id)
         return Response(status_code=204)
 
     @app.get("/v1/devices/{device_id}/events", dependencies=auth)
@@ -349,14 +340,7 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
     @app.get("/v1/calls/{call_id}", dependencies=auth)
     async def call_status(call_id: str, request: Request) -> dict[str, Any]:
         desk = desk_of(request)
-        try:
-            call = desk.calls.get(call_id)
-        except CallNotFound:
-            # Not in this process (e.g. after a restart): answer from the stored history.
-            stored = await desk.store.call_record(call_id)
-            if stored is None:
-                raise
-            return stored
+        call = desk.calls.get(call_id)
         message = desk.delivery.for_call(call_id)
         link = desk.links.get(call_id)
         return {"call_id": call_id, "person_id": call.person_id, "state": call.state.value,
@@ -387,7 +371,6 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
             link = desk.links.get(call_id)
             if link is not None:
                 link.on_event(event)
-            desk.store.record_client_event(call_id, event)
             if not call.terminal:
                 if call.state == CallState.RINGING:
                     desk.calls.decline(call_id)
@@ -397,7 +380,6 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
         if call.terminal:
             raise ApiError(410, "call_ended", "The call has ended.")
         desk.link(call_id).on_event(event)
-        desk.store.record_client_event(call_id, event)
         return Response(status_code=204)
 
     @app.get("/v1/calls/{call_id}/speech/{command_id}", dependencies=auth)
@@ -406,10 +388,20 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
         return Response(content=audio, media_type="application/octet-stream",
                         headers={"Cache-Control": "no-store", "X-Sample-Rate": "16000"})
 
+    @app.get("/v1/calls/{call_id}/video/{command_id}", dependencies=auth)
+    async def video_clip(call_id: str, command_id: str, request: Request) -> FileResponse:
+        path = desk_of(request).link(call_id).video_asset(command_id)
+        return FileResponse(path, media_type="video/mp4", headers={"Cache-Control": "no-store"})
+
     @app.post("/v1/calls/{call_id}/captures/{command_id}", status_code=204, dependencies=auth)
     async def answer_upload(call_id: str, command_id: str, request: Request) -> Response:
         link = desk_of(request).link(call_id)
-        data = await request.body()
+        data = bytearray()
+        async for chunk in request.stream():
+            if len(data) + len(chunk) > MAX_ANSWER_BYTES:
+                raise ApiError(413, "too_large", "Answer audio is larger than 10 MiB.")
+            data.extend(chunk)
+        data = bytes(data)
         media_type = check_answer(request.headers.get("content-type"), data)
         link.on_answer_upload(command_id, data, media_type)
         return Response(status_code=204)
@@ -430,9 +422,6 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
     @app.get("/v1/families/{family_id}/messages", dependencies=auth)
     async def messages(family_id: str, request: Request) -> list[dict[str, Any]]:
         desk = desk_of(request)
-        if desk.store.enabled:
-            # Stored messages survive restarts; the in-memory list only covers this process.
-            return await desk.store.family_messages(family_id)
         return [asdict(m) for m in desk.delivery.for_family(family_id, desk.people.all())]
 
     return app

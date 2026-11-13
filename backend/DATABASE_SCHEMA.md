@@ -27,20 +27,18 @@ Implemented here: initial migration, constraints/indexes/triggers, a standard
 library migration tool, and synthetic storage tests. No real people records,
 recordings, provider calls, seeded formulas or invented production thresholds.
 
-The call service now writes its own (owner 2) tables through
-[store.py](checkin_backend/store.py): devices, calls, the call event journal,
-client commands, family messages and their outbox/delivery rows. It also writes
-`session_summaries` for summaries it publishes, until Agent 3's coordinator
-does. Its limits are listed in the [backend README](README.md#persistence):
-write-behind delivery, task commands without `attempt_id`, and startup recovery
-that only closes open calls and commands.
+Not implemented here: application repositories, CallService persistence,
+CallSession, startup recovery, client endpoints, timers, outbox dispatch,
+task analyzers, metric formulas or end-to-end calls. The merged
+[Python foundation](README.md#python-foundation) provides an in-memory
+CallService. Schema tooling does not import that application or
+persist its records automatically. Writers must implement the transactions
+below before claiming persistence works in the running backend.
 
-Still not implemented: CallSession/task/baseline/model writers (owner 3),
-observation routes, timers, outbox dispatch with retries, task analyzers and
-metric formulas. Writers must implement the transactions below before claiming
-that part of persistence works in the running backend.
-
-The application wheel includes `storage` and `storage/migrations/*.sql`.
+The tooling is imported from the source checkout. When integrating storage into the
+application package, include `storage` and `storage/migrations/*.sql`
+in its package discovery/data; storage is not yet included in the application
+wheel configuration.
 
 SQLite 3.38+ with JSON functions is required. Use one application process,
 short write transactions and a bounded database worker/connection owner. Do not
