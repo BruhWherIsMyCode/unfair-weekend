@@ -5,7 +5,7 @@ import ParentCallKit
 
 /// Backend address and demo key, set on the hidden settings screen. Stored in UserDefaults on the
 /// phone only, never in the repo. Launch arguments such as `-parent.baseURL http://10.0.0.5:8000`
-/// override them for one run (UserDefaults argument domain).
+/// set them, and are kept as if typed on the settings screen (so a developer can set up a phone from a Mac).
 struct AppSettings: Equatable {
     var baseURL: String
     var demoKey: String
@@ -17,6 +17,12 @@ struct AppSettings: Equatable {
 
     static func load() -> AppSettings {
         let defaults = UserDefaults.standard
+        let passed = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
+        for key in [baseURLKey, demoKeyKey, personIdKey] {
+            if let value = passed[key] as? String {
+                defaults.set(value, forKey: key)  // keep it after this run
+            }
+        }
         return AppSettings(baseURL: defaults.string(forKey: baseURLKey) ?? "",
                            demoKey: defaults.string(forKey: demoKeyKey) ?? "",
                            personId: defaults.string(forKey: personIdKey) ?? "p_demo")
