@@ -163,8 +163,9 @@ class StreamArms:
 
     def __init__(self, frame_reader: Optional[FrameReader] = None, decode: Optional[Decoder] = None,
                  phases: Sequence[Phase] = limits.ARMS_PHASES, period_ms: int = OBSERVATION_PERIOD_MS,
-                 use_executor: bool = True) -> None:
+                 use_executor: bool = True, mirrored: bool = False) -> None:
         self._frame_reader = frame_reader
+        self.mirrored = mirrored  # for the production reader a run creates itself (a mirrored front camera)
         self._decode = decode
         self.phases = tuple(phases)
         self.period_ms = period_ms
@@ -199,7 +200,7 @@ class StreamArms:
         owned_reader: Optional[ProductionHandReader] = None
         reader = self._frame_reader
         if reader is None:
-            owned_reader = ProductionHandReader()
+            owned_reader = ProductionHandReader(self.mirrored)
             reader = owned_reader
         loop = asyncio.get_running_loop()
         holds = hold_windows(self.phases)

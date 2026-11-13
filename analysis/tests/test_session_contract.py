@@ -37,9 +37,20 @@ COVERED = [f for f in FIXTURES if parser_for(f) is not None]
 
 
 def test_the_published_copy_equals_the_draft():
+    """Only fixtures.json is still pinned byte for byte to backend/proposals. Two files are intentionally newer or
+    different now: contract/script.en.json (the one-hand phone script, published 0.3; the backend's own copy is pinned
+    to it by a backend test) and mvp.openapi.yaml (the proposals copy was relabelled 'Historical 0.2' by Agent 2)."""
     draft = Path(__file__).resolve().parents[2] / "backend" / "proposals"
-    for name in ("mvp.openapi.yaml", "script.en.json", "fixtures.json"):
-        assert (CONTRACT / name).read_bytes() == (draft / name).read_bytes()
+    assert (CONTRACT / "fixtures.json").read_bytes() == (draft / "fixtures.json").read_bytes()
+
+
+def test_the_published_script_is_the_one_hand_phone_script():
+    script = json.loads((CONTRACT / "script.en.json").read_text("utf-8"))
+    assert "swap_hands" in script and "right hand" in script["setup_phone"]
+    assert "both arms" not in script["task_arms"] and "table" not in script["setup_phone"]
+    draft = json.loads((Path(__file__).resolve().parents[2] / "backend" / "proposals" / "script.en.json")
+                       .read_text("utf-8"))
+    assert "swap_hands" not in draft  # the draft is the older text; the published script is intentionally newer
 
 
 def test_fixture_coverage_is_not_empty():

@@ -31,9 +31,10 @@ def calls_path(person: str, data_dir: Optional[Path] = None) -> Path:
 
 
 class BaselineStore:
-    def __init__(self, person: str, data_dir: Optional[Path] = None) -> None:
+    def __init__(self, person: str, data_dir: Optional[Path] = None, needed: Optional[int] = None) -> None:
         self.person = person
         self.path = calls_path(person, data_dir)
+        self.needed = int(needed) if needed is not None else config.BASELINE_NEEDED  # normal calls until "ready"
 
     def append(self, label: str, values: Dict[str, float]) -> bool:
         """Append one finished call's baseline values. False when there was nothing to store."""
@@ -45,24 +46,24 @@ class BaselineStore:
     def load_baselines(self) -> Dict[str, Dict[str, Any]]:
         person = baseline_mod.load_person(self.path)
         smile_values = baseline_mod.baseline_values(person, SMILE_METRIC_ID)
-        smile = baseline_mod.make_baseline(smile_values, metric="corner_height")
+        smile = baseline_mod.make_baseline(smile_values, metric="corner_height", needed=self.needed)
         smile["snapshot_id"] = "baseline_%s_smile_%d" % (self._safe(), len(smile_values))
 
         hands: Dict[str, Dict[str, Any]] = {}
         counts = []
         for side, key in HAND_KEYS.items():
             values = baseline_mod.baseline_values(person, key)
-            hands[side] = baseline_mod.make_baseline(values, metric="hand_sink")
+            hands[side] = baseline_mod.make_baseline(values, metric="hand_sink", needed=self.needed)
             counts.append(len(values))
         arms: Dict[str, Any] = {
             "snapshot_id": "baseline_%s_arms_%d_%d" % (self._safe(), counts[0], counts[1]),
-            "sessions": min(counts), "needed": config.BASELINE_NEEDED,
+            "sessions": min(counts), "needed": self.needed,
             "ready": all(h["ready"] for h in hands.values()),
             "hand_left": hands["left"], "hand_right": hands["right"]}
         # v8: how long she takes to say the sentence (seconds); the usual is at least +/- SENTENCE_MIN_HALF_WIDTH_S wide
         sentence_values = baseline_mod.baseline_values(person, limits.SPEECH_BASELINE_KEY)
         sentence = baseline_mod.make_baseline(sentence_values, metric="sentence_duration",
-                                              min_half_width=limits.SENTENCE_MIN_HALF_WIDTH_S)
+                                              min_half_width=limits.SENTENCE_MIN_HALF_WIDTH_S, needed=self.needed)
         sentence["snapshot_id"] = "baseline_%s_sentence_%d" % (self._safe(), len(sentence_values))
         return {"smile": smile, "arms": arms, "sentence": sentence}
 

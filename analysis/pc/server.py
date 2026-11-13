@@ -47,6 +47,8 @@ from analysis.session import limits
 from analysis.speech import elevenlabs
 from analysis.session.adapters import render_family_text
 from analysis.session.agent_tools import load_script
+from analysis.session.call_record import (LiveLog, build_record, format_log_line, format_numbers,  # noqa: F401
+                                          format_speech, write_record)
 from analysis.session.call_session import CallSession
 from analysis.session.clock import RealClock
 from analysis.session.run_call import run_call, safety_floor_from_env
@@ -61,62 +63,6 @@ def load_pc_script(lines_path: Optional[Path] = None) -> Dict[str, str]:
     overrides = json.loads(Path(lines_path or LINES_PATH).read_text("utf-8"))
     script.update({k: v for k, v in overrides.items() if not k.startswith("_") and isinstance(v, str)})
     return script
-
-
-class LiveLog(list):
-    """session.log that also prints a compact line for the interesting entries."""
-
-    def __init__(self, show: Callable[[Dict[str, Any]], None]) -> None:
-        super().__init__()
-        self._show = show
-
-    def append(self, entry: Dict[str, Any]) -> None:  # type: ignore[override]
-        super().append(entry)
-        try:
-            self._show(entry)
-        except Exception:  # printing must never break a call
-            pass
-
-
-def format_numbers(reading: Optional[Dict[str, Any]]) -> str:
-    if not reading:
-        return "no reading"
-    low, high = reading.get("usual_low"), reading.get("usual_high")
-    usual = "usual %.3f..%.3f" % (low, high) if low is not None and high is not None else "usual still learning"
-    outside = {True: "OUTSIDE", False: "inside", None: "-"}[reading.get("outside")]
-    return "value %.3f %s %s side=%s" % (reading["value"], usual, outside, reading.get("side"))
-
-
-def format_speech(session: Any, attempt_id: Optional[str]) -> str:
-    """The numbers of a sentence attempt for the terminal line."""
-    details = getattr(session.modules.get("sentence"), "attempt_details", None)
-    d = details(attempt_id) if callable(details) and attempt_id else None
-    if not d:
-        return "nothing usable heard"
-    return "heard %r | word error rate %s | longest pause %s s | %s words/min | missing %s changed %s extra %s" % (
-        d["heard"][:60], d["word_error_rate"], d["longest_pause_s"], d["words_per_min"], d["missing_words"],
-        [c["heard"] for c in d["changed_words"]], d["extra_words"])
-
-
-def format_log_line(entry: Dict[str, Any], session: Any) -> Optional[str]:
-    kind = entry["kind"]
-    rest = {k: v for k, v in entry.items() if k not in ("t", "kind")}
-    if kind == "attempt_finished":
-        last = session.results[-1] if session.results else {}
-        line = "task %s %s: %s | %s" % (last.get("task"), rest.get("attempt_id"), rest.get("outcome"),
-                                      format_numbers(last.get("reading")))
-        if last.get("task") == "sentence":
-            line += " | " + format_speech(session, rest.get("attempt_id"))
-        return line
-    shown = {"required_tasks": "required tasks", "call_driver": "driver", "agent_tool": "claude tool", "agent_fallback": "FALLBACK to fixed order",
-             "fallback_step": "fixed step", "agent_refused": "step refused", "change_confirmed": "CHANGE CONFIRMED",
-             "published": "family message", "concern_raised": "CONCERN RAISED", "resource_changed": "resource",
-             "floor_off_suppressed": "FLOOR OFF - would have published", "task_refused": "task refused",
-             "say": "say", "hang_up": "client hung up", "driver_crashed": "driver crashed",
-             "cue": "cue"}
-    if kind not in shown:
-        return None
-    return "%6.1fs %-26s %s" % (entry["t"], shown[kind], json.dumps(rest, sort_keys=True) if rest else "")
 
 
 class PcServer:
@@ -342,12 +288,8 @@ class PcServer:
             self.out("call crashed: %s" % type(exc).__name__)
             summary = session.build_session_result().to_dict()
         family_text = adapter.family.latest_text or render_family_text(summary, self.name)
-        record = {"call_id": call_id, "person": self.person, "label": self.label, "claude": self.claude,
-                  "safety_floor": self.safety_floor, "summary": summary, "family_text": family_text,
-                  "session_log": list(session.log),
-                  "timings": {"started_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(started_wall)),
-                              "duration_s": round(time.time() - started_wall, 1),
-                              "session_duration_s": summary.get("duration_s")}}
+        record = build_record(call_id, self.person, self.label, self.claude, self.safety_floor, summary, family_text,
+                              session.log, started_wall)
         self._write_record(call_id, record)
         stored = False
         try:
@@ -365,11 +307,7 @@ class PcServer:
             self.out(line)
 
     def _write_record(self, call_id: str, record: Dict[str, Any]) -> None:
-        try:
-            self.runs_dir.mkdir(parents=True, exist_ok=True)
-            (self.runs_dir / ("%s.json" % call_id)).write_text(json.dumps(record, indent=2, default=str), "utf-8")
-        except OSError as exc:
-            self.out("could not write the call record: %s" % type(exc).__name__)
+        write_record(self.runs_dir, call_id, record, self.out)
 
 
 # ---- command line ------------------------------------------------------------------------------------

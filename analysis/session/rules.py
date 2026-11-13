@@ -215,14 +215,18 @@ def session_status(evals: Dict[str, SignEvaluation], required_tasks: Sequence[st
 
 # ---- baseline eligibility -----------------------------------------------------------------------
 
-def baseline_values_to_store(label: str, records: Sequence[FinalRecord], confirmed_any: bool) -> Dict[str, float]:
+def baseline_values_to_store(label: str, records: Sequence[FinalRecord], confirmed_any: bool,
+                             concern: bool = False) -> Dict[str, float]:
     """metric_id -> value that may enter the person's baseline after this call.
 
-    Nothing for an acted session or one with a confirmed change. Interrupted attempts and anything without a
-    usable final reading never count. The first usable reading per metric is used. Labels live/normal keep
-    entering; acted is excluded.
+    Nothing for an acted session, one with a confirmed change, one where the call raised a concern
+    (status concern_raised), or one in which ANY usable final reading was outside her usual (confirmed or
+    not): such a call is not a normal one. Interrupted attempts and anything without a usable final reading
+    never count. The first usable reading per metric is used. Labels live/normal keep entering; acted is excluded.
     """
-    if label == "acted" or confirmed_any:
+    if label == "acted" or confirmed_any or concern:
+        return {}
+    if any(r.usable and r.reading is not None and r.reading.get("outside") is True for r in records):
         return {}
     out: Dict[str, float] = {}
     for r in records:

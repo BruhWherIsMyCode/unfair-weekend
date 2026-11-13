@@ -191,6 +191,24 @@ def test_acted_and_confirmed_sessions_never_enter_the_baseline():
     assert rules.baseline_values_to_store("normal", records, False) == {"m_v1": 0.01}
 
 
+def test_a_concern_call_stores_nothing():
+    assert rules.baseline_values_to_store("live", [rec(0.01)], False, True) == {}
+    assert rules.baseline_values_to_store("live", [rec(0.01)], False, False) == {"m_v1": 0.01}
+
+
+def test_any_usable_outside_reading_stores_nothing_even_when_not_confirmed():
+    outside_then_inside = [rec(0.11, attempt="A1"), rec(0.01, attempt="A2")]  # as_usual call, but one reading outside
+    assert rules.baseline_values_to_store("live", outside_then_inside, False) == {}
+    other_metric = [rec(0.01, metric="a_v1"), rec(0.11, metric="b_v1", attempt="A2")]
+    assert rules.baseline_values_to_store("live", other_metric, False) == {}  # one metric outside blocks all
+
+
+def test_an_unusable_or_interrupted_outside_reading_does_not_block_the_baseline():
+    # only usable final readings count: this record has no reading at all
+    records = [rec(usable=False, outcome="interrupted"), rec(0.01, attempt="A2")]
+    assert rules.baseline_values_to_store("live", records, False) == {"m_v1": 0.01}
+
+
 def test_interrupted_and_unusable_attempts_do_not_enter_the_baseline():
     records = [rec(usable=False, outcome="interrupted"), rec(usable=False, outcome="completed")]
     assert rules.baseline_values_to_store("live", records, False) == {}

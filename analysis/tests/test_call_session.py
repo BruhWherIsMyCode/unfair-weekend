@@ -424,6 +424,27 @@ def test_acted_session_does_not_enter_the_baseline_but_live_does():
     asyncio.run(scenario())
 
 
+def test_a_concern_call_does_not_enter_the_baseline():
+    async def scenario():
+        rig = Rig()
+        await complete(rig, 0.01)
+        assert rig.session.baseline_update() == {"fake_metric_v1": 0.01}
+        assert await rig.session.raise_concern("said_unwell", "she said she felt dizzy") is True
+        assert rig.session.baseline_update() == {}
+
+    asyncio.run(scenario())
+
+
+def test_a_single_outside_reading_keeps_the_call_out_of_the_baseline():
+    async def scenario():
+        rig = Rig()
+        result = await complete(rig, 0.11)  # outside her usual (0.03), one reading: not confirmed
+        assert result["reading"]["outside"] is True
+        assert rig.session.baseline_update() == {}
+
+    asyncio.run(scenario())
+
+
 # ---- v6: cues, event version, per-hand baseline ------------------------------------------------------------
 
 class CueModule:

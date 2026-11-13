@@ -723,8 +723,10 @@ class CallSession:
                              None, dict(self.concern) if self.concern is not None else None)
 
     def baseline_update(self) -> Dict[str, float]:
-        """metric_id -> value that may enter the baseline after this call (nothing if acted or a change was confirmed)."""
-        out = rules.baseline_values_to_store(self.label, self.records, self._confirmed_any())
+        """metric_id -> value that may enter the baseline after this call (nothing if acted, a change was confirmed,
+        a concern was raised, or any usable reading was outside her usual)."""
+        out = rules.baseline_values_to_store(self.label, self.records, self._confirmed_any(),
+                                             self.concern is not None)
         if limits.ARMS_METRIC_ID in out:  # arms: one value per hand, not one value for the task
             del out[limits.ARMS_METRIC_ID]
             first = next((r for r in self._records_for("arms") if not r.interrupted and r.usable

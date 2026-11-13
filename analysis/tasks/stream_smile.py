@@ -96,8 +96,9 @@ class StreamSmile:
 
     def __init__(self, frame_reader: Optional[FrameReader] = None, decode: Optional[Decoder] = None,
                  window_ms: int = WINDOW_MS, period_ms: int = OBSERVATION_PERIOD_MS,
-                 use_executor: bool = True) -> None:
+                 use_executor: bool = True, mirrored: bool = False) -> None:
         self._frame_reader = frame_reader
+        self.mirrored = mirrored  # for the production reader a run creates itself (a mirrored front camera)
         self._decode = decode
         self.use_executor = use_executor  # False runs the frame work inline (tests, demo)
         self.window_ms = window_ms
@@ -120,7 +121,7 @@ class StreamSmile:
         owned_reader: Optional[ProductionFrameReader] = None
         reader = self._frame_reader
         if reader is None:
-            owned_reader = ProductionFrameReader()
+            owned_reader = ProductionFrameReader(mirrored=self.mirrored)
             reader = owned_reader
         loop = asyncio.get_running_loop()
         readings: List[Optional[FrameReading]] = []
