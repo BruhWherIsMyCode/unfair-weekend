@@ -170,3 +170,30 @@ python -m pytest analysis/tests -q
 ```
 
 Not run yet. The tests use made-up points: no camera, no mediapipe, no video.
+
+## v5: call session core (streamed tasks)
+
+The first code for the merged Python backend (`backend/ARCHITECTURE_PLAN.md` sections 3-7). Pure Python + asyncio, imported by the backend, not a service. **Status: written, not run. The tests are written and have not been run; nothing here has been executed.**
+
+**`analysis/session/`** (no mediapipe, no cv2)
+- `limits.py`: every tunable from the plan in one place (1 s observations, 2 s framing, 2 s first sample and gap, 5 s no acknowledgment, 3 s analyzer stalled, 1 s cancel acknowledgment, window + 20 s finalize, 10 s recovery wait, 3 attempts per task, 180 s call).
+- `models.py`: dataclasses for `TaskObservation`, `TaskInterrupt`, `TaskResult`, `ResourceEvent`, `SessionResult` and their parts. `to_dict()` validates and returns schema-exact dicts; `from_dict()` parses them.
+- `clock.py`: `RealClock` and `FakeClock`. Every watchdog and wait goes through the clock.
+- `attempt.py`: the attempt state machine (preparing, capturing, finalizing, completed; or stopping, then interrupted, failed or cancelled). Finalizes once; late samples and observations are refused; duplicates are ignored; conflicting reuse is rejected.
+- `rules.py`: pure functions: interrupt decision, attempt budget, confirmation, session status, baseline eligibility.
+- `call_session.py`: `CallSession`, the coordinator: `run_task`, `handle_resource_event`, `handle_capture_started`, `handle_cancel_ack`, `hang_up`, `recover_resource`, `finish`, plus an in-memory decision log (`session.log`).
+- `adapters.py`: Protocols for what Agent 2 provides (`say`, `start_capture`, `cancel_capture`, `samples`, `publish`, `send_progress`) and `FakeAdapter`.
+- `demo_call.py`: `python -m analysis.session.demo_call` runs the plan's section 7 example against the fakes (no camera, no Claude, no network). Written, not run.
+
+**`analysis/tasks/`** (new files)
+- `stream_base.py`: the module interface `definition()` and `async run(context, samples, emit_observation)`, plus helpers.
+- `stream_smile.py`: the real streamed smile task. 5 s of JPEG frames, one observation about every second and on a quality change, final reading `corner_height` from the same `clip_reading` arithmetic as `tasks/smile.py`, compared with the frozen baseline. The frame reader is injected; the production reader wraps `FacePointsExtractor` and `frame_reading`.
+- `jpeg.py`: the one cv2 call of the new code (JPEG bytes to image).
+- `stream_arms.py`, `stream_sentence.py`: **stubs.** `run()` returns a schema-valid `failed` result with the reason `not_implemented_in_v5`. No both-arms or speech metric is guessed.
+- `stream_registry.py`: `STREAM_TASKS`.
+
+**Not built yet:** the Claude tool loop (`say`, `ask`, `record_answer`, `run_task`, `recover_resource`, `finish_call`) and the fixed-script fallback. That is the next build; CallSession is what its tool handlers will call.
+
+**Contract.** `contract/` holds draft 0.2.0 unchanged. Two deltas are proposed, not applied (see `contract/README.md`): the arms task as one free hand at a time while the script lines still say both arms, and the arms and sentence modules being stubs.
+
+**Tests (written, not run):** `test_session_rules.py`, `test_attempt.py`, `test_call_session.py`, `test_stream_smile.py`, `test_session_contract.py`, with `session_helpers.py`. They use a fake clock, a fake adapter and made-up numbers; the JSON Schema checks skip unless `jsonschema`, `referencing` and `PyYAML` are installed.
