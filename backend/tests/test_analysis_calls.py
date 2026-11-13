@@ -208,6 +208,59 @@ async def test_two_fresh_calls_train_and_the_third_can_send_a_change_alert(monke
 
 
 @pytest.mark.anyio
+async def test_existing_database_uses_two_call_default_without_rewriting_old_baselines(monkeypatch, tmp_path):
+    """Calls collected before the two-call default already contain enough measurements to stop learning."""
+    from contextlib import closing
+    import sqlite3
+
+    from analysis.storage import pending_retries
+
+    install(monkeypatch, tmp_path, seeded=False, label="normal")
+    monkeypatch.setenv("UW_BASELINE_NEEDED", "5")
+    database = tmp_path / "shared.sqlite3"
+
+    def snapshots():
+        with closing(sqlite3.connect(database)) as db:
+            db.row_factory = sqlite3.Row
+            return {row["snapshot_id"]: dict(row) for row in db.execute(
+                "SELECT * FROM baseline_snapshots WHERE sessions > 0")}
+
+    async with Server("analysis", database_path=str(database)) as server:
+        async def finish_writes():
+            async with asyncio.timeout(5):
+                while True:
+                    await server.app.state.store.flush()
+                    if pending_retries() == 0:
+                        await server.app.state.store.flush()
+                        assert server.app.state.store.failures == 0
+                        return
+                    await asyncio.sleep(0.02)
+
+        for _ in range(2):
+            sim = SimClient(base=server.base, key=KEY, time_scale=0.05)
+            status = await run_call(server, sim, timeout=90)
+            assert status["reason"] == "completed"
+            assert status["summary"]["status"] == "learning"
+            assert status["summary"]["baseline_needed"] == 5
+            await finish_writes()
+
+        historical = snapshots()
+        assert sorted((row["sessions"], row["needed"]) for row in historical.values()) == [
+            (1, 5), (1, 5), (2, 5), (2, 5)]
+
+        monkeypatch.delenv("UW_BASELINE_NEEDED")  # use the backend's current default of two calls
+        sim = SimClient(base=server.base, key=KEY, time_scale=0.05)
+        status = await run_call(server, sim, timeout=90)
+        await finish_writes()
+
+    after = snapshots()
+    assert {key: after[key] for key in historical} == historical
+    assert "agent_remark" not in sim.said, sim.said_commands
+    assert status["summary"]["status"] == "as_usual"
+    assert status["summary"]["baseline_needed"] == 2
+
+
+@pytest.mark.anyio
 async def test_with_a_database_path_the_call_is_recorded_through_the_call_service_store(monkeypatch, tmp_path):
     """Since main has Agent 2's Store (PR #9/#17), the answered call has its `calls` row and Agent 3's recorder writes
     through the same writer thread: the session, attempts and results are recorded, summaries stay the Store's (once)."""

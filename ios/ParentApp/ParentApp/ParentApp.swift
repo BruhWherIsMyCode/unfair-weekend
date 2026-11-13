@@ -100,6 +100,10 @@ struct RootView: View {
         switch mode {
         case .ringing(_, let ringTitle):
             title = ringTitle
+            // Clips hold their last frame between lines. A new call must not show the previous call's avatar
+            // while its own live stream or first prepared clip is connecting.
+            app.clips?.player.pause()
+            app.clips?.player.replaceCurrentItem(with: nil)
             // A real call wins over the debug screen.
             showCameraDebug = false
             app.camera.stopPreview()

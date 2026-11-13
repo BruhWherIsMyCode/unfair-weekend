@@ -248,8 +248,8 @@ struct CardContent: View {
 }
 
 /// The avatar, framed like the other side of a video call. The live Simli stream when connected, otherwise the
-/// backend's prepared clip for the current line (holding its last frame between lines). Before either, a local
-/// loop or still from ios/ParentApp/LocalAssets (git-ignored), else the design's striped placeholder.
+/// backend's prepared clip for the current line (holding its last frame between lines). Until a frame is ready,
+/// show the design's striped placeholder: a bundled avatar may belong to an older provider selection.
 ///
 /// Simli video is square (768 x 768), the face filling about half of it. It is shown at the screen's width, not
 /// stretched to the screen's height (which made the face about 2.7 times larger than a real call), over a
@@ -263,7 +263,7 @@ struct AvatarBackground: View {
             let size = geometry.size
             let frame = Self.avatarFrame(in: size)
             ZStack(alignment: .topLeading) {
-                placeholder
+                Stripes(a: Palette.stripeA, b: Palette.stripeB, period: 20)
                     .frame(width: size.width, height: size.height)
                     .clipped()
                 if let clips {
@@ -309,20 +309,6 @@ struct AvatarBackground: View {
         let top = min(max(liftedCardTop - 0.72 * side, -0.12 * side), size.height * 0.12)
         return CGRect(x: 0, y: top, width: side, height: side)
     }
-
-    @ViewBuilder
-    private var placeholder: some View {
-        if let clip = Bundle.main.url(forResource: "avatar", withExtension: "mp4") {
-            LoopingClip(url: clip)
-        } else if let path = Bundle.main.path(forResource: "avatar", ofType: "jpg"),
-                  let image = UIImage(contentsOfFile: path) {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-        } else {
-            Stripes(a: Palette.stripeA, b: Palette.stripeB, period: 20)
-        }
-    }
 }
 
 /// A dark blur over whatever is behind it.
@@ -337,37 +323,6 @@ struct Blur: UIViewRepresentable {
         let view = UIVisualEffectView(effect: UIBlurEffect(style: .systemThickMaterialDark))
         view.contentView.backgroundColor = UIColor.black.withAlphaComponent(0.25)
         return view
-    }
-}
-
-/// A muted, looping, aspect-filled local clip.
-struct LoopingClip: UIViewRepresentable {
-    let url: URL
-
-    func makeUIView(context: Context) -> PlayerView {
-        let view = PlayerView()
-        let player = AVQueuePlayer()
-        player.isMuted = true
-        view.looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
-        view.playerLayer.player = player
-        view.playerLayer.videoGravity = .resizeAspectFill
-        player.play()
-        return view
-    }
-
-    func updateUIView(_ uiView: PlayerView, context: Context) {}
-
-    static func dismantleUIView(_ uiView: PlayerView, coordinator: ()) {
-        uiView.playerLayer.player?.pause()
-    }
-
-    class PlayerView: UIView {
-        var looper: AVPlayerLooper?
-        override class var layerClass: AnyClass { AVPlayerLayer.self }
-        var playerLayer: AVPlayerLayer {
-            // swiftlint:disable:next force_cast
-            layer as! AVPlayerLayer
-        }
     }
 }
 
@@ -394,8 +349,14 @@ struct ClipLayer: UIViewRepresentable {
 
     func updateUIView(_ uiView: ClipView, context: Context) {}
 
-    final class ClipView: LoopingClip.PlayerView {
+    final class ClipView: UIView {
         private var ready: NSKeyValueObservation?
+
+        override class var layerClass: AnyClass { AVPlayerLayer.self }
+        var playerLayer: AVPlayerLayer {
+            // swiftlint:disable:next force_cast
+            layer as! AVPlayerLayer
+        }
 
         override init(frame: CGRect) {
             super.init(frame: frame)

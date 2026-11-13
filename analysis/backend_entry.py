@@ -139,7 +139,8 @@ def _open_database(db_path: Any, submit: Optional[Callable[[str, Any], None]], l
 
     rows = definitions.task_rows(modules)
     try:
-        usual = db_baselines.read_usual(db_path, link.person.person_id, rows)
+        needed = settings.baseline_needed if settings.baseline_needed is not None else config.BASELINE_NEEDED
+        usual = db_baselines.read_usual(db_path, link.person.person_id, rows, needed=needed)
     except Exception as exc:  # unreadable database: the JSON file keeps working
         log.warning("database baselines could not be read (%s); using the json file", type(exc).__name__)
         usual = {}
