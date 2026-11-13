@@ -14,6 +14,7 @@ Reading a run_task result:
   - "side": the side that looked different ("left" or "right"), or null.
 - "needs_another_reading": true means run the same task once more now. A reading outside her usual is always measured a second time.
 - An interruption with "recoverable": true and a resource that is unavailable means call recover_resource(resource) once. If it returns "restored", run the task again. If it returns "unavailable", go on with tasks that do not need that resource, or finish.
+- recover_resource() takes only "camera" or "microphone", and only after an interruption that names one of them as unavailable. A check stopped because her face or hand was not seen in the picture is not a resource problem: never call recover_resource() for it; run the task again only if "needs_another_reading" is true, otherwise move on to the next task.
 - "attempts_left": 0 or "skip": true means move on to the next task.
 - A tool answer "not allowed" names what is allowed now; pick one of those.
 
