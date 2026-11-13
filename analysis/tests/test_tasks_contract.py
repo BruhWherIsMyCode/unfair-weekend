@@ -49,7 +49,8 @@ def test_each_hand_uses_its_own_baseline():
 
 
 def test_acted_sessions_never_enter_the_baseline():
-    p = person("hand_left", NORMAL + [0.9, 0.9], label="acted")
+    p = person("hand_left", NORMAL)
+    p["sessions"] += person("hand_left", [0.9, 0.9], label="acted")["sessions"]
     r = hand_task.build_result("hand_left", 1, hand_clip(0.6), p)
     assert r["status"] == "different_from_usual"
 

@@ -69,7 +69,9 @@ def test_left_corner_lowered_is_positive_and_side_left():
 
 
 def test_rotation_15_degrees_still_about_zero():
-    fr = frame_reading(rotate(make_obs(), 15))
+    # eye_dx 60: at the default 40 the rotated eye distance rounds to 39.999 and
+    # falls under MIN_EYE_DISTANCE_PX (40), which is not what this test is about
+    fr = frame_reading(rotate(make_obs(eye_dx=60.0), 15))
     assert fr.usable
     assert abs(fr.corner_height) < 1e-6
 

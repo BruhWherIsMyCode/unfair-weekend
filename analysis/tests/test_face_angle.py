@@ -58,16 +58,16 @@ def rotated_obs(left_drop, yaw, pitch):
 
 # ---- the 3D reading --------------------------------------------------------------------------
 
-def test_3d_reading_unchanged_by_rotation_but_2d_changes():
+def test_3d_reading_unchanged_by_rotation():
     straight = observe(own_frame_points(left_drop=8.0))
     turned = rotated_obs(8.0, yaw=15.0, pitch=15.0)
     h3_straight = frame_reading(straight).corner_height_3d
     h3_turned = frame_reading(turned).corner_height_3d
     assert h3_straight is not None and h3_turned is not None
     assert abs(h3_straight - h3_turned) < 1e-9
-    h2_straight = frame_reading(straight).corner_height
-    h2_turned = frame_reading(turned).corner_height
-    assert abs(h2_straight - h2_turned) > 0.03  # the picture alone is fooled by the turn
+    # No claim about the 2D reading here: with this fake face a 15 deg turn moves it
+    # only ~0.0005 (eye-line normalisation absorbs most of it), as in the owner's
+    # real angle test, where 3D was no better than 2D.
 
 
 def test_3d_level_face_stays_level_when_rotated():

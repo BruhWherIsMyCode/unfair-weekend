@@ -447,7 +447,7 @@ class CallSession:
                                       code or "capture_failed", source_event_id, recoverable)
         if not attempt.begin_stop(self.clock.now(), kind, why, interrupt):
             return False
-        self._log("attempt_stopping", attempt_id=attempt.attempt_id, kind=kind, code=code, why=why,
+        self._log("attempt_stopping", attempt_id=attempt.attempt_id, stop_kind=kind, code=code, why=why,
                   source_event_id=source_event_id)
         if interrupt is not None and code in ("camera_unavailable", "microphone_unavailable") and recoverable:
             self._recovery_open.add(code.split("_")[0])
