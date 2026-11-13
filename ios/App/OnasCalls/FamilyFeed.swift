@@ -46,8 +46,6 @@ final class FamilyFeed {
     @ObservationIgnored private let defaults = UserDefaults.standard
     @ObservationIgnored private var loop: Task<Void, Never>?
     @ObservationIgnored private var lastEventId: String?
-    /// Long polling's cursor (the backend hub's sequence number).
-    @ObservationIgnored private var pollCursor: Int?
 
     private enum Key {
         static let baseURL = "family.baseURL", demoKey = "family.demoKey", familyId = "family.familyId"
@@ -88,7 +86,6 @@ final class FamilyFeed {
     func start() {
         loop?.cancel()
         lastEventId = nil
-        pollCursor = nil
         guard isConfigured, let base = url else {
             status = .off
             return
@@ -131,55 +128,9 @@ final class FamilyFeed {
         try check(response)
     }
 
-    /// A Cloudflare quick tunnel (*.trycloudflare.com) holds back an open event stream: there the events are
-    /// long-polled instead (same rule as ParentCallKit's CallAPI.prefersPolling).
-    static func prefersPolling(_ url: URL) -> Bool {
-        url.host?.lowercased().hasSuffix(".trycloudflare.com") ?? false
-    }
-
-    private func listen(base: URL, key: String, device: String) async throws {
-        if Self.prefersPolling(base) {
-            try await poll(base: base, key: key, device: device)
-        } else {
-            try await stream(base: base, key: key, device: device)
-        }
-    }
-
-    /// `GET /v1/devices/{id}/events/poll`: each answer comes when an event arrives or after 20 s, with a cursor to
-    /// send back so nothing sent between two polls is missed.
-    private func poll(base: URL, key: String, device: String) async throws {
-        struct Page: Decodable {
-            struct Frame: Decodable {
-                let event: String
-                let data: String
-            }
-
-            let events: [Frame]
-            let cursor: Int
-        }
-        while !Task.isCancelled {
-            var path = "/v1/devices/\(device)/events/poll?wait_s=20"
-            if let pollCursor {
-                path += "&after=\(pollCursor)"
-            }
-            var request = Self.request(base, path, key: key)
-            request.timeoutInterval = 35
-            let (data, response) = try await URLSession.shared.data(for: request)
-            try Self.check(response)
-            let page = try JSONDecoder().decode(Page.self, from: data)
-            pollCursor = page.cursor
-            for frame in page.events where frame.event == "message.new" {
-                if let message = try? Self.decoder.decode(FamilyMessage.self, from: Data(frame.data.utf8)) {
-                    onMessage(message)
-                }
-            }
-        }
-        throw CancellationError()
-    }
-
     /// Server-sent events. Each frame is `id:`, `event:` and a one-line JSON `data:`, so an event is complete at
     /// its `data:` line.
-    private func stream(base: URL, key: String, device: String) async throws {
+    private func listen(base: URL, key: String, device: String) async throws {
         var request = Self.request(base, "/v1/devices/\(device)/events", key: key)
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 3600

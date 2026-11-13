@@ -12,7 +12,7 @@ public actor CallClient {
     private let onPhase: @Sendable (CallPhase) -> Void
     private let onEvent: @Sendable (CallEvent) -> Void
 
-    private var connection: EventConnection?
+    private var connection: SSEConnection?
     private var listenTask: Task<Void, Never>?
     private var lastEventId: String?
     private var callId: String?

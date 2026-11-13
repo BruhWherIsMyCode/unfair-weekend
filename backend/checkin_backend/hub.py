@@ -4,10 +4,6 @@ A device is a phone: `parent` (the person who is called) or `family`. Every even
 short history, so a client that reconnects with `Last-Event-ID` receives what it missed. A client that connects
 without it receives only events that are still active (a ringing call, a command that has not finished), so an
 old command is never executed twice after a fresh start.
-
-Long polling (`subscribe_after`) is the same delivery for networks that buffer an open stream, such as a Cloudflare
-quick tunnel: the client sends back a cursor (the hub's sequence number), so an event sent between two polls is not
-lost. A cursor from before a restart is treated as a fresh start.
 """
 
 import asyncio
@@ -59,7 +55,6 @@ class DeviceHub:
         self._history: dict[str, deque[Event]] = {}
         self._listeners: dict[str, set[asyncio.Queue[Event | None]]] = {}
         self._seq = itertools.count(1)
-        self.last_seq = 0
         self._history_size = history
 
     def register(self, device: Device) -> None:
@@ -99,7 +94,6 @@ class DeviceHub:
     ) -> Event:
         self.get(device_id)
         seq = next(self._seq)
-        self.last_seq = seq
         if event_id is None:
             event_id = data.get("event_id") or f"ev_{seq}"
         event = Event(seq, event_id, event_type, data, still_active)
@@ -125,21 +119,6 @@ class DeviceHub:
         queue: asyncio.Queue[Event | None] = asyncio.Queue(maxsize=LISTENER_QUEUE_MAX)
         self._listeners.setdefault(device_id, set()).add(queue)
         return replay, queue
-
-    def subscribe_after(
-        self, device_id: str, after_seq: int | None
-    ) -> tuple[list[Event], asyncio.Queue[Event | None], int]:
-        """Like `subscribe`, by sequence number: (events after `after_seq`, the live queue, the cursor so far).
-        Without a cursor, or with one from before a restart, only still-active events are replayed."""
-        self.get(device_id)
-        history = list(self._history[device_id])
-        if after_seq is None or after_seq > self.last_seq:
-            replay = [event for event in history if event.active()]
-        else:
-            replay = [event for event in history if event.seq > after_seq]
-        queue: asyncio.Queue[Event | None] = asyncio.Queue(maxsize=LISTENER_QUEUE_MAX)
-        self._listeners.setdefault(device_id, set()).add(queue)
-        return replay, queue, self.last_seq
 
     def unsubscribe(self, device_id: str, queue: asyncio.Queue[Event | None]) -> None:
         self._listeners.get(device_id, set()).discard(queue)
