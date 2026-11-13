@@ -1,0 +1,17 @@
+# Private avatar clip or still. Never commit (AGENTS.md: no recordings of people).
+LocalAssets/
+*.mp4
+*.mov
+*.jpg
+*.jpeg
+*.heic
+
+# Signing team lives here, per machine.
+Local.xcconfig
+
+
+# Xcode per-user state and build output.
+xcuserdata/
+*.xcuserstate
+build/
+DerivedData/
