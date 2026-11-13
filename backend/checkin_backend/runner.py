@@ -29,6 +29,7 @@ CAPTURE_SETTINGS = {
 def analysis_available() -> bool:
     try:
         import analysis.session.call_session  # noqa: F401
+        import analysis.session.run_call  # noqa: F401
     except ImportError:
         return False
     return True
@@ -155,4 +156,12 @@ async def run_answered_call(link: ClientLink, driver: Callable[[ClientLink], Awa
         return await driver(link)
     except (CallEnded, PlaybackFailed) as exc:
         link.log.append({"kind": "call_stopped", "error": type(exc).__name__})
+        return None
+    except Exception as exc:  # a driver crash must still end the call and tell the family
+        link.log.append({"kind": "driver_crashed", "error": type(exc).__name__})
+        if not link.ended:
+            try:
+                await link.publish({"status": "incomplete", "signs": []}, "final")
+            except Exception:
+                pass
         return None

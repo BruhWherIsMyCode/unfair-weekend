@@ -4,13 +4,11 @@ import asyncio
 import json
 from contextlib import asynccontextmanager
 from dataclasses import asdict
-from pathlib import Path
 from secrets import compare_digest
 from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, Header, Request
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .calls import Call, CallConflict, CallNotFound, CallService, CallState, EndReason
@@ -25,7 +23,6 @@ from .speech import SpeechGateway
 
 IdStr = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,128}$")]
 KEEPALIVE_S = 15.0
-CLIENT_DIR = Path(__file__).resolve().parents[1] / "parent-web"
 
 
 class DemoKeyRequired(Exception):
@@ -411,12 +408,5 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
     async def messages(family_id: str, request: Request) -> list[dict[str, Any]]:
         desk = desk_of(request)
         return [asdict(m) for m in desk.delivery.for_family(family_id, desk.people.all())]
-
-    if CLIENT_DIR.exists():
-        @app.get("/")
-        async def client_index() -> FileResponse:
-            return FileResponse(CLIENT_DIR / "index.html", headers={"Cache-Control": "no-store"})
-
-        app.mount("/client", StaticFiles(directory=CLIENT_DIR), name="client")
 
     return app

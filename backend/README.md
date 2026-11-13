@@ -34,6 +34,31 @@ The tests cover app startup/shutdown, authentication, deadline/answer races, dup
 
 Built and locally tested: Python entrypoint, protected `/v1/health`, configuration and local connection lifecycle. Pending: registration/SSE and call HTTP routes, playback acknowledgments, Python provider adapters, media ingress, Agent 3 integration, persistence and family delivery. Baseline network schemas are awaiting canonical publication in [issue #6](https://github.com/BruhWherIsMyCode/unfair-weekend/issues/6); local records are not a replacement wire contract. The iOS stage shell remains mocked. This foundation does not yet demonstrate a joined call.
 
+## Call service (parent client protocol)
+
+The parent client talks to these routes. They follow [contract draft 0.2](proposals/mvp.openapi.yaml), plus the v0 registration, call and family routes.
+
+- `POST /v1/devices` registers a phone: `{device_id, role: parent|family, person_id|family_id}`.
+- `GET /v1/devices/{id}/events` is the SSE channel. It carries `call.incoming`, `call.ended`, `command.execute` (say/capture), `command.cancel`, `task.progress` and `message.new`. A reconnect with `Last-Event-ID` replays missed events. A fresh connection replays only active work.
+- `POST /v1/calls` (operator: `{person_id}`), `GET /v1/calls/{id}` (state, family message, summary, recent log), `POST /v1/calls/{id}/answer|decline`.
+- `POST /v1/calls/{id}/client-events`: `client.ready`, `playback.completed`, `capture.started`, `command.cancelled`, `command.failed`, `resource.changed`, `hangup`. Duplicates are idempotent; a conflicting reuse returns 409.
+- `GET /v1/calls/{id}/speech/{cmd}` returns the prepared PCM16 16 kHz line. `POST /v1/calls/{id}/captures/{cmd}` takes the answer audio for STT.
+- `POST /v1/calls/{id}/attempts/{attempt}/samples|finish` takes task input. JPEG ≤640×480 or PCM ≤250 ms per sample, with sequence, size and format checks.
+- `GET /v1/families/{family_id}/messages` lists family messages. There is one message per call, upserted by ID.
+
+`ClientLink` ([link.py](checkin_backend/link.py)) implements the `CallAdapter` that Agent 3's `CallSession` expects (`say`, `listen`, `start_capture`, `cancel_capture`, `samples`, `publish`, `send_progress`). It forwards client events to `handle_*` / `hang_up`. `say` returns after the client's `playback.completed`, not after TTS generation.
+
+`CALL_RUNNER` picks what drives an answered call:
+
+- `auto` (default): Agent 3's `analysis` package when it is importable, otherwise `scripted`.
+- `analysis`: CallSession with the real task modules.
+- `fake`: CallSession with input-only stand-in modules. These return `failed` and no reading.
+- `scripted`: fixed lines and captures with no analysis, always `incomplete`.
+
+`CALL_DRIVER=fixed|claude` is passed to Agent 3's `run_call`. Without `ELEVENLABS_API_KEY`, lines become silence of an estimated length (captions only) and answers are not transcribed.
+
+`tests/client_sim.py` is a scripted parent client that speaks the real HTTP/SSE protocol. `tests/test_call_service.py` runs whole calls through Uvicorn: the scripted call, decline/ring timeout, hang-up, protocol rejections, and two runs with Agent 3's `CallSession` (normal call, plus camera loss → `command.cancel` → `camera_unavailable` → new attempt). The CallSession tests run only with Agent 3's branch on `PYTHONPATH` and `numpy` installed; otherwise they are skipped. Not verified: real ElevenLabs STT/TTS from Python, a real phone, Simli in the parent app, and the real smile/arms analyzers fed with these samples.
+
 ## Simli + ElevenLabs greeting reference
 
 A local browser prototype: type a short line, generate its voice with ElevenLabs, and send that audio to a live Simli avatar. The browser plays the synchronized video and audio returned by Simli. It does not request camera or microphone access.
