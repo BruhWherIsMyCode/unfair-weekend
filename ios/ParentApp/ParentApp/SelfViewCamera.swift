@@ -24,6 +24,9 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
     private var capturing = false
     private var previewWanted = false
     private var configured = false
+    /// Session state below is touched only on sessionQueue.
+    private var input: AVCaptureDeviceInput?
+    private var previewConnection: AVCaptureConnection?
     private var lastEncode: CFTimeInterval = 0
     private var onAvailability: (@Sendable (Bool, ResourceProblem?) -> Void)?
 
@@ -119,6 +122,48 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
         }
     }
 
+    // MARK: self-view preview
+
+    /// Connects a preview layer with its own connection: portrait (90 degrees) and mirrored, set before the
+    /// connection is added. Left to AVFoundation, the layer's connection appears later and can keep the
+    /// sensor's landscape angle, which showed the self-view turned 90 degrees.
+    func attachPreview(_ layer: AVCaptureVideoPreviewLayer) {
+        layer.setSessionWithNoConnection(session)
+        sessionQueue.async {
+            try? self.configure()
+            guard let input = self.input,
+                  let port = input.ports(for: .video, sourceDeviceType: input.device.deviceType,
+                                         sourceDevicePosition: .front).first
+            else { return }
+            self.session.beginConfiguration()
+            defer { self.session.commitConfiguration() }
+            if let old = self.previewConnection {
+                self.session.removeConnection(old)
+                self.previewConnection = nil
+            }
+            let connection = AVCaptureConnection(inputPort: port, videoPreviewLayer: layer)
+            if connection.isVideoRotationAngleSupported(90) {
+                connection.videoRotationAngle = 90
+            }
+            if connection.isVideoMirroringSupported {
+                connection.automaticallyAdjustsVideoMirroring = false
+                connection.isVideoMirrored = true
+            }
+            if self.session.canAddConnection(connection) {
+                self.session.addConnection(connection)
+                self.previewConnection = connection
+            }
+        }
+    }
+
+    func detachPreview(_ layer: AVCaptureVideoPreviewLayer) {
+        sessionQueue.async {
+            guard let connection = self.previewConnection, connection.videoPreviewLayer === layer else { return }
+            self.session.removeConnection(connection)
+            self.previewConnection = nil
+        }
+    }
+
     // MARK: session
 
     /// Runs on sessionQueue.
@@ -135,6 +180,7 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
         session.sessionPreset = .vga640x480
         if session.canAddInput(input) {
             session.addInput(input)
+            self.input = input
         }
         let output = AVCaptureVideoDataOutput()
         output.alwaysDiscardsLateVideoFrames = true
@@ -195,46 +241,35 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
     }
 }
 
-/// The self-view: a live AVCaptureVideoPreviewLayer on the shared session.
+/// The self-view: a live AVCaptureVideoPreviewLayer on the shared session, upright and mirrored.
 struct CameraPreview: UIViewRepresentable {
-    let session: AVCaptureSession
+    let camera: SelfViewCamera
 
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
-        view.previewLayer.session = session
+        view.camera = camera
         view.previewLayer.videoGravity = .resizeAspectFill
         // Clear until frames arrive, so the design's striped placeholder shows through.
         view.backgroundColor = .clear
         view.previewLayer.backgroundColor = UIColor.clear.cgColor
+        camera.attachPreview(view.previewLayer)
         return view
     }
 
-    func updateUIView(_ uiView: PreviewView, context: Context) {
-        uiView.keepUpright()
+    func updateUIView(_ uiView: PreviewView, context: Context) {}
+
+    static func dismantleUIView(_ uiView: PreviewView, coordinator: ()) {
+        uiView.camera?.detachPreview(uiView.previewLayer)
     }
 
     final class PreviewView: UIView {
+        weak var camera: SelfViewCamera?
+
         override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
 
         var previewLayer: AVCaptureVideoPreviewLayer {
             // swiftlint:disable:next force_cast
             layer as! AVCaptureVideoPreviewLayer
-        }
-
-        override func layoutSubviews() {
-            super.layoutSubviews()
-            keepUpright()
-        }
-
-        override func didMoveToWindow() {
-            super.didMoveToWindow()
-            keepUpright()
-        }
-
-        func keepUpright() {
-            guard let connection = previewLayer.connection, connection.videoRotationAngle != 90,
-                  connection.isVideoRotationAngleSupported(90) else { return }
-            connection.videoRotationAngle = 90
         }
     }
 }

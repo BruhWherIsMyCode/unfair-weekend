@@ -111,7 +111,7 @@ struct InCallView: View {
 
     private var selfView: some View {
         let large = screen.selfViewLarge
-        return CameraPreview(session: camera.session)
+        return CameraPreview(camera: camera)
             .background(Stripes(a: Palette.selfViewA, b: Palette.selfViewB, period: 16))
             .frame(width: large ? 200 : 150, height: large ? 266 : 216)
             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
