@@ -40,14 +40,16 @@ def test_lifespan_closes_active_calls_and_separate_apps_have_separate_state():
     assert ended.reason == EndReason.SHUTDOWN
 
 
-def test_environment_factory_needs_no_provider_credentials(monkeypatch):
+def test_environment_factory_needs_no_provider_credentials(monkeypatch, tmp_path):
+    database = str(tmp_path / "checkin.sqlite3")
     monkeypatch.setenv("DEMO_KEY", "test-key-only")
+    monkeypatch.setenv("DATABASE_PATH", database)
     monkeypatch.setenv("RING_TIMEOUT_S", "7")
     monkeypatch.setenv("CALL_TIMEOUT_S", "90")
     monkeypatch.delenv("SIMLI_API_KEY", raising=False)
     monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
     assert Settings.from_environment() == Settings(
-        demo_key="test-key-only", ring_timeout_s=7, call_timeout_s=90
+        demo_key="test-key-only", ring_timeout_s=7, call_timeout_s=90, database_path=database
     )
     with TestClient(create_app()) as client:
         assert client.get("/v1/health", headers={"X-Demo-Key": "test-key-only"}).status_code == 200
