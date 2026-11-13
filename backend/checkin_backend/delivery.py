@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from .hub import DeviceHub
 from .people import Person
+from .store import NoStore, Store
 
 THINGS = {"face": ("smile", "looks"), "arm": ("arm", "looks"), "speech": ("speech", "sounds")}
 KINDS = ("as_usual", "change_noticed", "learning", "incomplete", "no_answer")
@@ -64,12 +65,14 @@ def now_iso() -> str:
 
 
 class FamilyDelivery:
-    def __init__(self, hub: DeviceHub) -> None:
+    def __init__(self, hub: DeviceHub, store: Store | None = None) -> None:
         self._hub = hub
+        self._store = store if store is not None else NoStore()
         self._messages: dict[str, Message] = {}
         self._by_call: dict[str, str] = {}
 
-    def publish(self, call_id: str, person: Person, kind: str, phase: str, signs: list[dict] | None = None) -> Message:
+    def publish(self, call_id: str, person: Person, kind: str, phase: str, signs: list[dict] | None = None,
+                summary: dict | None = None) -> Message:
         if kind not in KINDS:
             raise ValueError(f"Unknown message kind {kind}")
         if phase not in ("mid_call", "final"):
@@ -97,12 +100,9 @@ class FamilyDelivery:
         )
         self._messages[message.message_id] = message
         self._by_call[call_id] = message.message_id
-        self._hub.send_many(
-            self._hub.families_of(person.family_id),
-            "message.new",
-            asdict(message),
-            event_id=f"{message.message_id}_{phase}",
-        )
+        family_devices = self._hub.families_of(person.family_id)
+        self._hub.send_many(family_devices, "message.new", asdict(message), event_id=f"{message.message_id}_{phase}")
+        self._store.record_message(call_id, person.family_id, asdict(message), phase, summary, family_devices)
         return message
 
     def for_family(self, family_id: str, people: list[Person]) -> list[Message]:
