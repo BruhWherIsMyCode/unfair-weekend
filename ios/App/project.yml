@@ -39,6 +39,14 @@ targets:
           - UIInterfaceOrientationPortrait
         UIRequiresFullScreen: true
         UIApplicationSupportsIndirectInputEvents: true
+        NSLocalNetworkUsageDescription: "Ona's calls receives check-in alerts from the check-in service on this network."
+        NSAppTransportSecurity:
+          # The demo backend runs on a laptop on the same network, over plain HTTP.
+          NSAllowsLocalNetworking: true
+        # Demo workaround, not for the App Store: a silent loop keeps the app running in the background so the
+        # backend's alerts still arrive (no push without a paid team).
+        UIBackgroundModes:
+          - audio
     postCompileScripts:
       - name: Copy LocalAssets (clip.mp4, fedya.jpg) if present
         basedOnDependencyAnalysis: false

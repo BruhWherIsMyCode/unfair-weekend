@@ -7,6 +7,7 @@ struct DemoPanelView: View {
 
     var body: some View {
         @Bindable var store = store
+        @Bindable var feed = store.feed
         NavigationStack {
             Form {
                 Section {
@@ -61,6 +62,26 @@ struct DemoPanelView: View {
                     LabeledContent("Notifications", value: allowedText(store.notificationsAllowed))
                     LabeledContent("Time Sensitive", value: allowedText(store.timeSensitiveAllowed))
                 }
+
+                Section {
+                    TextField("http://192.168.1.20:8000", text: $feed.baseURL)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Demo key", text: $feed.demoKey)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("f_demo", text: $feed.familyId)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Button("Connect") { store.connect() }
+                        .disabled(!feed.isConfigured)
+                    LabeledContent("Backend", value: feedStatus)
+                } header: {
+                    Text("Check-in backend")
+                } footer: {
+                    Text("Alerts from the real check-in call arrive here, with her clip. Leave empty for the staged scene only. Keep the app open once after connecting: it then keeps listening in the background.")
+                }
             }
             .navigationTitle("Demo panel")
             .navigationBarTitleDisplayMode(.inline)
@@ -70,6 +91,15 @@ struct DemoPanelView: View {
             .onAppear { store.refreshNotificationSettings() }
         }
         .preferredColorScheme(.light)
+    }
+
+    private var feedStatus: String {
+        switch store.feed.status {
+        case .off: String(localized: "Not set up")
+        case .connecting: String(localized: "Connecting…")
+        case .listening: String(localized: "Listening")
+        case .failed(let reason): reason
+        }
     }
 
     private var phaseName: String {
