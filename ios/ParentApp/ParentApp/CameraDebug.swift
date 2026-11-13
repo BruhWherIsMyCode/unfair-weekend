@@ -28,6 +28,13 @@ final class CameraDebugModel {
         var value: Bool? { self == .server ? nil : self == .on }
     }
 
+    /// A check try is judged like a try in a call; a teach try feeds the practice usual the checks compare with.
+    enum Purpose: String, CaseIterable, Identifiable {
+        case check, teach
+        var id: String { rawValue }
+        var title: String { self == .check ? "Check" : "Teach usual" }
+    }
+
     enum State: Equatable {
         case ready
         case starting
@@ -39,6 +46,9 @@ final class CameraDebugModel {
 
     var task: Task = .arms
     var mirroring: Mirroring = .server
+    var purpose: Purpose = .check
+    /// What a real call would do with this screen's check tries of the task, and what the family would get.
+    private(set) var verdict: DebugVerdict?
     private(set) var state: State = .ready
     private(set) var frame: DebugFrame?
     /// The JPEG the latest `frame` facts belong to: the analysis lags a few frames behind the upload.
@@ -79,6 +89,26 @@ final class CameraDebugModel {
 
     func appear() {
         preview.startPreview()
+        loadVerdict()
+    }
+
+    func loadVerdict() {
+        guard let client = DebugClient(settings: settings) else { return }
+        let task = task
+        _Concurrency.Task { [weak self] in
+            let verdict = try? await client.series(task: task.rawValue)
+            if let self, self.task == task { self.verdict = verdict }
+        }
+    }
+
+    /// Forgets this task's check tries and its practice usual.
+    func startOver() {
+        guard let client = DebugClient(settings: settings), !isRunning else { return }
+        let task = task
+        _Concurrency.Task { [weak self] in
+            let verdict = try? await client.reset(task: task.rawValue)
+            if let self, self.task == task { self.verdict = verdict }
+        }
     }
 
     func disappear() {
@@ -99,9 +129,9 @@ final class CameraDebugModel {
         framesAnalysed = 0
         sent = [:]
         state = .starting
-        let task = task, mirrored = mirroring.value
+        let task = task, mirrored = mirroring.value, purpose = purpose
         loop = _Concurrency.Task { [weak self] in
-            await self?.run(task: task, mirrored: mirrored)
+            await self?.run(task: task, mirrored: mirrored, purpose: purpose)
         }
     }
 
@@ -117,13 +147,13 @@ final class CameraDebugModel {
         }
     }
 
-    private func run(task: Task, mirrored: Bool?) async {
+    private func run(task: Task, mirrored: Bool?, purpose: Purpose) async {
         guard let client = DebugClient(settings: settings) else {
             state = .failed("Set the backend address and demo key in Settings first.")
             return
         }
         do {
-            let run = try await client.start(task: task.rawValue, mirrored: mirrored)
+            let run = try await client.start(task: task.rawValue, mirrored: mirrored, purpose: purpose.rawValue)
             cues = run.cues.map { ($0.atMs, $0.lineId) }
             try await camera.start()
             let started = Date()
@@ -180,6 +210,9 @@ final class CameraDebugModel {
                 frameImage = UIImage(data: jpeg)
             }
         }
+        if let newVerdict = snapshot.verdict {
+            verdict = newVerdict
+        }
         observations.append(contentsOf: snapshot.observations)
         result = snapshot.result
         error = snapshot.error
@@ -212,6 +245,45 @@ struct DebugSnapshot: Decodable {
     let result: JSONValue?
     let error: String?
     let done: Bool
+    let verdict: DebugVerdict?
+}
+
+/// The backend's judgement of the screen's check tries with the call's own rules (debug_probe.judge).
+struct DebugVerdict: Decodable, Equatable {
+    struct Usual: Decodable, Equatable {
+        /// stored (her real usual), practice (from this screen's teach tries) or none.
+        let source: String
+        let ready: Bool
+        let storedSessions: Int?
+        let storedNeeded: Int?
+        let ranges: [String: [Double?]]?
+    }
+
+    struct Try: Decodable, Equatable {
+        let number: Int
+        let measured: Bool
+        let reasons: [String]
+        let hands: [String: Double]?
+        let value: Double?
+        let usualLow: Double?
+        let usualHigh: Double?
+        let outside: Bool?
+        let side: String?
+        let compared: Bool
+    }
+
+    let task: String
+    let usual: Usual
+    let tries: [Try]
+    let practiceTries: Int
+    let practiceNeeded: Int
+    /// no_tries, try_again (the call would ask again) or settled.
+    let state: String
+    /// The family message kind once settled: change_noticed, incomplete, learning or as_usual.
+    let status: String?
+    let headline: String
+    let lines: [String]
+    let familyMessage: String?
 }
 
 /// What the module saw in its latest frame, in that frame's pixels (after flipping, when mirrored).
@@ -306,13 +378,16 @@ struct DebugClient {
         return decoder
     }()
 
-    private func post<T: Decodable>(_ path: String, _ body: [String: Any]) async throws -> T {
+    /// POST `body`, or GET when it is nil.
+    private func send<T: Decodable>(_ path: String, _ body: [String: Any]?) async throws -> T {
         var request = URLRequest(url: URL(string: path, relativeTo: base)!.absoluteURL)
-        request.httpMethod = "POST"
+        request.httpMethod = body == nil ? "GET" : "POST"
         request.setValue(key, forHTTPHeaderField: "X-Demo-Key")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 40
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
@@ -322,20 +397,28 @@ struct DebugClient {
         return try Self.decoder.decode(T.self, from: data)
     }
 
-    func start(task: String, mirrored: Bool?) async throws -> DebugRunStarted {
-        var body: [String: Any] = ["task": task]
+    func start(task: String, mirrored: Bool?, purpose: String) async throws -> DebugRunStarted {
+        var body: [String: Any] = ["task": task, "purpose": purpose]
         if let mirrored { body["mirrored"] = mirrored }
-        return try await post("/v1/debug/runs", body)
+        return try await send("/v1/debug/runs", body)
     }
 
     func sample(runId: String, sequence: Int, capturedMs: Int, jpeg: Data, since: Int) async throws -> DebugSnapshot {
-        try await post("/v1/debug/runs/\(runId)/samples", [
+        try await send("/v1/debug/runs/\(runId)/samples", [
             "sequence": sequence, "captured_ms": capturedMs, "data_base64": jpeg.base64EncodedString(), "since": since,
         ])
     }
 
     func finish(runId: String) async throws -> DebugSnapshot {
-        try await post("/v1/debug/runs/\(runId)/finish", [:])
+        try await send("/v1/debug/runs/\(runId)/finish", [:])
+    }
+
+    func series(task: String) async throws -> DebugVerdict {
+        try await send("/v1/debug/series/\(task)", nil)
+    }
+
+    func reset(task: String) async throws -> DebugVerdict {
+        try await send("/v1/debug/series/\(task)/reset", [:])
     }
 
     static func describe(_ error: Error) -> String {

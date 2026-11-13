@@ -271,7 +271,8 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
         app.state.store = store
         app.state.live = live_avatar
         # Camera debug runs the analysis for the demo person; the phone's own person setting is not needed.
-        app.state.debug = DebugDesk(next(iter(directory.all())).person_id)
+        demo_person = next(iter(directory.all()))
+        app.state.debug = DebugDesk(demo_person.person_id, demo_person)
         try:
             log_event(log, logging.INFO, "application.started", voiced=gateway.voiced,
                       live_avatar=live_avatar.available)
@@ -510,6 +511,7 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
         model_config = ConfigDict(extra="forbid")
         task: Literal["smile", "arms"]
         mirrored: bool | None = None
+        purpose: Literal["check", "teach"] = "check"
 
     class DebugSampleIn(BaseModel):
         model_config = ConfigDict(extra="forbid")
@@ -528,10 +530,30 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
     async def debug_start(body: DebugRunIn, request: Request) -> dict[str, Any]:
         # Camera debug: Agent 3's real module on the phone's frames, outside any call. Nothing is stored.
         try:
-            run = request.app.state.debug.start(body.task, body.mirrored)
+            run = request.app.state.debug.start(body.task, body.mirrored, body.purpose)
         except DebugUnavailable as exc:
             raise ApiError(503, "analysis_unavailable", str(exc)) from None
-        return {"run_id": run.run_id, "task": run.task, "capture": run.capture, "cues": run.cues}
+        return {"run_id": run.run_id, "task": run.task, "capture": run.capture, "cues": run.cues,
+                "purpose": run.purpose, "usual_source": run.usual_source}
+
+    def debug_verdict(request: Request, task: str) -> dict[str, Any]:
+        if task not in ("smile", "arms"):
+            raise ApiError(404, "not_found", "Unknown task.")
+        try:
+            return request.app.state.debug.verdict(task)
+        except ImportError:
+            raise ApiError(503, "analysis_unavailable", "Agent 3's analysis is not installed here.") from None
+
+    @app.get("/v1/debug/series/{task}", dependencies=auth)
+    async def debug_series(task: str, request: Request) -> dict[str, Any]:
+        # What a real call would do with this screen's check tries of `task`, and what the family would get.
+        return debug_verdict(request, task)
+
+    @app.post("/v1/debug/series/{task}/reset", dependencies=auth)
+    async def debug_series_reset(task: str, request: Request) -> dict[str, Any]:
+        if task in ("smile", "arms"):
+            request.app.state.debug.reset(task)
+        return debug_verdict(request, task)
 
     @app.post("/v1/debug/runs/{run_id}/samples", dependencies=auth)
     async def debug_sample(run_id: str, body: DebugSampleIn, request: Request) -> dict[str, Any]:

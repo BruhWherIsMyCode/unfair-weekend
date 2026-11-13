@@ -25,6 +25,7 @@ struct CameraDebugView: View {
                             .overlay(alignment: .bottomLeading) { tag("What the analysis saw") }
                     }
                     timeline
+                    family
                     facts
                     tally
                     observations
@@ -38,6 +39,7 @@ struct CameraDebugView: View {
         .foregroundStyle(.white)
         .preferredColorScheme(.dark)
         .onAppear { model.appear() }
+        .onChange(of: model.task) { model.loadVerdict() }
         .onDisappear { model.disappear() }
     }
 
@@ -88,6 +90,84 @@ struct CameraDebugView: View {
             Text("Done").font(.title3.bold())
         case .failed(let message):
             Text(message).font(.callout).foregroundStyle(.orange)
+        }
+    }
+
+    // MARK: what the family would get
+
+    /// The check tries of this task judged with the call's own rules: would the family be told, and why.
+    @ViewBuilder
+    private var family: some View {
+        if let verdict = model.verdict {
+            section("What the family would get") {
+                Text(verdict.headline)
+                    .font(.callout.bold())
+                    .foregroundStyle(Self.verdictColor(verdict))
+                ForEach(Array(verdict.lines.enumerated()), id: \.offset) { _, line in
+                    Text(line).font(.caption).foregroundStyle(.secondary)
+                }
+                if let message = verdict.familyMessage {
+                    Text("“\(message)”")
+                        .font(.caption.italic())
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(white: 0.18), in: RoundedRectangle(cornerRadius: 8))
+                }
+                ForEach(verdict.tries, id: \.number) { attempt in
+                    row("Try \(attempt.number)", Self.tryText(attempt), ok: Self.tryOK(attempt))
+                }
+                row("Usual", Self.usualText(verdict), ok: verdict.usual.ready)
+                Button("Start over", action: model.startOver)
+                    .font(.caption.bold())
+                    .disabled(model.isRunning || (verdict.tries.isEmpty && verdict.practiceTries == 0))
+            }
+        }
+    }
+
+    static func verdictColor(_ verdict: DebugVerdict) -> Color {
+        switch verdict.status {
+        case "change_noticed": return .red
+        case "incomplete": return .orange
+        case "as_usual": return .green
+        default: return verdict.state == "try_again" ? .yellow : .white
+        }
+    }
+
+    static func tryText(_ attempt: DebugVerdict.Try) -> String {
+        guard attempt.measured else {
+            return "not measured: " + (attempt.reasons.isEmpty ? "?" : attempt.reasons.joined(separator: ", "))
+                .replacingOccurrences(of: "_", with: " ")
+        }
+        var text = attempt.value.map { String(format: "%.3f", $0) } ?? "–"
+        if let hands = attempt.hands {
+            text = String(format: "left %.3f · right %.3f", hands["left"] ?? .nan, hands["right"] ?? .nan)
+        }
+        guard attempt.compared else { return text + " · not compared (no usual)" }
+        let high = attempt.usualHigh.map { String(format: "%.3f", $0) } ?? "–"
+        if attempt.outside == true {
+            return text + " · OUTSIDE her usual (up to \(high))" + (attempt.side.map { ", her \($0) side" } ?? "")
+        }
+        return text + " · inside her usual (up to \(high))"
+    }
+
+    static func tryOK(_ attempt: DebugVerdict.Try) -> Bool? {
+        guard attempt.measured else { return false }
+        guard attempt.compared else { return nil }
+        return attempt.outside != true
+    }
+
+    static func usualText(_ verdict: DebugVerdict) -> String {
+        let usual = verdict.usual
+        let stored = "stored \(usual.storedSessions ?? 0) of \(usual.storedNeeded ?? 0) calls"
+        let practice = "practice \(verdict.practiceTries) of \(verdict.practiceNeeded) teach tries"
+        let ranges = (usual.ranges ?? [:]).sorted { $0.key < $1.key }.compactMap { key, range -> String? in
+            guard range.count == 2, let low = range[0], let high = range[1] else { return nil }
+            return String(format: "%@ %.3f–%.3f", key == "value" ? "range" : key, low, high)
+        }.joined(separator: " · ")
+        switch usual.source {
+        case "stored": return "her stored usual · \(ranges)"
+        case "practice": return "practice usual · \(ranges) · \(stored)"
+        default: return "none yet: \(stored), \(practice)"
         }
     }
 
@@ -218,8 +298,14 @@ struct CameraDebugView: View {
                 ForEach(CameraDebugModel.Mirroring.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
+            Picker("Try", selection: $model.purpose) {
+                ForEach(CameraDebugModel.Purpose.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
             Button(action: model.start) {
-                Text(model.isRunning ? "Running…" : "Start \(model.task.title.lowercased()) test")
+                Text(model.isRunning ? "Running…"
+                     : model.purpose == .teach ? "Teach usual: normal \(model.task.title.lowercased())"
+                                               : "Start \(model.task.title.lowercased()) test")
                     .font(.headline)
                     .frame(maxWidth: .infinity, minHeight: 50)
                     .background(model.isRunning ? Color.gray : Color.green, in: RoundedRectangle(cornerRadius: 14))
