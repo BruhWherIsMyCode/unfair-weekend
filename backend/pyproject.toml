@@ -20,7 +20,10 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["checkin_backend*"]
+include = ["checkin_backend*", "storage"]
+
+[tool.setuptools.package-data]
+storage = ["migrations/*.sql"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

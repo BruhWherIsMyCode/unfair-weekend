@@ -21,6 +21,7 @@ from .hub import DeviceHub
 from .media import MAX_ATTEMPT_BYTES
 from .people import Person
 from .speech import SpeechError, SpeechGateway, load_script, render_line
+from .store import NoStore, Store
 
 ANSWER_CAPTURE = {
     "media_kind": "audio",
@@ -104,8 +105,10 @@ class ClientLink:
         speech: SpeechGateway,
         delivery: FamilyDelivery,
         script: dict[str, str] | None = None,
+        store: Store | None = None,
     ) -> None:
         self.call_id = call_id
+        self.store = store if store is not None else NoStore()
         self.person = person
         self.hub = hub
         self.speech = speech
@@ -148,7 +151,8 @@ class ClientLink:
         self._commands[command_id] = command
         return command
 
-    def _execute(self, command: Command) -> None:
+    def _execute(self, command: Command, deadline_s: float) -> None:
+        self.store.record_command(self.call_id, command.payload, deadline_s)
         self._push(
             "command.execute",
             {
@@ -181,6 +185,7 @@ class ClientLink:
     def _cancel_on_client(self, command_id: str, reason: str) -> None:
         if self.ended and reason != "call_ended":
             return
+        self.store.record_command_cancel(self.call_id, command_id, reason)
         self.hub.send_many(
             self._devices(),
             "command.cancel",
@@ -214,8 +219,9 @@ class ClientLink:
             "duration_ms": prepared.duration_ms,
         }
         self._note("say", line=line_id, command_id=command.command_id, voiced=prepared.voiced)
-        self._execute(command)
-        await self._await(command, prepared.duration_ms / 1000 + PLAYBACK_GRACE_S)
+        wait_s = prepared.duration_ms / 1000 + PLAYBACK_GRACE_S
+        self._execute(command, wait_s)
+        await self._await(command, wait_s)
 
     async def listen(self, question_id: str, timeout_s: float) -> str | None:
         question = question_id.removeprefix("q_")
@@ -228,8 +234,8 @@ class ClientLink:
             "transport": "answer_upload",
         }
         self._note("listen", question=question, command_id=command.command_id)
-        self._execute(command)
         wait_s = max(timeout_s, ANSWER_CAPTURE["duration_ms"] / 1000) + UPLOAD_GRACE_S
+        self._execute(command, wait_s)
         try:
             upload = await self._await(command, wait_s)
         except PlaybackFailed:
@@ -262,7 +268,8 @@ class ClientLink:
             attempt_id, task, settings["format"], asyncio.Queue(maxsize=SAMPLE_QUEUE_MAX)
         )
         self._note("capture", attempt_id=attempt_id, task=task)
-        self._execute(command)
+        window_s = (settings.get("prepare_ms", 0) + settings.get("duration_ms", 0)) / 1000
+        self._execute(command, window_s + CAPTURE_START_GRACE_S + UPLOAD_GRACE_S)
 
     async def cancel_capture(self, attempt_id: str, reason: str) -> None:
         capture = self._captures.get(attempt_id)
@@ -288,7 +295,7 @@ class ClientLink:
 
     async def publish(self, summary: dict[str, Any], phase: str, message_id: str | None = None) -> dict[str, Any]:
         kind = summary.get("status", "incomplete")
-        message = self.delivery.publish(self.call_id, self.person, kind, phase, summary.get("signs"))
+        message = self.delivery.publish(self.call_id, self.person, kind, phase, summary.get("signs"), summary=summary)
         return {"message_id": message.message_id, "delivery": "stored"}
 
     async def send_progress(self, event: dict[str, Any]) -> None:
@@ -385,6 +392,7 @@ class ClientLink:
         if command.finished:
             raise LinkRejected("expired", "This recording command is closed.", 410)
         command.upload_print = print_
+        self.store.record_command_done(self.call_id, command_id, "completed")
         self._settle(command, (audio, content_type))
 
     def on_sample(self, attempt_id: str, sequence: int, captured_ms: int, media_format: str, data: bytes) -> None:
@@ -424,6 +432,7 @@ class ClientLink:
         if last_sequence != capture.last_sequence:
             raise LinkRejected("conflict", "last_sequence does not match the last accepted sample.", 409)
         capture.finish_print = print_
+        self.store.record_command_done(self.call_id, attempt_id, "completed")
         self._close_capture(capture)
         command = self._commands.get(attempt_id)
         if command is not None:
