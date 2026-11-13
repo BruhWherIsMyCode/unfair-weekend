@@ -39,6 +39,9 @@ class CallAdapter(Protocol):
 
 
 _THING = {"face": ("smile", "looks"), "arm": ("arm", "looks"), "speech": ("speech", "sounds")}
+CONCERN_WORDS = {"said_unwell": "she said she does not feel well", "asked_for_help": "she asked for help",
+                 "confused_answers": "her answers were confused",
+                 "reading_far_outside": "one check was far from her usual", "other": "something else"}
 
 
 def render_family_text(summary: Dict[str, Any], name: str) -> str:
@@ -48,6 +51,10 @@ def render_family_text(summary: Dict[str, Any], name: str) -> str:
         confirmed = [s for s in summary["signs"] if s["confirmed"]]
         noun, verb = _THING[confirmed[0]["sign"]]
         return "%s's %s %s different from her usual. Call her now. If she seems unwell, call 112." % (name, noun, verb)
+    if status == "concern_raised":
+        reason = (summary.get("concern") or {}).get("reason", "other")
+        return ("%s said or showed something during today's check-in that needs a look (%s). Please call her. "
+                "If she seems unwell, call 112." % (name, CONCERN_WORDS.get(reason, CONCERN_WORDS["other"])))
     if status == "incomplete":
         return "%s's check-in could not be finished. Please call her. If she seems unwell, call 112." % name
     if status == "learning":

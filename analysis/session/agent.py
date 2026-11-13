@@ -52,7 +52,9 @@ def _loggable(name: Any, args: Any) -> Dict[str, Any]:
         return {}
     out: Dict[str, Any] = {}
     for key, value in args.items():
-        if name == "record_answer" and key == "value":
+        if name == "alert_family" and key == "note":
+            out[key] = "<omitted>"  # the note may repeat her words
+        elif name == "record_answer" and key == "value":
             medicine = args.get("question_id") == "q_medicine" and value in ("yes", "no", "unclear")
             out[key] = value if medicine else "<omitted>"
         elif isinstance(value, (str, int, float, bool)) or value is None:

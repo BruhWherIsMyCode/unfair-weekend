@@ -188,14 +188,18 @@ def evaluate_sign(records: Sequence[FinalRecord]) -> SignEvaluation:
                           last.baseline_ready)
 
 
-def session_status(evals: Dict[str, SignEvaluation], required_tasks: Sequence[str]) -> str:
-    """confirmed change > incomplete (a required task unfinished) > learning (no baseline) > as_usual.
+def session_status(evals: Dict[str, SignEvaluation], required_tasks: Sequence[str], concern: bool = False,
+                   floor_on: bool = True) -> str:
+    """confirmed change > concern_raised > incomplete (a required task unfinished) > learning (no baseline) > as_usual.
 
     A required task whose latest usable reading is outside but not confirmed is also unfinished: the repeat
     that would confirm or settle it has not happened.
+    `floor_on=False` (experiments only): a confirmed sign does not set change_noticed.
     """
-    if any(e.confirmed for e in evals.values()):
+    if floor_on and any(e.confirmed for e in evals.values()):
         return "change_noticed"
+    if concern:
+        return "concern_raised"
     for task in required_tasks:
         e = evals.get(task)
         if e is None or not e.attempts:

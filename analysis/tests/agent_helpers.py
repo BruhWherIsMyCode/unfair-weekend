@@ -26,7 +26,7 @@ ARMS_BASELINE = {"snapshot_id": "baseline_a", "ready": True, "sessions": 12, "ne
 ANSWERS = {"q_medicine": "Yes, after breakfast.", "q_feeling": "I feel fine, thank you.",
            "q_unusual": "Nothing unusual."}
 FACT_KEYS = {"task", "outcome", "quality", "reasons", "interruption", "attempts_left", "needs_another_reading",
-             "skip", "resources"}
+             "skip", "resources", "reading", "baseline_ready"}  # v7: the numbers are part of the facts
 
 
 def identity_decode(sample: Dict[str, Any]) -> Any:

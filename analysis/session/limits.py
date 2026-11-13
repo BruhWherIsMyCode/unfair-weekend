@@ -53,7 +53,15 @@ ANSWER_KEY = {"q_medicine": "medicine", "q_feeling": "feeling", "q_unusual": "un
 SAYABLE_LINES = ("greet", "setup_phone")
 RESOURCES = ("camera", "microphone")
 
-TASK_WINDOW_S ={"smile": 5.0, "arms": 12.0, "sentence": 12.0}
+# ---- v7: PC version ------------------------------------------------------------------------------
+REQUIRED_TASKS = ("smile", "arms")  # the sentence task has no measuring yet; the speech build makes it required again
+SAFETY_FLOOR_DEFAULT = True  # ON: two same-side outside readings are published mid-call whatever Claude does
+CLAUDE_SUB_TIMEOUT_S = 15.0  # one request through the claude CLI (slower round trips than the API)
+ALERT_REASONS = ("said_unwell", "asked_for_help", "confused_answers", "reading_far_outside", "other")
+ALERT_NOTE_MAX_CHARS = 200
+ALERT_MAX_PER_CALL = 2
+
+TASK_WINDOW_S = {"smile": 5.0, "arms": 12.0, "sentence": 12.0}
 TASK_SIGN = {"smile": "face", "arms": "arm", "sentence": "speech"}
 TASK_RESOURCE = {"smile": "camera", "arms": "camera", "sentence": "microphone"}
 TASKS = ("smile", "arms", "sentence")

@@ -3,13 +3,14 @@
 Every guard lives here, so no driver can skip it. The handlers call CallSession and the adapter; they never touch
 readings, confirmation or the family message (those stay in CallSession code).
 
-Tools (exact names): say, ask, record_answer, run_task, recover_resource, finish_call.
+Tools (exact names): say, ask, record_answer, run_task, recover_resource, finish_call, alert_family.
 A refused step returns {"error": "not allowed: <plain reason>", "allowed": [<tool names allowed now>]} and changes
 nothing. After hang-up every tool returns {"error": "call ended"} and nothing reaches the client.
 
-What run_task returns is PLAIN FACTS ONLY: outcome, quality, reasons, interruption, attempts left, whether another
-reading is needed, skip, resource states. Never a measured value, a usual range, an outside flag, a side, or
-anything about the family message.
+What run_task returns (v7, reversing v6's "plain facts only" on the owner's instruction): outcome, quality, reasons,
+interruption, attempts left, whether another reading is needed, skip, resource states, plus "reading" (today's
+number and her usual range, see facts()) and "baseline_ready". Never anything about whether the family was told.
+alert_family(reason, note) asks the code to tell the family; the code decides nothing else from it.
 
 Pure Python + asyncio. No network, no mediapipe.
 """
@@ -22,7 +23,7 @@ from typing import Any, Dict, List, Optional
 from analysis.session import limits, rules
 from analysis.tasks.stream_base import NOT_IMPLEMENTED
 
-TOOL_NAMES = ("say", "ask", "record_answer", "run_task", "recover_resource", "finish_call")
+TOOL_NAMES = ("say", "ask", "record_answer", "run_task", "recover_resource", "finish_call", "alert_family")
 VIDEO_TASKS = ("smile", "arms")
 STOP_REASON = "she_asked_to_stop"
 SCRIPT_PATH = Path(__file__).resolve().parents[2] / "contract" / "script.en.json"
@@ -46,6 +47,7 @@ class ToolHandlers:
         self.transcripts: Dict[str, str] = {q: "" for q in limits.QUESTIONS}
         self.recorded: Dict[str, bool] = {q: False for q in limits.QUESTIONS}
         self.not_implemented: set = set()
+        self.alerts = 0  # alert_family calls accepted in this call
 
     # ---- state views --------------------------------------------------------------------------------
 
@@ -171,6 +173,8 @@ class ToolHandlers:
             out.append("recover_resource")
         if self.finish_refusal(None) is None:
             out.append("finish_call")
+        if self.alerts < limits.ALERT_MAX_PER_CALL:
+            out.append("alert_family")
         return out
 
     def plain_state(self) -> Dict[str, Any]:
@@ -226,6 +230,13 @@ class ToolHandlers:
              "check still has attempts and no settled result. If she asked to stop, pass reason she_asked_to_stop.",
              "input_schema": {"type": "object", "properties": {"reason": {"type": "string", "enum": [STOP_REASON]}},
                               "additionalProperties": False}},
+            {"name": "alert_family", "description": "Tell her family something worries you, now. At most %d times "
+             "per call, after the greeting. Give a short plain note (at most 20 words) of what you noticed. The code "
+             "sends it; you carry on with the call." % limits.ALERT_MAX_PER_CALL,
+             "input_schema": {"type": "object", "properties": {
+                 "reason": {"type": "string", "enum": list(limits.ALERT_REASONS)},
+                 "note": {"type": "string", "maxLength": limits.ALERT_NOTE_MAX_CHARS}},
+                 "required": ["reason", "note"], "additionalProperties": False}},
         ]
 
     # ---- validation and guards --------------------------------------------------------------------------
@@ -237,7 +248,8 @@ class ToolHandlers:
         if not isinstance(args, dict):
             return "input must be an object"
         allowed_keys = {"say": {"line_id"}, "ask": {"question_id"}, "record_answer": {"question_id", "value"},
-                        "run_task": {"task"}, "recover_resource": {"resource"}, "finish_call": {"reason"}}[name]
+                        "run_task": {"task"}, "recover_resource": {"resource"}, "finish_call": {"reason"},
+                        "alert_family": {"reason", "note"}}[name]
         if set(args) - allowed_keys:
             return "unexpected fields"
         if name == "say" and args.get("line_id") not in limits.SAYABLE_LINES:
@@ -258,6 +270,11 @@ class ToolHandlers:
             return "resource must be camera or microphone"
         if name == "finish_call" and "reason" in args and args["reason"] != STOP_REASON:
             return "reason, when given, must be %s" % STOP_REASON
+        if name == "alert_family":
+            if args.get("reason") not in limits.ALERT_REASONS:
+                return "reason must be one of %s" % ", ".join(limits.ALERT_REASONS)
+            if "note" in args and not isinstance(args["note"], str):
+                return "note must be a string"
         return None
 
     def refusal(self, name: str, args: Dict[str, Any]) -> Optional[str]:
@@ -284,6 +301,10 @@ class ToolHandlers:
             return None if self.session.recovery_pending(r) else "there is no interruption to recover from for the %s" % r
         if name == "finish_call":
             return self.finish_refusal(args.get("reason"))
+        if name == "alert_family":
+            if self.alerts >= limits.ALERT_MAX_PER_CALL:
+                return "the family was already alerted %d times in this call" % limits.ALERT_MAX_PER_CALL
+            return None
         return None
 
     # ---- execution ----------------------------------------------------------------------------------------
@@ -355,7 +376,7 @@ class ToolHandlers:
             self.session.note("task_not_implemented", task=task, reason=reason)
             return {"task": task, "outcome": "failed", "quality": "unusable", "reasons": [reason],
                     "interruption": None, "attempts_left": 0, "needs_another_reading": False, "skip": True,
-                    "resources": self.resource_states()}
+                    "resources": self.resource_states(), "reading": None, "baseline_ready": False}
         if task in VIDEO_TASKS and not self.setup_played:
             await self._play("setup_phone")
             self.setup_played = True
@@ -364,14 +385,46 @@ class ToolHandlers:
         result = await self.session.run_task(task)
         return self.facts(task, result)
 
+    @staticmethod
+    def _reading_facts(reading: Optional[Dict[str, Any]], baseline_ready: bool) -> Optional[Dict[str, Any]]:
+        """The numbers Claude sees (v7). distance = how far outside, as a multiple of half her usual range,
+        0.0 when inside or while the usual is still being learned."""
+        if reading is None:
+            return None
+
+        def r3(x: Any) -> Any:
+            return round(float(x), 3) if isinstance(x, (int, float)) and not isinstance(x, bool) else None
+
+        value, low, high = reading.get("value"), reading.get("usual_low"), reading.get("usual_high")
+        distance = 0.0
+        if baseline_ready and reading.get("outside") is True and None not in (value, low, high):
+            half = (float(high) - float(low)) / 2.0
+            outside_by = max(float(value) - float(high), float(low) - float(value), 0.0)
+            if half > 0:
+                distance = round(outside_by / half, 2)
+        return {"value": r3(value), "usual_low": r3(low), "usual_high": r3(high),
+                "outside_usual": reading.get("outside"), "distance": distance, "side": reading.get("side"),
+                "unit": reading.get("unit")}
+
     def facts(self, task: str, result: Dict[str, Any]) -> Dict[str, Any]:
-        """A TaskResult dict -> plain facts. Deliberately drops the reading and the baseline."""
+        """A TaskResult dict -> the facts Claude gets, now with today's numbers."""
         i = result.get("interruption")
+        ready = bool((result.get("baseline") or {}).get("ready"))
         return {"task": task, "outcome": result["outcome"], "quality": result["quality"]["status"],
                 "reasons": list(result["quality"]["reasons"]),
                 "interruption": {"code": i["code"], "recoverable": i["recoverable"]} if i else None,
                 "attempts_left": self.attempts_left(task), "needs_another_reading": self.needs_another(task),
-                "skip": self.skip(task), "resources": self.resource_states()}
+                "skip": self.skip(task), "resources": self.resource_states(),
+                "reading": self._reading_facts(result.get("reading"), ready), "baseline_ready": ready}
+
+    async def _do_alert_family(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        note = args.get("note", "")
+        if len(note) > limits.ALERT_NOTE_MAX_CHARS:
+            self.session.note("alert_note_cut", length=len(note))
+            note = note[:limits.ALERT_NOTE_MAX_CHARS]
+        self.alerts += 1
+        await self.session.raise_concern(args["reason"], note)
+        return {"sent": True}
 
     async def _do_recover_resource(self, args: Dict[str, Any]) -> Dict[str, Any]:
         resource = args["resource"]

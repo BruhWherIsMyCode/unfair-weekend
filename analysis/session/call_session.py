@@ -47,8 +47,9 @@ class _Runtime:
 class CallSession:
     def __init__(self, call_id: str, person_id: str, person_name: str, adapter: Any, modules: Dict[str, Any],
                  baselines: Optional[Dict[str, Dict[str, Any]]] = None, clock: Any = None, label: str = "live",
-                 required_tasks: Sequence[str] = limits.TASKS,
-                 initial_resources: Optional[Dict[str, str]] = None) -> None:
+                 required_tasks: Sequence[str] = limits.REQUIRED_TASKS,
+                 initial_resources: Optional[Dict[str, str]] = None,
+                 safety_floor: bool = limits.SAFETY_FLOOR_DEFAULT) -> None:
         self.call_id = call_id
         self.person_id = person_id
         self.person_name = person_name
@@ -58,6 +59,11 @@ class CallSession:
         self.clock = clock or RealClock()
         self.label = label
         self.required_tasks = tuple(required_tasks)
+        # ON (the default): two same-side outside readings are published mid-call whatever Claude does.
+        # OFF is for experiments only; it is set by the server flag / UW_SAFETY_FLOOR, never inside the session.
+        self.safety_floor = bool(safety_floor)
+        self.concern: Optional[Dict[str, str]] = None
+        self._concern_published = False
         self.started_at = self.clock.now()
 
         self.log: List[Dict[str, Any]] = []
@@ -635,10 +641,31 @@ class CallSession:
         self._log("attempt_finished", attempt_id=attempt.attempt_id, outcome=result.outcome, state=terminal,
                   interruption=result.interruption.code if result.interruption else None)
         if usable and not self._change_published and self._confirmed_any():
-            self._log("change_confirmed", attempt_id=attempt.attempt_id, task=attempt.task)
-            if await self._publish("mid_call"):
-                self._change_published = True
+            if self.safety_floor:
+                self._log("change_confirmed", attempt_id=attempt.attempt_id, task=attempt.task)
+                if await self._publish("mid_call"):
+                    self._change_published = True
+            else:
+                self._log("floor_off_suppressed", attempt_id=attempt.attempt_id, task=attempt.task,
+                          detail="the safety floor is off: the confirmed sign is kept but nothing is published")
         return d
+
+    async def raise_concern(self, reason: str, note: str) -> bool:
+        """The call agent tells the family something worries it (v7 alert_family). The concern is kept in the
+        summary and published mid-call at once, once; the final publish updates the same message.
+        Returns True when the concern is recorded."""
+        if self.hung_up or reason not in limits.ALERT_REASONS:
+            return False
+        note = str(note)
+        if len(note) > limits.ALERT_NOTE_MAX_CHARS:
+            self._log("concern_note_cut", length=len(note))
+            note = note[:limits.ALERT_NOTE_MAX_CHARS]
+        self.concern = {"raised_by": "agent", "reason": reason, "note": note}
+        self._log("concern_raised", reason=reason, note_chars=len(note))
+        if not self._concern_published:
+            if await self._publish("mid_call"):
+                self._concern_published = True
+        return True
 
     def _last_finished(self) -> Optional[Attempt]:
         finished = [a for a in self.attempts.values() if a.is_terminal]
@@ -688,11 +715,12 @@ class CallSession:
                 limits.TASK_SIGN[task], e.side if e.confirmed else None,
                 [SummaryAttempt(a["value"], a["usual_low"], a["usual_high"], a["outside"]) for a in e.attempts],
                 e.confirmed))
-        status = rules.session_status(evals, self.required_tasks)
+        status = rules.session_status(evals, self.required_tasks, self.concern is not None, self.safety_floor)
         used = [t for t in limits.TASKS if evals[t].attempts] or list(self.required_tasks) or ["smile"]
         baselines = [self._baseline_info(t) for t in used]
         return SessionResult(self.person_id, self.label, int(self.clock.now() - self.started_at), dict(self.answers),
-                             signs, status, min(b.sessions for b in baselines), max(b.needed for b in baselines))
+                             signs, status, min(b.sessions for b in baselines), max(b.needed for b in baselines),
+                             None, dict(self.concern) if self.concern is not None else None)
 
     def baseline_update(self) -> Dict[str, float]:
         """metric_id -> value that may enter the baseline after this call (nothing if acted or a change was confirmed)."""

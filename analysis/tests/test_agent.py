@@ -316,9 +316,9 @@ def test_a_confirmed_change_is_published_even_if_claude_fails_right_after():
             assert phases[0] == "mid_call" and phases[-1] == "final" and phases.count("mid_call") == 1
             assert rig.adapter.published[0]["summary"]["status"] == "change_noticed"
             assert fallback_reasons(rig) == ["request_timeout"]
-            # what Claude saw after the second smile: plain facts, nothing about the finding or the family
+            # what Claude saw after the second smile: the numbers (v7), nothing about the finding or the family
             seen = json.dumps(client.requests[3]["messages"]).lower()
-            for word in ("confirm", "family", "outside", "usual", "alert", "published"):
+            for word in ("confirm", "family", "alert", "published"):
                 assert word not in seen, word
             assert SECRET not in json.dumps(rig.session.log, default=str)
         finally:

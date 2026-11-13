@@ -27,7 +27,8 @@ RESOURCE_STATES = ("available", "unavailable")
 RESOURCE_REASONS = ("permission_denied", "track_ended", "device_missing", "unknown")
 SIGNS = ("face", "arm", "speech")
 LABELS = ("live", "normal", "acted")
-STATUSES = ("as_usual", "change_noticed", "learning", "incomplete")
+STATUSES = ("as_usual", "change_noticed", "concern_raised", "learning", "incomplete")  # concern_raised: v7
+CONCERN_REASONS = ("said_unwell", "asked_for_help", "confused_answers", "reading_far_outside", "other")
 
 
 def _req(cond: bool, msg: str) -> None:
@@ -407,6 +408,16 @@ class SessionResult:
     baseline_sessions: int
     baseline_needed: int
     clip_id: Optional[str] = None
+    concern: Optional[Dict[str, str]] = None  # v7: {"raised_by": "agent", "reason", "note"}; the key is absent when None
+
+    def _concern_dict(self) -> Optional[Dict[str, str]]:
+        if self.concern is None:
+            return None
+        _only_keys(self.concern, ("raised_by", "reason", "note"), "concern")
+        _req(self.concern["raised_by"] == "agent", "concern.raised_by must be agent")
+        _req(self.concern["reason"] in CONCERN_REASONS, "concern.reason not in %s" % (CONCERN_REASONS,))
+        _req(isinstance(self.concern["note"], str) and len(self.concern["note"]) <= 200, "concern.note too long")
+        return dict(self.concern)
 
     def to_dict(self) -> Dict[str, Any]:
         _check_id(self.person_id, "person_id")
@@ -424,18 +435,26 @@ class SessionResult:
         _req(_is_int(self.baseline_sessions) and self.baseline_sessions >= 0, "baseline_sessions must be >= 0")
         _req(_is_int(self.baseline_needed) and self.baseline_needed >= 1, "baseline_needed must be >= 1")
         _req(self.clip_id is None, "clip_id is null in this draft")
-        return {"person_id": self.person_id, "label": self.label, "duration_s": self.duration_s,
-                "answers": dict(self.answers), "signs": signs, "status": self.status,
-                "baseline_sessions": self.baseline_sessions, "baseline_needed": self.baseline_needed,
-                "clip_id": None}
+        concern = self._concern_dict()
+        _req((self.status == "concern_raised") <= (concern is not None), "concern_raised needs a concern")
+        out = {"person_id": self.person_id, "label": self.label, "duration_s": self.duration_s,
+               "answers": dict(self.answers), "signs": signs, "status": self.status,
+               "baseline_sessions": self.baseline_sessions, "baseline_needed": self.baseline_needed,
+               "clip_id": None}
+        if concern is not None:
+            out["concern"] = concern
+        return out
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "SessionResult":
-        _only_keys(d, ("person_id", "label", "duration_s", "answers", "signs", "status", "baseline_sessions",
-                       "baseline_needed", "clip_id"), "session result")
+        keys = ["person_id", "label", "duration_s", "answers", "signs", "status", "baseline_sessions",
+                "baseline_needed", "clip_id"]
+        if "concern" in d:
+            keys.append("concern")
+        _only_keys(d, keys, "session result")
         return cls(d["person_id"], d["label"], d["duration_s"], dict(d["answers"]),
                    [SummarySign.from_dict(s) for s in d["signs"]], d["status"], d["baseline_sessions"],
-                   d["baseline_needed"], d["clip_id"])
+                   d["baseline_needed"], d["clip_id"], d.get("concern"))
 
 
 # ---- what a task module receives ----------------------------------------------------------------

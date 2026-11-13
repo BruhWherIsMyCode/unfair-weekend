@@ -151,8 +151,9 @@ def test_run_task_returns_plain_facts_only():
         assert len(rig.adapter.published) == 1
         for facts in (first, second):
             text = json.dumps(facts).lower()
-            for word in ("value", "usual", "outside", "side", "family", "message", "confirm", "alert", "left_hand",
-                         "sink", "corner"):
+            # v7: value / usual range / outside flag / side are now part of the facts; only the family message,
+            # the confirmation and the metric names stay hidden from Claude
+            for word in ("family", "message", "confirm", "alert", "left_hand", "sink", "corner"):
                 assert word not in text, word
         assert not_allowed(await rig.handlers.execute("run_task", {"task": "smile"}))
 
