@@ -221,7 +221,7 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
         var rawHeight = 0
         var mirrored = false
         var angle: Double = 0
-        /// Landscape buffers, turned counter-clockwise and mirrored (the setup checked upright on the iPhone).
+        /// Landscape buffers, turned counter-clockwise (the setup checked upright on the iPhone).
         var fixed = 0
         /// Portrait buffers, sent as they came: not expected; if these appear, frames are not all alike.
         var asIs = 0
@@ -250,10 +250,13 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
         if landscape {
             // Still landscape: the connection's 90-degree rotation did not take. With the connection set as in
             // uprightFrames() (set again at every capture start: without it the buffers differ and this turn put
-            // her upside down), turn 90 degrees counter-clockwise, then mirror. Checked on an iPhone 18 Pro Max with
-            // the camera debug screen: upright, and only the mirrored picture put her raised hand on the right
-            // side for the analysis. Clockwise, or leaving the connection at its default, gave her upside down.
-            image = image.oriented(.left).oriented(.upMirrored)
+            // her upside down), turn 90 degrees counter-clockwise. Checked on an iPhone 18 Pro Max with the camera
+            // debug screen: upright, and her raised hand is detected on the right side when the analysis's
+            // "Mirrored" setting flips this picture; the same as the turn plus a mirror here with the backend's
+            // UW_MIRRORED off, which detected unreliably. So no mirror here: the backend must run with UW_MIRRORED
+            // off (no --mirrored), or the picture is flipped twice. Clockwise, or the default connection, gave
+            // her upside down.
+            image = image.oriented(.left)
         }
         guard let space = CGColorSpace(name: CGColorSpace.sRGB),
               let jpeg = context.jpegRepresentation(

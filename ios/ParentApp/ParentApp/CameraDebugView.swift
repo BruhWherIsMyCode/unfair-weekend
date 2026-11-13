@@ -154,7 +154,7 @@ struct CameraDebugView: View {
                 }
                 if let camera = model.cameraStats {
                     row("Camera", "raw \(camera.rawWidth) × \(camera.rawHeight), mirrored \(camera.mirrored ? "on" : "off"),"
-                        + " angle \(Int(camera.angle))° · turned+mirrored \(camera.fixed) · as is \(camera.asIs)",
+                        + " angle \(Int(camera.angle))° · turned \(camera.fixed) · as is \(camera.asIs)",
                         ok: camera.asIs == 0)
                 }
             }
