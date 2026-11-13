@@ -26,7 +26,7 @@ uv run --locked --extra dev pytest -q
 uv build --out-dir .cache/python-dist
 ```
 
-Tests exercise a complete HTTP/SSE call with mocked voice, transcripts and video transport, plus lifecycle, cache, cancellation, authentication and provider-error paths. Real provider generation and iPhone audio/video playback are untested in this worktree; provider credentials are not configured. No provider credits are used by the tests. The separate iOS family stage shell remains mocked.
+Tests exercise a complete HTTP/SSE call with mocked voice, transcripts and video transport, plus lifecycle, cache, cancellation, authentication and provider-error paths. The Simli readiness fix reproduces delayed 404/429 responses and the permitted CDN redirect, with bounded retries and cancellation. One real ElevenLabs/Simli greeting was generated, downloaded and decoded successfully; [VOICE_VIDEO.md](VOICE_VIDEO.md#verification-and-limits) records that trial and its limits. Real answer STT and iPhone audio/video playback remain untested by Agent 2. No provider credits are used by the automated tests. The separate iOS family stage shell remains mocked.
 
 ## Shared database
 
