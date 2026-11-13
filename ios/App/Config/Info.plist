@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>Ona's calls</string>
+	<string>HeartLine</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -26,9 +26,9 @@
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Ona's calls receives check-in alerts from the check-in service on this network.</string>
+	<string>HeartLine receives check-in alerts from the check-in service on this network.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Ona's calls saves a check-in clip to Photos when you tap Save to Photos.</string>
+	<string>HeartLine saves a check-in clip to Photos when you tap Save to Photos.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIBackgroundModes</key>

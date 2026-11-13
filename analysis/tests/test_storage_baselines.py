@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from analysis import backend_entry
+from analysis import backend_entry, config
 from analysis.pc.store import BaselineStore
 from analysis.storage import close_all_writers, shared_writer
 from analysis.tests.storage_helpers import (PERSON, add_call, count, end_call, make_db, rows, settle)
@@ -100,6 +100,50 @@ def test_the_database_wins_over_the_json_file_where_it_has_a_snapshot(world):
     assert summary1["status"] == "as_usual" and any("json file" in line for line in lines1)
     summary2, lines2 = call(world, 2)  # ... the database now has one session of its own and takes over (learning)
     assert any("database for" in line for line in lines2) and summary2["status"] == "learning"
+
+
+@pytest.mark.parametrize("old_needed,new_needed,ready", [(5, 2, True), (2, 3, False), (2, None, False)])
+def test_changing_the_learning_target_rebuilds_and_freezes_a_new_snapshot(world, old_needed, new_needed, ready):
+    tmp_path, path = world
+    call(world, 1, needed=old_needed)
+    call(world, 2, needed=old_needed)
+    old_rows = rows(path, "SELECT * FROM baseline_snapshots ORDER BY rowid")
+    old_members = rows(path, "SELECT * FROM baseline_members ORDER BY rowid")
+    add_call(path, "call_t3")
+    link = Link()
+    link.call_id = "call_t3"
+    env = env_for(tmp_path, path, needed=new_needed)
+    if new_needed is None:
+        env.pop("UW_BASELINE_NEEDED")
+        new_needed = config.BASELINE_NEEDED
+    summary = asyncio.run(backend_entry.run_backend_call(link, modules(), env=env, out=lambda line: None))
+    end_call(path, "call_t3")
+    settle(shared_writer(path))
+
+    assert summary["baseline_needed"] == new_needed
+    assert summary["status"] == ("as_usual" if ready else "learning")
+    for task in ("smile", "arms"):
+        baseline = link.session.baselines[task]
+        assert (baseline["sessions"], baseline["needed"], baseline["ready"]) == (2, new_needed, ready)
+        frozen = rows(path, "SELECT b.* FROM baseline_snapshots b JOIN session_baselines s USING (snapshot_id) "
+                            "WHERE s.call_id = 'call_t3' AND s.task = ?", (task,))[0]
+        assert frozen["snapshot_id"] == baseline["snapshot_id"]
+        assert frozen["needed"] == new_needed and frozen["sessions"] == 2
+        if task == "smile":
+            assert bool(frozen["ready"]) == ready
+            assert frozen["usual_low"] == baseline["usual_low"]
+            assert frozen["usual_high"] == baseline["usual_high"]
+        else:
+            for side in ("left", "right"):
+                hand = baseline["hand_" + side]
+                assert (hand["needed"], hand["ready"]) == (new_needed, ready)
+                assert (hand["usual_low"] is not None) == ready
+        members = rows(path, "SELECT source_call_id FROM baseline_members WHERE snapshot_id = ? ORDER BY rowid",
+                       (frozen["snapshot_id"],))
+        assert [member["source_call_id"] for member in members] == ["call_t1", "call_t2"]
+    assert rows(path, "SELECT * FROM baseline_snapshots ORDER BY rowid")[:len(old_rows)] == old_rows
+    assert rows(path, "SELECT * FROM baseline_members ORDER BY rowid")[:len(old_members)] == old_members
+    assert count(path, "task_results", "call_id = 'call_t3'") == 2
 
 
 def test_the_call_record_says_where_her_usual_came_from(world):

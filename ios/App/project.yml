@@ -30,7 +30,7 @@ targets:
     info:
       path: Config/Info.plist
       properties:
-        CFBundleDisplayName: "Ona's calls"
+        CFBundleDisplayName: "HeartLine"
         CFBundleDevelopmentRegion: en
         UILaunchScreen:
           UIColorName: LaunchBackground
@@ -39,8 +39,8 @@ targets:
           - UIInterfaceOrientationPortrait
         UIRequiresFullScreen: true
         UIApplicationSupportsIndirectInputEvents: true
-        NSLocalNetworkUsageDescription: "Ona's calls receives check-in alerts from the check-in service on this network."
-        NSPhotoLibraryAddUsageDescription: "Ona's calls saves a check-in clip to Photos when you tap Save to Photos."
+        NSLocalNetworkUsageDescription: "HeartLine receives check-in alerts from the check-in service on this network."
+        NSPhotoLibraryAddUsageDescription: "HeartLine saves a check-in clip to Photos when you tap Save to Photos."
         NSAppTransportSecurity:
           # The demo backend runs on a laptop on the same network, over plain HTTP.
           NSAllowsLocalNetworking: true
