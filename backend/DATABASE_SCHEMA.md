@@ -24,6 +24,11 @@ This PR can be reviewed/merged independently because its tooling does not
 import that application. Writers must implement the transactions below before
 claiming persistence works in the running backend.
 
+The tooling is imported from the source checkout. When integrating the separate
+application package from PR #8, include `storage` and `storage/migrations/*.sql`
+in its package discovery/data; this standalone schema PR does not change that
+PR's packaging configuration.
+
 SQLite 3.38+ with JSON functions is required. Use one application process,
 short write transactions and a bounded database worker/connection owner. Do not
 perform blocking SQLite I/O on the event loop receiving resource events.
@@ -282,7 +287,9 @@ and group by label/status/system version, never count mid-call updates twice.
 
 Agent 2 owns migration publication and connection/lifecycle/delivery writers;
 Agent 3 reviews the session/task/baseline/model columns before implementing
-independent consumers. Shared schema changes need one new migration, affected
+independent consumers. The boundary handoff is tracked in
+[issue #10](https://github.com/BruhWherIsMyCode/unfair-weekend/issues/10).
+Shared schema changes need one new migration, affected
 writer review and constraint tests. Consumer types are derived from the shared
 wire artifact after publication; do not generate an API by exposing these rows.
 

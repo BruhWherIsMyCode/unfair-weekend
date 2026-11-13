@@ -25,6 +25,8 @@ The existing browser experiment uses Node, `simli-client` 3.2.0 and ElevenLabs T
 
 ## Recorded verification
 
+The storage change passes 26 synthetic migration/constraint tests, including atomic terminalization, durable observation history, frozen comparisons, stale input, command identity, baseline eligibility and delivery deduplication. Migration CLI apply/reapply, the Node build and seven mocked-provider tests pass. These checks do not demonstrate runtime persistence, watchdog execution, restart recovery or a real client. Agent 3's shared-boundary review is [issue #10](https://github.com/BruhWherIsMyCode/unfair-weekend/issues/10).
+
 On 12 Nov the prototype build, seven mocked-provider tests and dependency audit passed. Chromium verified setup state, console output and layout at an emulated 390-pixel viewport. Mobile emulation is not iPhone media verification.
 
 Two real greeting trials used local provider credentials. The first prepared ElevenLabs audio in 1.14 seconds and rendered the first avatar frame 2.31 seconds after connection began. A replay reused cached audio in 0.01 seconds and rendered its first frame in 2.91 seconds. Simli's first speaking event followed audio submission by 0.08/0.13 seconds. Both reached automatic completion. These are individual observations, not benchmarks, subjective listening assessments or end-to-end voice-latency measurements.

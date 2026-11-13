@@ -136,6 +136,8 @@ family_delivery.publish(summary, phase) -> stable message ID and outbox intent
 
 Wire contracts to publish: task-start command and definition version; actual capture-start acknowledgment; client `TaskObservation`; immediate resource event; normal-stop vs interrupted-stop command; stop acknowledgment with final sequence; event acknowledgment/deduplication/errors; server `TaskResult`; family message updates. These are proposals for Agent 3 review, not implemented routes. All share call/attempt/event/command identities and explicit schema versions.
 
+Agent 3's protocol publication and storage review are tracked in [issue #10](https://github.com/BruhWherIsMyCode/unfair-weekend/issues/10).
+
 [Draft 0.2](proposals/README.md) and its synthetic fixtures are retained as historical transport examples. Its JPEG/PCM sample endpoints and local-only observation boundary are superseded. Do not build those consumers. [SHARED_CONTRACT.md](../docs/SHARED_CONTRACT.md) and the team briefs need owner updates to this decision; Agent 2 does not edit human-owned `docs/` or Agent 3's folders.
 
 ## 7. Fixed script
