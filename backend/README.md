@@ -105,7 +105,7 @@ Optional environment variables (all can stay empty; see `.env.example`). They ar
 - `CALL_DRIVER`: `fixed` (default; the fixed order, no model) or `claude`. Empty follows `UW_CLAUDE=on`.
 - `UW_CLAUDE_BACKEND`: `api` (default, needs `ANTHROPIC_API_KEY`) or `subscription` (the `claude` CLI login; the API key variable is removed from the process first).
 - `UW_MIRRORED`: `on` when the phone frames are mirrored (default `off`).
-- `UW_BASELINE_PERSON`: the key her usual is stored under (default: the person id). `UW_DATA_DIR`: the folder of the JSON baseline files (default `analysis/data`). `UW_BASELINE_NEEDED`: normal calls before her usual is ready (default 5; use 1-2 to try it out).
+- `UW_BASELINE_PERSON`: the key her usual is stored under (default: the person id). `UW_DATA_DIR`: the folder of the JSON baseline files (default `analysis/data`). `UW_BASELINE_NEEDED`: successful normal/live calls before her usual is ready (backend default 2). In a learning call, after the greeting the avatar explains that it is learning her usual and says the total and remaining call counts, including the current call. Each required check needs enough usable measurements; an unusable check does not advance its count. Calls labelled `acted` never train her usual and do not play the learning introduction. The learning settings do not change how concerns raised during a call reach her family.
 - `UW_SAFETY_FLOOR`: only `off` turns off the mid-call message for two same-side readings outside her usual. Experiments only.
 - `UW_CALL_LOG`: `off` hides the live log (one plain line per step, prefixed `[call <id>]`). `UW_RUNS_DIR`: where the call record JSON is written (default `analysis/runs/calls`).
 

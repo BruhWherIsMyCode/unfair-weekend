@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from .link import CallEnded, ClientLink, PlaybackFailed
+from .learning import DEFAULT_LEARNING_CALLS
 from .logging_config import log_event
 
 log = logging.getLogger(__name__)
@@ -71,6 +72,10 @@ async def run_analysis_call(link: ClientLink, modules: str, database_path: str |
     ensure_analysis_path()
     from analysis.backend_entry import Settings, default_modules, run_backend_call
 
+    env = dict(os.environ)
+    if not env.get("UW_BASELINE_NEEDED", "").strip():
+        env["UW_BASELINE_NEEDED"] = str(DEFAULT_LEARNING_CALLS)
+
     # One writer for the shared database: when the call service's Store is on, Agent 3's recorder hands its jobs
     # to the same writer thread (its calls row is then always committed before ours; summaries stay the Store's).
     store = getattr(link, "store", None)
@@ -82,9 +87,9 @@ async def run_analysis_call(link: ClientLink, modules: str, database_path: str |
     else:
         from .native_tasks import protect_native_modules
 
-        settings = Settings(os.environ, link.person.person_id)
+        settings = Settings(env, link.person.person_id)
         chosen = protect_native_modules(default_modules(settings.mirrored))
-    return await run_backend_call(link, modules=chosen, database_path=database_path, submit=submit)
+    return await run_backend_call(link, modules=chosen, env=env, database_path=database_path, submit=submit)
 
 
 class ScriptedSession:
