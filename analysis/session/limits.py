@@ -19,6 +19,9 @@ WORKER_STOP_WAIT_S = 1.0  # how long a stopped analyzer may take to end before i
 
 MAX_ATTEMPTS_PER_TASK = 3  # two usable + one technical retry, three in total
 MAX_USABLE_PER_TASK = 2  # a third usable reading is never needed (two confirm or settle it)
+# v11 (owner, after real calls): an attempt that ends without a usable reading (unusable, could_not_perform,
+# interrupted, failed) is repeated at most ONCE; the second not-measured attempt of a task skips the task.
+MAX_NOT_MEASURED_PER_TASK = 2
 
 WATCHDOG_TICK_S = 0.1  # how often the session re-checks its watchdogs (through the clock)
 SAMPLE_QUEUE_MAX = 64  # bounded sample queue per attempt; a full queue drops the new sample and logs it
@@ -82,7 +85,28 @@ SPEECH_METRIC_ID = "speech_duration_v1"
 SPEECH_BASELINE_KEY = "sentence.duration_s"
 SENTENCE_MIN_HALF_WIDTH_S = 0.5  # minimum half width of her usual sentence duration (seconds); first guess
 
-TASK_WINDOW_S = {"smile": 5.0, "arms": 12.0, "sentence": 12.0}
+# ---- v11: live talk -------------------------------------------------------------------------------
+# The smile window has a relaxed phase first, then the cue line `smile_now`, then the smile phase. The relaxed
+# reference of the reading is taken from the relax phase (the owner's real calls asked "smile until the timer
+# finishes", so she was already smiling when capture started and no rise was ever seen).
+SMILE_PHASES = (
+    ("relax", 0, 1500),
+    ("smile", 1500, 6000),
+)
+SMILE_CUE_LINE = "smile_now"
+SMILE_CUE_MS = 1500
+SMILE_MIN_PHASE_FRAMES = 3  # usable frames needed in the relax phase (and for the peak) for the phase-aware rule
+SMILE_ALREADY_SMILING = 0.5  # relaxed smile strength at or above this means she was already smiling; first guess
+
+OWN_LINES_MAX = 10  # say_own + ask_followup together, per call
+OWN_LINE_MAX_WORDS = 25
+OWN_LINE_MAX_CHARS = 200
+FOLLOWUPS_PER_QUESTION = 1
+OWN_LINE_BANNED_WORDS = ("stroke", "detect", "diagnose", "predict", "suspect", "medical", "safe", "risk", "emergency")
+RETRY_HINTS = ("face_not_in_view", "already_smiling", "no_smile_seen", "hand_not_seen", "hand_too_late",
+               "camera_lost", "too_dark", "other")
+
+TASK_WINDOW_S = {"smile": 6.0, "arms": 12.0, "sentence": 12.0}
 TASK_SIGN = {"smile": "face", "arms": "arm", "sentence": "speech"}
 TASK_RESOURCE = {"smile": "camera", "arms": "camera", "sentence": "microphone"}
 TASKS = ("smile", "arms", "sentence")

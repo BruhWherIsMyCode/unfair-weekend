@@ -41,13 +41,18 @@ from analysis import config
 from analysis.pc.store import BaselineStore
 from analysis.session import limits
 from analysis.session.adapters import render_family_text
-from analysis.session.call_record import LiveLog, build_record, format_log_line, write_record
+from analysis.session.call_record import LiveLog, build_record, format_terminal_line, write_record
 from analysis.session.call_session import CallSession
 from analysis.session.run_call import BACKENDS, FLOOR_ENV, SWITCH_ENV, run_call
 
 log = logging.getLogger(__name__)
 
 DRIVERS = ("fixed", "claude")
+
+
+def _show(line: str) -> None:
+    """One terminal line, flushed at once (the backend's stdout is often a pipe or a log file)."""
+    print(line, flush=True)
 
 
 class BaselineSource(Protocol):
@@ -142,7 +147,7 @@ def _open_database(db_path: Any, submit: Optional[Callable[[str, Any], None]], l
 
 async def run_backend_call(link: Any, modules: Optional[Dict[str, Any]] = None, *,
                            env: Optional[Mapping[str, str]] = None,
-                           out: Callable[[str], Any] = print, database_path: Any = None,
+                           out: Callable[[str], Any] = _show, database_path: Any = None,
                            submit: Optional[Callable[[str, Any], None]] = None) -> Dict[str, Any]:
     """Run one answered call over `link` and return the SessionResult dict.
 
@@ -181,7 +186,7 @@ async def run_backend_call(link: Any, modules: Optional[Dict[str, Any]] = None, 
     prefix = "[call %s] " % link.call_id
     if settings.call_log:
         def show(entry: Dict[str, Any]) -> None:
-            line = format_log_line(entry, session)
+            line = format_terminal_line(entry, session)
             if line is not None:
                 out(prefix + line)
 

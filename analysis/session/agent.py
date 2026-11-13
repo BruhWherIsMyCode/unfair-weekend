@@ -31,7 +31,7 @@ PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "agent_system.md"
 FIRST_MESSAGE = "Call connected. Nothing done yet."
 # The lines Claude can cause (directly or through a tool); the code plays all of them.
 CAUSABLE_LINES = ("greet", "q_medicine", "q_feeling", "q_unusual", "setup_phone", "task_smile", "task_arms",
-                  "task_sentence", "repeat_smile", "repeat_arms", "repeat_sentence", "swap_hands",
+                  "task_sentence", "repeat_smile", "repeat_arms", "repeat_sentence", "smile_now", "swap_hands",
                   "camera_unavailable", "microphone_unavailable", "bye")
 
 
@@ -54,6 +54,8 @@ def _loggable(name: Any, args: Any) -> Dict[str, Any]:
     for key, value in args.items():
         if name == "alert_family" and key == "note":
             out[key] = "<omitted>"  # the note may repeat her words
+        elif name in ("say_own", "ask_followup") and key == "text":
+            out[key] = value[:200] if isinstance(value, str) else "<omitted>"  # the agent's own words, not hers
         elif name == "record_answer" and key == "value":
             medicine = args.get("question_id") == "q_medicine" and value in ("yes", "no", "unclear")
             out[key] = value if medicine else "<omitted>"

@@ -180,7 +180,8 @@ def test_an_interruption_is_reported_as_plain_facts_and_recovery_is_offered():
         assert set(r) == FACT_KEYS and r["outcome"] == "interrupted" and r["quality"] == "unusable"
         assert r["interruption"] == {"code": "camera_unavailable", "recoverable": True}
         assert r["resources"]["camera"] == "unavailable"
-        assert r["needs_another_reading"] is True and r["skip"] is False and r["attempts_left"] == 2
+        assert r["needs_another_reading"] is True and r["skip"] is False and r["attempts_left"] == 1  # v11: one repeat
+        assert r["retry_hint"] == "camera_lost" and r["retry_hint_text"] == "the picture was lost"
         h = rig.handlers
         assert "recover_resource" in h.allowed_now()
         refused = await h.execute("run_task", {"task": "arms"})

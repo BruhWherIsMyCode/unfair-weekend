@@ -110,7 +110,8 @@ def test_samples_follow_reading_messages_and_end_on_capture_ended():
         adapter, client, clock = rig()
         await adapter.start_capture("A1", "smile", {"duration_ms": 5000})
         start = await client.recv()
-        assert start["type"] == "start_capture" and "phases" not in start and start["cues"] == []
+        assert start["type"] == "start_capture" and "phases" not in start and start["cues"] == [
+            {"at_ms": 1500, "line_id": "smile_now"}]  # v11: the smile cue
         got = []
 
         async def collect():

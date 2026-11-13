@@ -26,7 +26,8 @@ ARMS_BASELINE = {"snapshot_id": "baseline_a", "ready": True, "sessions": 12, "ne
 ANSWERS = {"q_medicine": "Yes, after breakfast.", "q_feeling": "I feel fine, thank you.",
            "q_unusual": "Nothing unusual."}
 FACT_KEYS = {"task", "outcome", "quality", "reasons", "interruption", "attempts_left", "needs_another_reading",
-             "skip", "resources", "reading", "baseline_ready"}  # v7: the numbers are part of the facts
+             "skip", "resources", "reading", "baseline_ready",
+             "retry_hint", "retry_hint_text"}  # v7: the numbers are part of the facts; v11: why a repeat is needed
 
 
 def identity_decode(sample: Dict[str, Any]) -> Any:

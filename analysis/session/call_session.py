@@ -290,7 +290,7 @@ class CallSession:
     async def _send_progress(self, attempt: Attempt, obs: TaskObservation) -> None:
         hint = None
         if obs.signal == "framing_unusable":
-            hint = {"smile": "look_at_camera", "arms": "show_both_arms"}.get(attempt.task)
+            hint = {"smile": "look_at_camera", "arms": "show_your_hand"}.get(attempt.task)
         event = {"event_id": "progress_%s_%d" % (attempt.attempt_id, obs.sequence), "call_id": self.call_id,
                  "attempt_id": attempt.attempt_id, "type": "task.progress", "elapsed_ms": obs.elapsed_ms,
                  "phase": obs.phase, "input_quality": obs.quality.status, "hint": hint}

@@ -41,7 +41,14 @@ def test_the_published_copy_equals_the_draft():
     different now: contract/script.en.json (the one-hand phone script, published 0.3; the backend's own copy is pinned
     to it by a backend test) and mvp.openapi.yaml (the proposals copy was relabelled 'Historical 0.2' by Agent 2)."""
     draft = Path(__file__).resolve().parents[2] / "backend" / "proposals"
-    assert (CONTRACT / "fixtures.json").read_bytes() == (draft / "fixtures.json").read_bytes()
+    # v11: one fixture is intentionally newer (the smile window is 6 s now); every other fixture is the draft's.
+    published = json.loads((CONTRACT / "fixtures.json").read_text("utf-8"))
+    older = json.loads((draft / "fixtures.json").read_text("utf-8"))
+    assert [f["name"] for f in published] == [f["name"] for f in older]
+    changed = [p["name"] for p, o in zip(published, older) if p != o]
+    assert changed == ["capture_smile"]
+    smile = next(f for f in published if f["name"] == "capture_smile")
+    assert smile["data"]["settings"]["duration_ms"] == 6000
 
 
 def test_the_published_script_is_the_one_hand_phone_script():

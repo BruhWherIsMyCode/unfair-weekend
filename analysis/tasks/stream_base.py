@@ -19,7 +19,7 @@ NOT_IMPLEMENTED = "not_implemented_in_v5"
 
 # Capture settings equal to x-task-definitions in contract/mvp.openapi.yaml.
 CAPTURE_SETTINGS: Dict[str, Dict[str, Any]] = {
-    "smile": {"media_kind": "video", "duration_ms": 5000, "prepare_ms": 0, "stop_on_silence_ms": None,
+    "smile": {"media_kind": "video", "duration_ms": 6000, "prepare_ms": 0, "stop_on_silence_ms": None,
               "format": "jpeg", "sample_period_ms": 200},
     "arms": {"media_kind": "video", "duration_ms": 15000, "prepare_ms": 2000, "stop_on_silence_ms": None,
              "format": "jpeg", "sample_period_ms": 200},

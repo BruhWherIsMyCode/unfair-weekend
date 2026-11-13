@@ -69,11 +69,14 @@ def next_step(state: Dict[str, Any]) -> Step:
         s = state["questions"][q]
         if s["recorded"]:
             continue
+        # A follow-up asked by Claude (v11) may have heard what the question itself did not: use it, do not re-ask.
+        followup = s.get("followup_transcript") or ""
+        heard = s["heard"] or bool(followup)
         ask = ("ask", {"question_id": q})
-        if (s["asks"] == 0 or (s["asks"] == 1 and not s["heard"])) and free(*ask):
+        if (s["asks"] == 0 or (s["asks"] == 1 and not heard)) and free(*ask):
             return ask
-        record = ("record_answer", {"question_id": q,
-                                    "value": answer_value(q, s["transcript"] if s["heard"] else "")})
+        text = s["transcript"] if s["heard"] else followup
+        record = ("record_answer", {"question_id": q, "value": answer_value(q, text)})
         if s["asks"] > 0 and free(*record):
             return record
 
