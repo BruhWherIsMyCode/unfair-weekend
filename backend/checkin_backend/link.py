@@ -98,6 +98,11 @@ def fingerprint(*parts: object) -> str:
     return digest.hexdigest()
 
 
+# Which task's frames show a confirmed sign. "arm" also covers the one-hand arm tasks.
+CLIP_TASKS = {"face": "smile", "arm": "arm"}
+MAX_CLIP_FRAMES_PER_ATTEMPT = 100
+
+
 class ClientLink:
     def __init__(
         self,
@@ -128,6 +133,8 @@ class ClientLink:
         self._captures: dict[str, Capture] = {}
         self._events: dict[str, str] = {}
         self._pending_resource_events: list[dict[str, Any]] = []
+        # Camera frames per attempt, in memory only, for the family's alert clip (delivery.ClipShelf).
+        self._frames: dict[str, tuple[str, list[tuple[int, bytes]]]] = {}
 
     # ---- helpers -------------------------------------------------------------------------------
 
@@ -304,10 +311,29 @@ class ClientLink:
 
     async def publish(self, summary: dict[str, Any], phase: str, message_id: str | None = None) -> dict[str, Any]:
         kind = summary.get("status", "incomplete")
+        clip = self.alert_frames(summary.get("signs")) if kind == "change_noticed" else None
         message = self.delivery.publish(
-            self.call_id, self.person, kind, phase, summary.get("signs"), summary.get("concern"), summary=summary
+            self.call_id, self.person, kind, phase, summary.get("signs"), summary.get("concern"), summary=summary,
+            clip=clip,
         )
         return {"message_id": message.message_id, "delivery": "stored"}
+
+    def alert_frames(self, signs: list[dict[str, Any]] | None) -> list[list[tuple[int, bytes]]] | None:
+        """The camera frames of every attempt at the task behind the first confirmed face or arm sign, oldest first:
+        both tries, as the family message says. None for speech or when no frames were kept."""
+        for sign in signs or []:
+            if sign.get("confirmed") is not True:
+                continue
+            prefix = CLIP_TASKS.get(sign.get("sign"))
+            if prefix is None:
+                continue
+            attempts = [frames for task, frames in self._frames.values() if task.startswith(prefix) and frames]
+            if attempts:
+                return attempts
+        return None
+
+    def release_frames(self) -> None:
+        self._frames.clear()
 
     async def send_progress(self, event: dict[str, Any]) -> None:
         if self.ended:
@@ -439,6 +465,10 @@ class ClientLink:
         capture.prints[sequence] = print_
         capture.last_sequence = sequence
         capture.total_bytes += len(data)
+        if media_format == "jpeg":
+            task, frames = self._frames.setdefault(attempt_id, (capture.task, []))
+            if len(frames) < MAX_CLIP_FRAMES_PER_ATTEMPT:
+                frames.append((captured_ms, data))
 
     def on_finish(self, attempt_id: str, last_sequence: int, captured_until_ms: int) -> None:
         capture = self._captures.get(attempt_id)

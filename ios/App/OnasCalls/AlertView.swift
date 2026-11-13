@@ -21,7 +21,14 @@ struct AlertView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     who
-                    ClipPlayerView(height: clipHeight).padding(.horizontal, 20)
+                    Group {
+                        if store.liveMessage != nil {
+                            FrameClipView(clip: store.clip, height: clipHeight)
+                        } else {
+                            ClipPlayerView(height: clipHeight)
+                        }
+                    }
+                    .padding(.horizontal, 20)
                     VStack(alignment: .leading, spacing: 8) {
                         NotUsualLabel()
                         Text("Call Fedya now")
@@ -67,7 +74,8 @@ struct AlertView: View {
             Avatar(size: 48, label: "Fedya", photo: LocalAssets.fedyaPhoto)
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: "Fedya").font(.system(size: 22, weight: .bold)).tracking(-0.5)
-                Text("Check-in at \(Clock.time(store.alertTime)), 1 min 40 s")
+                Text(store.liveMessage == nil ? "Check-in at \(Clock.time(store.alertTime)), 1 min 40 s"
+                                              : "Check-in at \(Clock.time(store.alertTime))")
                     .font(.system(size: 15))
                     .foregroundStyle(Palette.secondary)
             }
@@ -77,9 +85,14 @@ struct AlertView: View {
 
     private var report: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Fedya seemed different from his usual during today's check-in.")
-            Text("He says he took his medicine and feels a bit tired.")
-                .foregroundStyle(Palette.secondary)
+            if let message = store.liveMessage {
+                // The backend writes the family text; shown as is.
+                Text(verbatim: message.text)
+            } else {
+                Text("Fedya seemed different from his usual during today's check-in.")
+                Text("He says he took his medicine and feels a bit tired.")
+                    .foregroundStyle(Palette.secondary)
+            }
         }
         .font(.system(size: 17))
         .tracking(-0.4)

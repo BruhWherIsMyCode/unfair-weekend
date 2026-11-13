@@ -2,10 +2,16 @@
 
 The backend alone writes the family text. A mid-call change message and the final summary share one message
 ID, so family clients upsert by ID. `stored` means stored and pushed to connected family devices, not read.
+
+A change message may carry `clip_url`: the camera frames of both tries at the task that showed the change, kept
+in memory only (never on disk, never in the database) and dropped after CLIP_TTL_S.
 """
 
+import base64
+import statistics
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from time import monotonic
 from uuid import uuid4
 
 from .hub import DeviceHub
@@ -32,7 +38,7 @@ class Message:
     kind: str
     text: str
     phase: str
-    clip_url: None
+    clip_url: str | None
     created_at: str
     updated_at: str
 
@@ -73,6 +79,61 @@ def render(kind: str, person: Person, signs: list[dict] | None = None, concern: 
     raise ValueError(f"Unknown message kind {kind}")
 
 
+CLIP_TTL_S = 30 * 60
+MAX_CLIP_FRAMES = 160
+DEFAULT_PERIOD_MS = 200
+
+
+@dataclass(frozen=True, slots=True)
+class Clip:
+    clip_id: str
+    call_id: str
+    period_ms: int
+    frames: tuple[bytes, ...]
+    created: float
+
+    def as_json(self) -> dict:
+        return {"clip_id": self.clip_id, "format": "jpeg", "period_ms": self.period_ms,
+                "frames": [base64.b64encode(frame).decode("ascii") for frame in self.frames]}
+
+
+class ClipShelf:
+    """In-memory alert clips. A family client fetches one with the demo key; it expires after CLIP_TTL_S."""
+
+    def __init__(self, ttl_s: float = CLIP_TTL_S, clock=monotonic) -> None:
+        self._ttl_s = ttl_s
+        self._clock = clock
+        self._clips: dict[str, Clip] = {}
+
+    def put(self, call_id: str, attempts: list[list[tuple[int, bytes]]]) -> Clip | None:
+        self._expire()
+        frames: list[bytes] = []
+        gaps: list[int] = []
+        for attempt in attempts:
+            ordered = sorted(attempt, key=lambda item: item[0])
+            frames.extend(data for _, data in ordered)
+            gaps.extend(b[0] - a[0] for a, b in zip(ordered, ordered[1:]) if b[0] > a[0])
+        if not frames:
+            return None
+        if len(frames) > MAX_CLIP_FRAMES:
+            step = len(frames) / MAX_CLIP_FRAMES
+            frames = [frames[int(i * step)] for i in range(MAX_CLIP_FRAMES)]
+            gaps = [int(g * step) for g in gaps]
+        period = int(statistics.median(gaps)) if gaps else DEFAULT_PERIOD_MS
+        clip = Clip(f"clip_{uuid4().hex[:16]}", call_id, max(40, min(period, 1000)), tuple(frames), self._clock())
+        self._clips[clip.clip_id] = clip
+        return clip
+
+    def get(self, clip_id: str) -> Clip | None:
+        self._expire()
+        return self._clips.get(clip_id)
+
+    def _expire(self) -> None:
+        now = self._clock()
+        for clip_id in [c.clip_id for c in self._clips.values() if now - c.created > self._ttl_s]:
+            del self._clips[clip_id]
+
+
 def now_iso() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -84,6 +145,7 @@ class FamilyDelivery:
         self._messages: dict[str, Message] = {}
         self._by_call: dict[str, str] = {}
         self._sent: dict[tuple[str, str], int] = {}
+        self.clips = ClipShelf()
 
     def publish(
         self,
@@ -94,6 +156,7 @@ class FamilyDelivery:
         signs: list[dict] | None = None,
         concern: dict | None = None,
         summary: dict | None = None,
+        clip: list[list[tuple[int, bytes]]] | None = None,
     ) -> Message:
         if kind not in KINDS:
             raise ValueError(f"Unknown message kind {kind}")
@@ -110,6 +173,11 @@ class FamilyDelivery:
             text = previous.text
         else:
             text = render(kind, person, signs, concern)
+        # Keep the first clip: the final summary of a change call carries the same evidence as the mid-call one.
+        clip_url = previous.clip_url if previous is not None else None
+        if clip_url is None and kind == "change_noticed" and clip:
+            shelved = self.clips.put(call_id, clip)
+            clip_url = f"/v1/clips/{shelved.clip_id}" if shelved else None
         stamp = now_iso()
         message = Message(
             message_id=message_id or f"msg_{uuid4().hex[:16]}",
@@ -118,7 +186,7 @@ class FamilyDelivery:
             kind=kind,
             text=text,
             phase=phase,
-            clip_url=None,
+            clip_url=clip_url,
             created_at=previous.created_at if previous else stamp,
             updated_at=stamp,
         )

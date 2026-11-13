@@ -4,7 +4,8 @@ import SwiftUI
 import UIKit
 import UserNotifications
 
-/// The whole scene state. Local and hard-coded on purpose: this is a stage shell, not the product.
+/// The whole scene state. With backend settings (demo panel) a real alert from the check-in call drives it:
+/// `liveMessage` holds the backend's text and `clip` her frames. Without them it is the local stage shell.
 @MainActor
 @Observable
 final class DemoStore {
@@ -31,7 +32,15 @@ final class DemoStore {
     static let delayPresets = [10, 30, 60, 120]
     static let fakeScreenSeconds: Double = 4
 
+    /// The backend's alert for the current scene; nil for a staged (demo panel) alert.
+    private(set) var liveMessage: FamilyMessage?
+    /// Her frames for `liveMessage`, once downloaded.
+    private(set) var clip: AlertClip?
+    let feed = FamilyFeed()
+
     @ObservationIgnored private let defaults = UserDefaults.standard
+    @ObservationIgnored private let keepAlive = KeepAlive()
+    @ObservationIgnored private var seenMessages: Set<String> = []
     @ObservationIgnored private let callMonitor = CallMonitor()
     @ObservationIgnored private var sawRealCall = false
     @ObservationIgnored private var fakeTimer: Task<Void, Never>?
@@ -40,6 +49,7 @@ final class DemoStore {
         static let phone = "demo.phone", delay = "demo.delay", fakeCall = "demo.fakeCallScreen"
         static let phase = "scene.phase", alertTime = "scene.alertTime"
         static let calledAt = "scene.calledAt", declinedAt = "scene.declinedAt", armedFor = "scene.armedFor"
+        static let liveMessage = "scene.liveMessage", seen = "scene.seenMessages"
     }
     static let notificationId = "onas.fedya.alert"
 
@@ -54,7 +64,65 @@ final class DemoStore {
         armedFor = defaults.object(forKey: Key.armedFor) as? Date
         // A real call cannot survive a relaunch; never come back stuck in "calling".
         if phase == .calling { phase = .alert }
+        liveMessage = defaults.data(forKey: Key.liveMessage).flatMap { try? JSONDecoder().decode(FamilyMessage.self, from: $0) }
+        seenMessages = Set(defaults.stringArray(forKey: Key.seen) ?? [])
         callMonitor.onChange = { [weak self] in self?.callsChanged() }
+        feed.onMessage = { [weak self] message in self?.receive(message) }
+    }
+
+    // MARK: Backend
+
+    /// Launch: listen for the backend's messages and stay alive in the background to hear them.
+    func connect() {
+        feed.start()
+        if feed.isConfigured {
+            keepAlive.start()
+        }
+        loadClipIfNeeded()
+    }
+
+    /// A family message from the check-in call. An alert (a change from her usual, or a concern) rings with a
+    /// notification and opens the alert state with the backend's text; a later update of the same message (the
+    /// final summary) only refreshes it. "Could not finish" and "no answer" are a plain notification.
+    func receive(_ message: FamilyMessage) {
+        let isNew = !seenMessages.contains(message.messageId)
+        if isNew {
+            seenMessages.insert(message.messageId)
+            defaults.set(Array(seenMessages.suffix(200)), forKey: Key.seen)
+        }
+        if message.isAlert {
+            if isNew {
+                resetScene()
+                enterAlert(at: Date())
+                notify(title: String(localized: "Call Fedya now."), body: message.text, loud: true)
+            }
+            if isNew || liveMessage?.messageId == message.messageId {
+                liveMessage = message
+                save()
+                loadClipIfNeeded()
+            }
+        } else if message.asksToCall, isNew {
+            notify(title: String(localized: "Daily check-in"), body: message.text, loud: false)
+        }
+    }
+
+    private func loadClipIfNeeded() {
+        guard let path = liveMessage?.clipUrl, clip?.url != path else { return }
+        Task { [weak self] in
+            guard let self, let loaded = await self.feed.fetchClip(path), self.liveMessage?.clipUrl == path else { return }
+            self.clip = loaded
+        }
+    }
+
+    private func notify(title: String, body: String, loud: Bool) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = loud ? UNNotificationSound(named: UNNotificationSoundName("alert.caf")) : .default
+        content.interruptionLevel = loud ? .timeSensitive : .active
+        let request = UNNotificationRequest(identifier: loud ? Self.notificationId : UUID().uuidString,
+                                            content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
     }
 
     // MARK: Derived text
@@ -110,6 +178,8 @@ final class DemoStore {
         phase = .asUsual
         screen = .home
         overlay = .none
+        liveMessage = nil
+        clip = nil
         calledAt = nil
         declinedAt = nil
         armedFor = nil
@@ -135,6 +205,8 @@ final class DemoStore {
 
     func heIsFine() {
         fakeTimer?.cancel()
+        liveMessage = nil
+        clip = nil
         phase = .asUsual
         screen = .home
         overlay = .none
@@ -256,6 +328,7 @@ final class DemoStore {
         defaults.set(calledAt, forKey: Key.calledAt)
         defaults.set(declinedAt, forKey: Key.declinedAt)
         defaults.set(armedFor, forKey: Key.armedFor)
+        defaults.set(liveMessage.flatMap { try? JSONEncoder().encode($0) }, forKey: Key.liveMessage)
     }
 }
 
