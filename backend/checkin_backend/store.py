@@ -17,7 +17,7 @@ Known limits, deliberately small for the demo:
 - Wire IDs (commands, client events) are only unique per call, so stored IDs are "<call_id>.<wire_id>".
 - Startup recovery only closes calls and commands left open by a previous process ('shutdown' /
   'cancelled'). It does not write summaries or retry deliveries.
-- No raw media, audio or transcripts are stored.
+- MP4 task recordings, when enabled, live outside SQLite. This store keeps their metadata only.
 """
 
 import asyncio
@@ -88,6 +88,9 @@ class Store:
                 log.info("store: applied %s", ", ".join(applied))
             self._transaction(db, "recover", lambda c: self._close_open_work(c, now_ms()))
             self._transaction(db, "seed people", lambda c: self._seed(c, people, now_ms()))
+            self._transaction(db, "recover clip encoding", lambda c: c.execute(
+                "UPDATE attempt_clips SET state = 'failed', error_code = 'process_stopped' WHERE state = 'queued'"
+            ))
         self._thread = threading.Thread(target=self._run, name="checkin-store", daemon=True)
         self._thread.start()
 
@@ -348,6 +351,60 @@ class Store:
                 self._delivered(db, notification_id, stamp)
 
         self._submit("family message", job, call_id=call_id)
+
+    # ---- optional MP4 task recordings -------------------------------------------------------------------
+
+    def record_clip_queued(self, *, clip_id: str, call_id: str, attempt_id: str, task: str, session_label: str,
+                           capture_status: str, duration_ms: int, frame_count: int, recorded_at_ms: int,
+                           created_at_ms: int, expires_at_ms: int) -> None:
+        def job(db: Any) -> None:
+            db.execute(
+                "INSERT INTO attempt_clips (clip_id, call_id, attempt_id, command_id, task, session_label, "
+                "capture_status, state, file_name, duration_ms, frame_count, recorded_at_ms, created_at_ms, "
+                "expires_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)",
+                (clip_id, call_id, attempt_id, stored_id(call_id, attempt_id), task, session_label,
+                 capture_status, clip_id + ".mp4", duration_ms, frame_count, recorded_at_ms,
+                 created_at_ms, expires_at_ms),
+            )
+        self._submit("queue attempt clip", job, call_id=call_id)
+
+    def record_clip_ready(self, clip_id: str, byte_count: int) -> None:
+        stamp = now_ms()
+        self._submit("clip ready", lambda db: db.execute(
+            "UPDATE attempt_clips SET state = 'ready', byte_count = ?, encoded_at_ms = max(?, created_at_ms) "
+            "WHERE clip_id = ? AND state = 'queued'", (byte_count, stamp, clip_id),
+        ))
+
+    def record_clip_failed(self, clip_id: str, code: str) -> None:
+        self._submit("clip failed", lambda db: db.execute(
+            "UPDATE attempt_clips SET state = 'failed', error_code = ? WHERE clip_id = ? AND state = 'queued'",
+            (code, clip_id),
+        ))
+
+    def record_clip_expired(self, clip_id: str) -> None:
+        self._submit("clip expired", lambda db: db.execute(
+            "UPDATE attempt_clips SET state = 'expired' WHERE clip_id = ?", (clip_id,),
+        ))
+
+    async def call_clips(self, call_id: str) -> list[dict[str, Any]]:
+        await self.flush()
+        return await asyncio.to_thread(self._read, lambda db, key: [dict(row) for row in db.execute(
+            "SELECT * FROM attempt_clips WHERE call_id = ? ORDER BY recorded_at_ms, created_at_ms, rowid", (key,)
+        )], call_id)
+
+    async def clip_record(self, clip_id: str) -> dict[str, Any] | None:
+        await self.flush()
+        def read(db: Any, key: str) -> dict[str, Any] | None:
+            row = db.execute("SELECT * FROM attempt_clips WHERE clip_id = ?", (key,)).fetchone()
+            return dict(row) if row is not None else None
+        return await asyncio.to_thread(self._read, read, clip_id)
+
+    async def clips_for_cleanup(self, stamp: int) -> list[dict[str, Any]]:
+        await self.flush()
+        return await asyncio.to_thread(self._read, lambda db, key: [dict(row) for row in db.execute(
+            "SELECT clip_id, expires_at_ms FROM attempt_clips "
+            "WHERE (expires_at_ms <= ? AND state = 'ready') OR state = 'failed'", (key,)
+        )], stamp)
 
     # ---- reads (run in a worker thread; never on the event loop) ----------------------------------------------
 

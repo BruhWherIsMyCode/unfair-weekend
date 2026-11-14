@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .calls import Call, CallConflict, CallNotFound, CallService, CallState, EndReason
 from .avatar import ClipGateway
+from .attempt_clips import AttemptClips, clip_metadata
 from .config import Settings
 from .debug_probe import DebugDesk, DebugUnavailable
 from .delivery import FamilyDelivery
@@ -27,7 +28,7 @@ from .provider_io import ProviderError
 from .runner import choose_driver, run_answered_call
 from .request_logging import RequestLoggingMiddleware
 from .speech import SpeechGateway
-from .store import NoStore, Store
+from .store import NoStore, Store, now_ms
 
 IdStr = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,128}$")]
 KEEPALIVE_S = 15.0
@@ -138,9 +139,10 @@ class CallDesk:
 
     def __init__(self, settings: Settings, calls: CallService, hub: DeviceHub, people: Directory,
                  speech: SpeechGateway, delivery: FamilyDelivery, clips: ClipGateway,
-                 store: Store | None = None) -> None:
+                 store: Store | None = None, attempt_clips: AttemptClips | None = None) -> None:
         self.settings = settings
         self.store = store if store is not None else NoStore()
+        self.attempt_clips = attempt_clips
         self.calls = calls
         self.hub = hub
         self.people = people
@@ -192,7 +194,8 @@ class CallDesk:
         if call_id not in self.links:
             self.store.record_call_answered(call_id, self.settings.call_timeout_s)
             link = ClientLink(call_id=call_id, person=person, hub=self.hub, speech=self.speech,
-                              delivery=self.delivery, clips=self.clips, store=self.store)
+                              delivery=self.delivery, clips=self.clips, store=self.store,
+                              attempt_clips=self.attempt_clips)
             self.links[call_id] = link
             self._spawn(self._run(link), call_id)
         return {"call_id": call_id, "person_name": person.name, "voiced": self.speech.voiced,
@@ -221,7 +224,7 @@ class CallDesk:
             if link.session is not None and not link.ended:
                 link.session.hang_up()
             link.close()
-            # The alert clip, if any, was copied to the delivery shelf; nothing else keeps her frames.
+            # Alert frames remain in the short-lived shelf; optional MP4 jobs own their bounded copies.
             link.release_frames()
         if ended.state == CallState.NO_ANSWER and person is not None:
             self.delivery.publish(call.call_id, person, "no_answer", "final")
@@ -263,8 +266,16 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
         directory = people if people is not None else Directory.from_environment()
         store = Store(settings.database_path) if settings.database_path else NoStore()
         await asyncio.to_thread(store.open, directory.all())
+        recordings = None
+        if settings.clip_storage_dir:
+            recordings = AttemptClips(settings.clip_storage_dir, store, settings.clip_retention_days)
+            try:
+                await recordings.open()
+            except BaseException:
+                await asyncio.to_thread(store.close)
+                raise
         delivery = FamilyDelivery(hub, store)
-        desk = CallDesk(settings, calls, hub, directory, gateway, delivery, avatar, store)
+        desk = CallDesk(settings, calls, hub, directory, gateway, delivery, avatar, store, recordings)
         app.state.calls = calls
         app.state.hub = hub
         app.state.desk = desk
@@ -282,6 +293,8 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
             hub.close()
             await desk.aclose()
             await calls.aclose()
+            if recordings is not None:
+                await recordings.aclose()
             await asyncio.to_thread(store.close)
             if speech is None:
                 await gateway.aclose()
@@ -506,6 +519,44 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
         if clip is None:
             raise ApiError(404, "not_found", "This clip does not exist or has expired.")
         return JSONResponse(clip.as_json(), headers={"Cache-Control": "no-store"})
+
+    @app.get("/v1/calls/{call_id}/clips", dependencies=auth)
+    async def call_clips(call_id: str, request: Request) -> JSONResponse:
+        desk = desk_of(request)
+        try:
+            desk.calls.get(call_id)
+        except CallNotFound:
+            if await desk.store.call_record(call_id) is None:
+                raise
+        rows = await desk.store.call_clips(call_id) if desk.store.enabled else []
+        return JSONResponse({"call_id": call_id, "clips": [clip_metadata(row) for row in rows]},
+                            headers={"Cache-Control": "no-store"})
+
+    @app.get("/v1/clips/{clip_id}/video", dependencies=auth)
+    async def attempt_video(clip_id: str, request: Request) -> Response:
+        desk = desk_of(request)
+        archive = desk.attempt_clips
+        row = await desk.store.clip_record(clip_id) if archive is not None else None
+        if row is None:
+            raise ApiError(404, "not_found", "This video does not exist or recording is disabled.")
+        if row["expires_at_ms"] <= now_ms() or row["state"] == "expired":
+            raise ApiError(410, "expired", "This video has expired.")
+        if row["state"] == "queued":
+            return JSONResponse({"code": "clip_pending", "message": "This video is being prepared."},
+                                status_code=202, headers={"Retry-After": "1", "Cache-Control": "no-store"})
+        if row["state"] != "ready":
+            raise ApiError(409, "clip_unavailable", "This video could not be prepared.")
+        try:
+            path = archive.path(clip_id)
+            exists = await asyncio.to_thread(path.is_file)
+        except ValueError:
+            exists = False
+        if not exists:
+            raise ApiError(404, "not_found", "This video is no longer on the server.")
+        return FileResponse(path, media_type="video/mp4", headers={
+            "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+            "Content-Disposition": f'inline; filename="{clip_id}.mp4"',
+        })
 
     class DebugRunIn(BaseModel):
         model_config = ConfigDict(extra="forbid")
