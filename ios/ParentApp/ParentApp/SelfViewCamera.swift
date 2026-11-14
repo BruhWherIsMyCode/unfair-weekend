@@ -21,6 +21,12 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
     private let context = CIContext()
     private let lock = NSLock()
     private var latest: Data?
+    /// When `latest` was encoded. A frame older than `maxFrameAge` is not handed out: when the camera stops (for
+    /// example the app went to the background), the analysis must see no frames, not the last one again and again.
+    private var latestAt: CFTimeInterval = 0
+    private let maxFrameAge: CFTimeInterval = 1.0
+    /// Frames delivered by the camera since the last start, for the diagnostic lines.
+    private var delivered = 0
     private var capturing = false
     private var previewWanted = false
     private var configured = false
@@ -28,6 +34,8 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
     private var input: AVCaptureDeviceInput?
     private var output: AVCaptureVideoDataOutput?
     private var previewConnection: AVCaptureConnection?
+    /// Diagnostics: describes the self-view's connection and whether its layer is drawing.
+    private var previewProbe: (() -> String)?
     private var lastEncode: CFTimeInterval = 0
     private var onAvailability: (@Sendable (Bool, ResourceProblem?) -> Void)?
 
@@ -57,12 +65,14 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
 
     func startPreview() {
         lock.withLock { previewWanted = true }
+        Diag.log("camera startPreview (app \(Diag.appState))")
         sessionQueue.async {
             do {
                 try self.configure()
                 if !self.session.isRunning {
                     self.session.startRunning()
                 }
+                Diag.log("camera session running=\(self.session.isRunning) interrupted=\(self.session.isInterrupted)")
             } catch {
                 self.report(false, .deviceMissing)
             }
@@ -70,6 +80,7 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
     }
 
     func stopPreview() {
+        Diag.log("camera stopPreview")
         lock.withLock {
             previewWanted = false
             capturing = false
@@ -79,6 +90,7 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
             if self.session.isRunning {
                 self.session.stopRunning()
             }
+            Diag.log("camera session stopped")
         }
     }
 
@@ -95,7 +107,10 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
                         self.latest = nil
                         self.capturing = true
                         self.stats = FrameStats()
+                        self.delivered = 0
                     }
+                    Diag.log("camera capture start running=\(self.session.isRunning) "
+                             + "interrupted=\(self.session.isInterrupted) (app \(Diag.appState))")
                     if !self.session.isRunning {
                         self.session.startRunning()
                     }
@@ -108,7 +123,7 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
     }
 
     func jpegFrame() async throws -> Data? {
-        lock.withLock { latest }
+        lock.withLock { CACurrentMediaTime() - latestAt <= maxFrameAge ? latest : nil }
     }
 
     func stop() async {
@@ -156,16 +171,30 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
             if self.session.canAddConnection(connection) {
                 self.session.addConnection(connection)
                 self.previewConnection = connection
+                Diag.log("preview attached (running=\(self.session.isRunning))")
+            } else {
+                Diag.log("preview connection REFUSED by the session")
             }
+            let probe: () -> String = { [weak layer, weak connection] in
+                guard let layer, let connection else { return "preview gone" }
+                return "preview enabled=\(connection.isEnabled) active=\(connection.isActive) "
+                    + "previewing=\(layer.isPreviewing)"
+            }
+            self.lock.withLock { self.previewProbe = probe }
             self.uprightFrames()
         }
     }
 
     func detachPreview(_ layer: AVCaptureVideoPreviewLayer) {
         sessionQueue.async {
-            guard let connection = self.previewConnection, connection.videoPreviewLayer === layer else { return }
+            guard let connection = self.previewConnection, connection.videoPreviewLayer === layer else {
+                Diag.log("preview detach skipped (another layer is attached)")
+                return
+            }
             self.session.removeConnection(connection)
             self.previewConnection = nil
+            self.lock.withLock { self.previewProbe = nil }
+            Diag.log("preview detached")
         }
     }
 
@@ -236,6 +265,12 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
         let now = CACurrentMediaTime()
+        let count = lock.withLock { () -> Int in delivered += 1; return delivered }
+        if count == 1 || count % 100 == 0 {
+            let raw = CMSampleBufferGetImageBuffer(sampleBuffer).map(Diag.brightness) ?? -1
+            let preview = lock.withLock { previewProbe }
+            Diag.log("camera frames delivered: \(count) raw brightness \(raw) \(preview?() ?? "no preview")")
+        }
         let wanted = lock.withLock { capturing && now - lastEncode >= minEncodeInterval }
         guard wanted, let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         var image = CIImage(cvPixelBuffer: pixels)
@@ -262,10 +297,20 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
               let jpeg = context.jpegRepresentation(
                 of: image, colorSpace: space,
                 options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.7])
-        else { return }
+        else {
+            Diag.log("camera JPEG encoding FAILED")
+            return
+        }
+        if let check = UIImage(data: jpeg)?.cgImage, let decoded = check.dataProvider?.data as Data?,
+           lock.withLock({ delivered % 50 == 1 }) {
+            let step = max(4, decoded.count / 256 / 4 * 4)
+            let samples = stride(from: 1, to: decoded.count, by: step).map { Int(decoded[$0]) }
+            Diag.log("camera jpeg \(check.width)x\(check.height) brightness \(samples.reduce(0, +) / max(1, samples.count))")
+        }
         lock.withLock {
             if capturing {
                 latest = jpeg
+                latestAt = now
                 lastEncode = now
             }
         }
@@ -279,14 +324,19 @@ final class SelfViewCamera: NSObject, CameraSource, AVCaptureVideoDataOutputSamp
     }
 
     @objc private func interrupted(_ note: Notification) {
+        let raw = note.userInfo?[AVCaptureSessionInterruptionReasonKey] as? Int
+        let reason = raw.flatMap(AVCaptureSession.InterruptionReason.init(rawValue:))
+        Diag.log("camera INTERRUPTED reason=\(reason.map(Diag.describe) ?? "nil") (app \(Diag.appState))")
         report(false, .trackEnded)
     }
 
     @objc private func resumed(_ note: Notification) {
+        Diag.log("camera interruption ended")
         report(true, nil)
     }
 
     @objc private func failed(_ note: Notification) {
+        Diag.log("camera RUNTIME ERROR \(String(describing: note.userInfo?[AVCaptureSessionErrorKey]))")
         report(false, .unknown)
     }
 }
@@ -320,6 +370,57 @@ struct CameraPreview: UIViewRepresentable {
         var previewLayer: AVCaptureVideoPreviewLayer {
             // swiftlint:disable:next force_cast
             layer as! AVCaptureVideoPreviewLayer
+        }
+    }
+}
+
+/// Temporary diagnostic lines (prefix "[diag]") for the camera and audio during a call. Read them with
+/// `xcrun devicectl device process launch --console ... -- com.unfairweekend.parentcall`.
+enum Diag {
+    static func log(_ text: String) {
+        print("[diag] \(Date().formatted(.dateTime.hour().minute().second())) \(text)")
+        NSLog("[diag] %@", text)  // also into the iPhone's system log (idevicesyslog), without a console attached
+    }
+
+    @MainActor static var appStateNow: String {
+        switch UIApplication.shared.applicationState {
+        case .active: return "active"
+        case .inactive: return "inactive"
+        case .background: return "background"
+        @unknown default: return "?"
+        }
+    }
+
+    static var appState: String {
+        Thread.isMainThread ? MainActor.assumeIsolated { appStateNow } : DispatchQueue.main.sync { appStateNow }
+    }
+
+    /// Mean of the green channel over a grid of pixels of a BGRA buffer (0 = black, 255 = white).
+    static func brightness(_ pixels: CVPixelBuffer) -> Int {
+        CVPixelBufferLockBaseAddress(pixels, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixels, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(pixels) else { return -1 }
+        let width = CVPixelBufferGetWidth(pixels), height = CVPixelBufferGetHeight(pixels)
+        let row = CVPixelBufferGetBytesPerRow(pixels)
+        let bytes = base.assumingMemoryBound(to: UInt8.self)
+        var sum = 0, n = 0
+        for y in stride(from: 0, to: height, by: max(1, height / 16)) {
+            for x in stride(from: 0, to: width, by: max(1, width / 16)) {
+                sum += Int(bytes[y * row + x * 4 + 1])
+                n += 1
+            }
+        }
+        return n == 0 ? -1 : sum / n
+    }
+
+    static func describe(_ reason: AVCaptureSession.InterruptionReason) -> String {
+        switch reason {
+        case .videoDeviceNotAvailableInBackground: return "videoDeviceNotAvailableInBackground"
+        case .audioDeviceInUseByAnotherClient: return "audioDeviceInUseByAnotherClient"
+        case .videoDeviceInUseByAnotherClient: return "videoDeviceInUseByAnotherClient"
+        case .videoDeviceNotAvailableWithMultipleForegroundApps: return "videoDeviceNotAvailableWithMultipleForegroundApps"
+        case .videoDeviceNotAvailableDueToSystemPressure: return "videoDeviceNotAvailableDueToSystemPressure"
+        default: return "other(\(reason.rawValue))"
         }
     }
 }

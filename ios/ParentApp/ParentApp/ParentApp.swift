@@ -118,6 +118,7 @@ struct RootView: View {
     /// Coming back to the front: ring on the app's own screen again, unless CallKit still rings.
     private func followScene(_ phase: ScenePhase) {
         let mode = (app.model?.screen ?? CallScreen()).mode
+        Diag.log("scene \(phase) connection=\(app.connection)")
         if phase == .background || phase == .inactive {
             app.keepAwake(reason: "scene-\(phase == .background ? "background" : "inactive")")
         }
@@ -130,6 +131,7 @@ struct RootView: View {
 
     private func follow(_ mode: CallScreen.Mode) {
         defer { syncRing(mode) }
+        Diag.log("call screen \(mode) (app \(Diag.appStateNow))")
         switch mode {
         case .ringing(_, let ringTitle):
             title = ringTitle
@@ -178,6 +180,7 @@ struct RootView: View {
     /// public API.
     private func leaveAfterCall() {
         app.keepAwake(reason: "leave-after-call")
+        Diag.log("leaving to the home screen (suspend)")
         UIApplication.shared.perform(#selector(NSXPCConnection.suspend))
         Task {
             // Reset behind the home-screen animation, so reopening shows the waiting screen.
