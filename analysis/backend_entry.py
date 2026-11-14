@@ -10,6 +10,7 @@ Environment (all optional):
 
     CALL_DRIVER          fixed | claude      the call driver; unset = follow UW_CLAUDE=on (claude) else fixed
     UW_CLAUDE_BACKEND    api | subscription  how Claude is reached (default api); subscription removes ANTHROPIC_API_KEY
+    UW_CLAUDE_FALLBACK   on | off            default on; off requires Claude and propagates failure after finalization
                                              from this process first, as the PC server does
     UW_SAFETY_FLOOR      off                 only "off" turns the safety floor off (experiments); anything else keeps it ON
     UW_MIRRORED          on | off            the phone frames are mirrored (default off)
@@ -45,7 +46,7 @@ from analysis.session import limits
 from analysis.session.adapters import render_family_text
 from analysis.session.call_record import LiveLog, build_record, format_terminal_line, write_record
 from analysis.session.call_session import CallSession
-from analysis.session.run_call import BACKENDS, FLOOR_ENV, SWITCH_ENV, run_call
+from analysis.session.run_call import BACKENDS, FLOOR_ENV, SWITCH_ENV, fallback_from_env, run_call
 
 log = logging.getLogger(__name__)
 
@@ -81,6 +82,9 @@ class Settings:
         if driver and driver not in DRIVERS:
             raise ValueError("CALL_DRIVER must be fixed or claude, got %r" % driver)
         self.mode = driver or ("claude" if get(SWITCH_ENV).lower() == "on" else "fixed")
+        self.allow_fallback = fallback_from_env(env)
+        if not self.allow_fallback and self.mode != "claude":
+            raise ValueError("UW_CLAUDE_FALLBACK=off requires CALL_DRIVER=claude")
 
         self.claude_backend = get("UW_CLAUDE_BACKEND").lower() or "api"
         if self.claude_backend not in BACKENDS:
@@ -225,10 +229,14 @@ async def run_backend_call(link: Any, modules: Optional[Dict[str, Any]] = None, 
         if settings.call_log:
             out(prefix + source_line)
 
+    driver_error = None
     try:
-        summary = await run_call(session, link, settings.mode, backend=settings.claude_backend)
+        summary = await run_call(session, link, settings.mode, backend=settings.claude_backend,
+                                 allow_fallback=settings.allow_fallback)
     except Exception as exc:  # the call is lost, the backend is not
         session.note("call_crashed", error=type(exc).__name__)
+        if not settings.allow_fallback:
+            driver_error = exc
         try:  # v14: a pending concern or change is told once, even when the call is lost (finish is idempotent)
             summary = await session.finish()
         except Exception as exc2:
@@ -255,4 +263,6 @@ async def run_backend_call(link: Any, modules: Optional[Dict[str, Any]] = None, 
         write_record(settings.runs_dir, link.call_id, record, log.error)
     except Exception as exc:
         log.error("call record failed: %s", type(exc).__name__)
+    if driver_error is not None:
+        raise driver_error
     return summary

@@ -8,7 +8,8 @@ from .logging_config import log_event
 
 log = logging.getLogger(__name__)
 FIELDS = {"attempt_id", "command_id", "task", "outcome", "state", "code", "stop_kind", "resource",
-          "mode", "backend", "turn", "tool", "line", "question", "heard", "status", "interruption", "latency_s"}
+          "mode", "backend", "turn", "tool", "line", "question", "heard", "status", "interruption", "latency_s",
+          "allow_fallback"}
 QUIET = {"observation", "task_observation", "sample", "task_progress"}
 
 
@@ -36,6 +37,6 @@ class SessionEventLog(list):
         fields = {key: value for key, value in entry.items() if key in FIELDS}
         if kind == "agent_tool":
             fields["tool"] = entry.get("name")
-        if kind == "agent_fallback":
+        if kind in ("agent_fallback", "agent_failed"):
             fields["reason"] = entry.get("reason")
         log_event(log, level, f"session.{kind}", call_id=self._call_id, error_type=error_type, **fields)

@@ -100,6 +100,7 @@ def format_log_line(entry: Dict[str, Any], session: Any) -> Optional[str]:
         return "%6.1fs %-26s attempt %s | %s" % (entry["t"], "attempt stopping", rest.get("attempt_id"),
                                                   describe_stop(entry, session))
     shown = {"required_tasks": "required tasks", "call_driver": "driver", "agent_tool": "claude tool", "agent_fallback": "FALLBACK to fixed order",
+             "agent_failed": "CLAUDE STOPPED (no fallback)",
              "fallback_step": "fixed step", "agent_refused": "step refused", "change_confirmed": "CHANGE CONFIRMED",
              "published": "family message", "concern_raised": "CONCERN RAISED", "resource_changed": "resource",
              "floor_off_suppressed": "FLOOR OFF - would have published", "task_refused": "task refused",

@@ -66,13 +66,16 @@ def analysis_available() -> bool:
     return True
 
 
-async def run_analysis_call(link: ClientLink, modules: str, database_path: str | None = None) -> dict[str, Any]:
+async def run_analysis_call(link: ClientLink, modules: str, database_path: str | None = None,
+                            *, allow_fallback: bool | None = None) -> dict[str, Any]:
     """Agent 3's session over this link. All call settings are read by analysis.backend_entry (CALL_DRIVER, ...).
     `database_path` (DATABASE_PATH) turns on Agent 3's recording in the shared database; None leaves it off."""
     ensure_analysis_path()
     from analysis.backend_entry import Settings, default_modules, run_backend_call
 
     env = dict(os.environ)
+    if allow_fallback is not None:
+        env["UW_CLAUDE_FALLBACK"] = "on" if allow_fallback else "off"
     if not env.get("UW_BASELINE_NEEDED", "").strip():
         env["UW_BASELINE_NEEDED"] = str(DEFAULT_LEARNING_CALLS)
 
@@ -202,12 +205,17 @@ def _print_block(block: str) -> None:
 
 
 def choose_driver(
-    kind: str, database_path: str | None = None, report: Callable[[str], Any] = _print_block
+    kind: str, database_path: str | None = None, report: Callable[[str], Any] = _print_block,
+    *, allow_fallback: bool = True,
 ) -> Callable[[ClientLink], Awaitable[dict[str, Any]]]:
     """`auto` uses the analysis only when its self-check finds no problem; otherwise it prints the problems in one
-    block at start-up and runs the scripted call. `analysis` with problems refuses to start (never mid-call)."""
+    block at start-up and runs the scripted call. `analysis` with problems refuses to start (never mid-call).
+    Disabling fallback also makes `auto` refuse problems and prevents explicit `scripted` selection."""
     if kind in ("auto", "analysis"):
         problems = measuring_problems()
+        if problems and not allow_fallback:
+            raise RuntimeError(problems_block(problems, "UW_CLAUDE_FALLBACK=off: the scripted call is disabled. "
+                                                        "Fix the analysis setup before starting."))
         if problems and kind == "analysis":
             raise RuntimeError(problems_block(problems, "CALL_RUNNER=analysis cannot start. Fix the above, or use "
                                                         "CALL_RUNNER=scripted."))
@@ -217,10 +225,12 @@ def choose_driver(
         else:
             kind = "analysis"
     if kind == "scripted":
+        if not allow_fallback:
+            raise ValueError("UW_CLAUDE_FALLBACK=off cannot use CALL_RUNNER=scripted")
         return run_scripted_call
     if kind in ("analysis", "fake"):
         modules = "fake" if kind == "fake" else "real"
-        return lambda link: run_analysis_call(link, modules, database_path)
+        return lambda link: run_analysis_call(link, modules, database_path, allow_fallback=allow_fallback)
     raise ValueError("CALL_RUNNER must be auto, analysis, fake or scripted")
 
 
@@ -251,6 +261,9 @@ async def run_answered_call(link: ClientLink, driver: Callable[[ClientLink], Awa
     except Exception as exc:  # a driver crash must still end the call and tell the family
         log_event(log, logging.ERROR, "call.driver_failed", call_id=link.call_id, exc_info=True)
         link.log.append({"kind": "driver_crashed", "error": type(exc).__name__})
+        if getattr(exc, "code", None) == "claude_failed" and link.session is not None and link.session.finished:
+            # Strict Claude mode already closed the session and published its final summary, including any concern.
+            return None
         if not link.ended:
             try:
                 await link.publish({"status": "incomplete", "signs": []}, "final")
