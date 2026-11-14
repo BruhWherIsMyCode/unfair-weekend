@@ -88,12 +88,12 @@ final class SSEConnection: NSObject, URLSessionDataDelegate, @unchecked Sendable
     private var task: URLSessionDataTask?
     private let lock = NSLock()
 
-    init(request: URLRequest) {
+    init(request: URLRequest, configuration: URLSessionConfiguration = .default) {
         var cont: AsyncThrowingStream<SSEMessage, Error>.Continuation!
         messages = AsyncThrowingStream { cont = $0 }
         continuation = cont
         super.init()
-        let configuration = URLSessionConfiguration.default
+        let configuration = configuration.copy() as! URLSessionConfiguration
         configuration.timeoutIntervalForRequest = 3600
         configuration.timeoutIntervalForResource = 3600
         let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)

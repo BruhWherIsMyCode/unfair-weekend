@@ -20,8 +20,14 @@ camera or microphone is lost. The design team builds the screens on top of `Call
   Cancel, hang-up and teardown stop the clip and cancel its download. Without a clip player, lines play as PCM.
 - Live avatar: `devices.live` (`LiveAvatarPlayer`, implemented in the app as `SimliLiveAvatar` over LiveKit). After
   answering, `CallClient` asks `POST /v1/calls/{id}/avatar/live` for a Simli session and connects in the background.
-  Each line then streams its PCM to Simli and completes on Simli's `SPEAK` then `SILENT`. Any live failure drops to
-  clips and PCM for the rest of the call (backend/VOICE_VIDEO.md).
+  Each line streams its PCM to Simli, including Claude's newly generated remarks and clarification questions.
+  Live mode remains the backend default (`AVATAR_MODE=live`); prepared clips are the fallback.
+  A line can fall back immediately only when the live player reports `LivePlaybackFailure.notStarted`, before
+  attempting to send audio. A partial or uncertain live failure ends that command with `playback_failed` and
+  drops live for future commands; it never replays the current line as a clip or reports it completed.
+  Playback acknowledgments are separate from playback: bounded acknowledgment retries send the same event
+  without replaying audio. Native playback diagnostics use the `live-avatar` log category and omit tokens,
+  provider URLs, text and media. The app must be rebuilt to use this policy.
 - `BackgroundKeepAlive`: demo workaround, not for the App Store. A silent audio loop keeps the app running in the
   background so the event stream stays open; the app then rings through CallKit (no VoIP push).
   - The loop is restarted by a 5 s watchdog timer, by interruption-ended (even without "should resume"), route

@@ -14,6 +14,14 @@ public protocol AvatarClipPlayer: Sendable {
     func stop() async
 }
 
+/// Whether a failed live line can be attempted by another player without repeating audio.
+public enum LivePlaybackFailure: Error, Equatable, Sendable {
+    /// No audio was submitted for this line; another player may play it.
+    case notStarted
+    /// Audio may have been heard. Report failure without replaying the same line.
+    case interrupted
+}
+
 /// A Simli live avatar for the whole call: the phone streams each line's PCM to Simli, and Simli sends the talking
 /// avatar back (video and the line's own voice). The app shows its video as the avatar while it is connected.
 public protocol LiveAvatarPlayer: Sendable {
@@ -21,7 +29,8 @@ public protocol LiveAvatarPlayer: Sendable {
     /// cannot connect.
     func connect(_ session: LiveAvatarSession) async throws
     /// Streams one line (signed 16-bit little-endian mono PCM, 16 kHz). Returns when Simli reports the avatar has
-    /// spoken it and gone silent. Throws when the avatar never starts speaking or the session fails.
+    /// spoken it and gone silent. Only LivePlaybackFailure.notStarted permits same-line fallback;
+    /// all other errors mean playback may have begun. Cancellation stops without fallback.
     func speak(pcm16k: Data, durationMs: Int) async throws
     /// Silences the current line and keeps the session.
     func stop() async
