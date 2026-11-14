@@ -147,8 +147,30 @@ async def test_a_whole_call_with_say_own_and_ask_followup_through_the_real_stack
     cursor = -1
     for line in order:  # the lines come in this order (other lines may sit between them)
         cursor = sim.said.index(line, cursor + 1)
-    assert client.requests and "say_own" in [t["name"] for t in client.requests[0]["tools"]]
+    assert client.requests and [t["name"] for t in client.requests[0]["tools"]] == ["advance_call"]
     del data
+
+
+@pytest.mark.anyio
+async def test_compound_claude_turns_finish_the_same_phone_call_in_six_requests(monkeypatch, tmp_path):
+    from analysis.session import run_call as run_call_module
+    from analysis.session.claude_client import FakeClaudeClient
+    from analysis.tests.test_turn_plan import normal_plans
+
+    analysis_calls.install(monkeypatch, tmp_path)
+    monkeypatch.setenv("CALL_DRIVER", "claude")
+    client = FakeClaudeClient(normal_plans())
+    monkeypatch.setattr(run_call_module, "build_client", lambda backend: client)
+    async with Server("analysis") as server:
+        sim = SimClient(base=server.base, key=KEY, time_scale=0.05)
+        status = await run_call(server, sim, timeout=90)
+    assert status["reason"] == "completed" and status["summary"]["status"] == "as_usual"
+    assert len(client.requests) == 6
+    assert status["summary"]["answers"] == {"medicine": "yes", "feeling": "I feel fine.",
+                                             "unusual": "Nothing unusual."}
+    assert [c["text"] for c in sim.said_commands if c["line_id"] == "agent_remark"] == [
+        "Thank you for telling me."] * 3
+    assert all(sim.said.count(line) == 1 for line in ("greet", "q_medicine", "q_feeling", "q_unusual", "bye"))
 
 
 # ---- the runner's choice between the analysis and the scripted call --------------------------------------------------

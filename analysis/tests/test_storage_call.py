@@ -105,6 +105,55 @@ def test_a_whole_call_is_recorded_in_every_owner_3_table(env):
 
 # ---- the Claude driver: turns and tool calls --------------------------------------------------------------------
 
+def test_compound_decisions_keep_one_model_turn_and_attach_each_action_to_it(env):
+    from analysis.tests.test_turn_plan import normal_plans
+
+    path, writer = env
+    rig, recorder = claude_rig_call(path, writer, normal_plans())
+    end_call(path)
+    settle(writer)
+    assert rig.session.finished and recorder.failures == writer.failures == 0
+    turns = rows(path, "SELECT turn_id, model_id, response_json FROM model_turns ORDER BY sequence")
+    assert len(turns) == 6 and {t["model_id"] for t in turns} == {"fake-claude"}
+    tools = rows(path, "SELECT tool_call_id, tool_name, turn_id, state FROM tool_calls ORDER BY created_at_ms, rowid")
+    assert [t["tool_name"] for t in tools] == ["say", "ask", "record_answer", "ask", "record_answer", "ask",
+                                             "record_answer", "run_task", "run_task", "finish_call"]
+    assert all(t["state"] == "completed" and ".step" in t["tool_call_id"] for t in tools)
+    assert tools[0]["turn_id"] == tools[1]["turn_id"] == turns[0]["turn_id"]
+    assert tools[2]["turn_id"] == tools[3]["turn_id"] == turns[1]["turn_id"]
+    assert tools[6]["turn_id"] == tools[7]["turn_id"] == turns[3]["turn_id"]
+    assert count(path, "task_attempts") == 2 and count(path, "answers", "selected = 1") == 3
+    selected = rows(path, "SELECT normalized_value FROM answers WHERE question_id='feeling' AND selected=1")
+    assert selected == [{"normalized_value": "I feel fine."}]
+    recorded_decision = json.loads(turns[2]["response_json"])["content"][0]["input"]
+    assert recorded_decision["answer"]["value"] == "<omitted>"
+    contexts = rows(path, "SELECT request_json FROM model_turns")
+    assert "Yes, after breakfast" not in json.dumps(contexts)
+    assert "I feel fine, thank you" not in json.dumps(contexts)
+
+
+def test_aborted_plan_clears_its_binding_before_fixed_order_takes_over(env):
+    from analysis.tests.test_turn_plan import plan
+
+    path, writer = env
+    script = [plan("ask", {"question_id": "q_medicine"}, greet=True),
+              plan("ask", {"question_id": "q_feeling"},
+                   answer={"question_id": "q_medicine", "value": "yes"}, reaction="Do you feel better?"),
+              RuntimeError("model failed")]
+    rig, recorder = claude_rig_call(path, writer, script)
+    end_call(path)
+    settle(writer)
+    assert rig.session.finished and recorder.failures == writer.failures == 0
+    turns = rows(path, "SELECT model_id, state FROM model_turns ORDER BY sequence")
+    assert [t["model_id"] for t in turns[:3]] == ["fake-claude"] * 3
+    assert turns[2]["state"] == "failed" and all(t["model_id"] == "fixed_order" for t in turns[3:])
+    linked = rows(path, "SELECT t.tool_name, m.model_id FROM tool_calls t JOIN model_turns m USING(turn_id) "
+                        "WHERE t.tool_name='ask' ORDER BY t.created_at_ms, t.rowid")
+    assert linked == [{"tool_name": "ask", "model_id": "fake-claude"},
+                      {"tool_name": "ask", "model_id": "fixed_order"},
+                      {"tool_name": "ask", "model_id": "fixed_order"}]
+
+
 def claude_rig_call(path, writer, script, *, stop_early=None, **rig_kw):
     """A CallRig whose tool loop is run by a scripted fake Claude, recorded in the database."""
     add_call(path)

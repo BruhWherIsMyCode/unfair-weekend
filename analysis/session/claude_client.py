@@ -4,7 +4,7 @@
 dict (content blocks of type "text" / "tool_use", and stop_reason). The `anthropic` package is imported lazily
 inside the class; the API key comes from the environment variable ANTHROPIC_API_KEY only and is never logged,
 never put in an exception message and never stored anywhere else. The model comes from UW_CLAUDE_MODEL
-(default claude-haiku-4-5), max_tokens is 300, one request may take CLAUDE_TIMEOUT_S.
+(default claude-haiku-4-5), max_tokens is CLAUDE_MAX_TOKENS, one request may take CLAUDE_TIMEOUT_S.
 
 A missing package or key raises ClaudeUnavailable at construction; the call loop then uses the fixed-order
 driver. `FakeClaudeClient` scripts responses for tests and the demo: no network.
