@@ -156,8 +156,14 @@ final class DemoStore {
     private func loadClipIfNeeded() {
         guard let path = liveMessage?.clipUrl, clip?.url != path else { return }
         Task { [weak self] in
-            guard let self, let loaded = await self.feed.fetchClip(path), let message = self.liveMessage,
-                  message.clipUrl == path else { return }
+            guard let self else { return }
+            var loaded = await self.feed.fetchClip(path)
+            // The backend forgets the frames after 30 min or a restart: use the copy kept on this phone.
+            if loaded == nil, let id = self.liveMessage?.messageId, let record = self.history.record(id),
+               let kept = await Task.detached(operation: { CallHistory.loadFrames(record) }).value {
+                loaded = AlertClip(url: path, frames: kept.frames, periodMs: kept.periodMs)
+            }
+            guard let loaded, let message = self.liveMessage, message.clipUrl == path else { return }
             self.clip = loaded
             // Kept on this phone: the backend forgets it after 30 min.
             self.history.saveClip(loaded, for: message.messageId)
