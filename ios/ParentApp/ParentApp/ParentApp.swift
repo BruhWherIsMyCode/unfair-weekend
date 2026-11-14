@@ -18,6 +18,7 @@ struct RootView: View {
     @State private var cameraDebugAfterSettings = false
     /// The ring title ("Daily check-in"), kept for the pill during the call.
     @State private var title = "Daily check-in"
+    @Environment(\.scenePhase) private var scenePhase
 
     private enum Step: Equatable {
         case idle, ringing, call, done
@@ -34,8 +35,12 @@ struct RootView: View {
                     .transition(.opacity.animation(Motion.glide(0.6)))
             case .ringing:
                 IncomingView(title: title,
-                             onAccept: { app.model?.answer() },
+                             onAccept: {
+                                 app.ringer.stop()
+                                 app.model?.answer()
+                             },
                              onDecline: {
+                                 app.ringer.stop()
                                  app.model?.decline()
                                  // The engine does not move the screen on decline: go back to waiting here.
                                  app.model?.dismissDone()
@@ -74,6 +79,9 @@ struct RootView: View {
         .onChange(of: screen.mode, initial: true) { _, mode in
             follow(mode)
         }
+        .onChange(of: scenePhase) { _, phase in
+            followScene(phase)
+        }
         .task {
             // A phone that waits for calls on a stand must not lock.
             UIApplication.shared.isIdleTimerDisabled = true
@@ -83,6 +91,7 @@ struct RootView: View {
                 app.model?.dismissDone()
             }
             app.systemCalls.onHangUp = { app.model?.hangUp() }
+            app.systemCalls.onAudioDeactivated = { app.keepAwake(reason: "callkit-deactivated") }
             await app.launch()
         }
     }
@@ -96,7 +105,31 @@ struct RootView: View {
         }
     }
 
+    /// The app's own ring plays only while the ring screen is up, the app is in front and CallKit is not ringing.
+    private func syncRing(_ mode: CallScreen.Mode) {
+        if case .ringing = mode, scenePhase == .active, !app.systemCalls.isRinging {
+            app.ringer.start()
+        } else {
+            app.ringer.stop()
+        }
+    }
+
+    /// Leaving the foreground while ringing: stop the app ring and let CallKit keep ringing.
+    /// Coming back to the front: ring on the app's own screen again, unless CallKit still rings.
+    private func followScene(_ phase: ScenePhase) {
+        let mode = (app.model?.screen ?? CallScreen()).mode
+        if phase == .background || phase == .inactive {
+            app.keepAwake(reason: "scene-\(phase == .background ? "background" : "inactive")")
+        }
+        if phase == .background, case .ringing = mode {
+            app.ringer.stop()
+            app.systemCalls.reportIncoming(title: title)
+        }
+        syncRing(mode)
+    }
+
     private func follow(_ mode: CallScreen.Mode) {
+        defer { syncRing(mode) }
         switch mode {
         case .ringing(_, let ringTitle):
             title = ringTitle
@@ -122,9 +155,21 @@ struct RootView: View {
             app.camera.stopPreview()
             app.systemCalls.reportEnded(unanswered: app.systemCalls.isRinging)
             app.model?.dismissDone()
+            keepAwakeAfterCall(reason: "call-ended")
         case .idle, .done:
             app.camera.stopPreview()
             app.systemCalls.reportEnded(unanswered: app.systemCalls.isRinging)
+            keepAwakeAfterCall(reason: "call-idle-or-done")
+        }
+    }
+
+    /// End of every call (answered, declined or missed): restart the silent loop now, and once more after the
+    /// live avatar has had time to disconnect (that disconnect can deactivate the audio session).
+    private func keepAwakeAfterCall(reason: String) {
+        app.keepAwake(reason: reason)
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            app.keepAwake(reason: "\(reason)-after-disconnect")
         }
     }
 
@@ -132,6 +177,7 @@ struct RootView: View {
     /// the background (BackgroundKeepAlive) and rings through CallKit next time. Demo only: `suspend` is not
     /// public API.
     private func leaveAfterCall() {
+        app.keepAwake(reason: "leave-after-call")
         UIApplication.shared.perform(#selector(NSXPCConnection.suspend))
         Task {
             // Reset behind the home-screen animation, so reopening shows the waiting screen.

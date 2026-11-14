@@ -70,6 +70,8 @@ final class AppState {
     private(set) var debugFrames: CameraSource?
     /// Rings through the system call screen while the app is in the background.
     let systemCalls = SystemCalls()
+    /// Rings out loud on the app's own call screen while the app is in the foreground.
+    @ObservationIgnored let ringer = Ringer()
     @ObservationIgnored private let keepAlive = BackgroundKeepAlive()
 
     @ObservationIgnored private var devices: ParentDevices?
@@ -112,6 +114,14 @@ final class AppState {
         }
         observeAudioInterruptions()
         connect()
+    }
+
+    /// Restarts the silent loop if it stopped (logged under "keepalive"). No-op in the Simulator, which has no
+    /// keep-alive.
+    func keepAwake(reason: String) {
+        #if !targetEnvironment(simulator)
+        keepAlive.ensureRunning(reason: reason)
+        #endif
     }
 
     func update(_ newSettings: AppSettings) {

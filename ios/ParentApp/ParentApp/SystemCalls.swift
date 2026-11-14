@@ -1,3 +1,4 @@
+import AVFoundation
 import CallKit
 import Foundation
 
@@ -11,6 +12,8 @@ final class SystemCalls: NSObject {
     var onAnswer: () -> Void = {}
     var onDecline: () -> Void = {}
     var onHangUp: () -> Void = {}
+    /// The system took the audio session away (for example when a CallKit call ends).
+    var onAudioDeactivated: () -> Void = {}
 
     private let provider: CXProvider
     private var current: UUID?
@@ -78,6 +81,17 @@ extension SystemCalls: CXProviderDelegate {
             answered = true
             onAnswer()
             action.fulfill()
+        }
+    }
+
+    nonisolated func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
+        // Nothing needed: the call's audio session is shared with the app's own players.
+    }
+
+    nonisolated func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
+        // The system deactivates the session without any interruption notice: the silent loop stops with it.
+        MainActor.assumeIsolated {
+            onAudioDeactivated()
         }
     }
 
