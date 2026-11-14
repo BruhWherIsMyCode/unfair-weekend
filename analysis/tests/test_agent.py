@@ -85,7 +85,7 @@ def test_a_normal_call_uses_one_request_per_step_and_finishes():
             assert client.requests[0]["messages"][0]["content"] == "Call connected. Nothing done yet."
             assert rig.session.finished is True and rig.adapter.said[0] == "greet" and rig.adapter.said[-1] == "bye"
             assert rig.session.answers["medicine"] == "yes" and rig.session.answers["feeling"] == "I feel fine."
-            assert all(r["tools"] == rig.handlers.tool_definitions() for r in client.requests)
+            assert all([t["name"] for t in r["tools"]] == ["advance_call"] for r in client.requests)
             assert len(rig.kinds("agent_request")) == 11 and "latency_s" in rig.kinds("agent_request")[0]
             assert len(rig.kinds("agent_tool")) == 11
             # free text she said is never logged; the key and the prompt never reach the log

@@ -29,6 +29,15 @@ def env_for(tmp_path, path, needed=2, **extra):
     return env
 
 
+def finish_stored_call(path, call_id):
+    # The backend queues call closure after analysis writes on the same writer. These tests close through a
+    # separate connection, which must wait for pending attempt writes before making the call terminal.
+    writer = shared_writer(path)
+    assert writer.flush(), "pending analysis writes did not finish before call closure"
+    end_call(path, call_id)
+    settle(writer)
+
+
 def call(world, n, *, label="live", corners=(0.01,), sinks=({},), end=True, **extra):
     """One whole call number n; returns (summary, live log lines). The call is ended in the database afterwards,
     which is what Agent 2's call service does once the driver returned."""
@@ -40,8 +49,7 @@ def call(world, n, *, label="live", corners=(0.01,), sinks=({},), end=True, **ex
     summary = asyncio.run(backend_entry.run_backend_call(
         link, modules(corners, sinks), env=env_for(tmp_path, path, **extra), out=lines.append))
     if end:
-        end_call(path, call_id)
-        settle(shared_writer(path))
+        finish_stored_call(path, call_id)
     else:
         assert shared_writer(path).flush()  # learning is waiting for the call to end: only flush
     return summary, lines
@@ -117,8 +125,7 @@ def test_changing_the_learning_target_rebuilds_and_freezes_a_new_snapshot(world,
         env.pop("UW_BASELINE_NEEDED")
         new_needed = config.BASELINE_NEEDED
     summary = asyncio.run(backend_entry.run_backend_call(link, modules(), env=env, out=lambda line: None))
-    end_call(path, "call_t3")
-    settle(shared_writer(path))
+    finish_stored_call(path, "call_t3")
 
     assert summary["baseline_needed"] == new_needed
     assert summary["status"] == ("as_usual" if ready else "learning")
@@ -167,8 +174,7 @@ def test_learning_is_deferred_until_agent_2_has_ended_the_call(world):
     tmp_path, path = world
     summary, _ = call(world, 1, end=False)
     assert summary["status"] == "learning" and snapshots(path, "smile") == []  # the call is still 'connected'
-    end_call(path, "call_t1")
-    settle(shared_writer(path))
+    finish_stored_call(path, "call_t1")
     assert [s["sessions"] for s in snapshots(path, "smile")] == [1]
 
 
@@ -228,8 +234,7 @@ def test_resource_events_queued_before_attach_are_recorded_without_stale_writes(
     caplog.set_level("WARNING")
     summary = asyncio.run(backend_entry.run_backend_call(link, modules(), env=env_for(tmp_path, path),
                                                          out=lambda line: None))
-    end_call(path, "call_q1")
-    settle(shared_writer(path))
+    finish_stored_call(path, "call_q1")
     assert summary["status"] in ("learning", "as_usual")
     problems = [r.getMessage() for r in caplog.records if "not saved" in r.getMessage() or "recording is off" in
                 r.getMessage() or "StaleWrite" in r.getMessage()]

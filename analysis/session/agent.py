@@ -1,7 +1,8 @@
-"""ClaudeAgent: Claude chooses the next step of the call through six tools; the code guards every step.
+"""ClaudeAgent: one bounded plan per model request; the code guards each action in that plan.
 
-One action per turn. The history is a proper Messages API history: every assistant tool_use gets exactly one
-user tool_result with the same id. The first user message is a short plain state.
+One advance_call per turn groups answer recording, a concern and a reaction with the next question/check.
+That final action's result returns to the model before another plan is chosen. Legacy individual tool calls
+remain executable. Every assistant tool_use gets exactly one matching user tool_result.
 
 Stale decisions. CallSession.event_version counts resource changes, interruptions and hang-up. It is recorded
 before each request; when it moved by the time the answer arrives, the answer was decided on an old state: its
@@ -24,7 +25,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from analysis.session import limits
+from analysis.session import limits, turn_plan
 from analysis.session.fallback import FixedOrderDriver
 
 PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "agent_system.md"
@@ -67,6 +68,18 @@ def _loggable(name: Any, args: Any) -> Dict[str, Any]:
     if not isinstance(args, dict):
         return {}
     out: Dict[str, Any] = {}
+    if name == turn_plan.TOOL_NAME:
+        for field, tool in turn_plan.PREFIX_TOOLS.items():
+            if field in args:
+                out[field] = _loggable(tool, args[field])
+        if "greet" in args:
+            out["greet"] = args["greet"] is True
+        if "reaction" in args:
+            out["reaction"] = _loggable("say_own", {"text": args["reaction"]}).get("text")
+        next_ = args.get("next")
+        if isinstance(next_, dict) and next_.get("tool") in turn_plan.NEXT_TOOLS:
+            out["next"] = {"tool": next_["tool"], "input": _loggable(next_["tool"], next_.get("input"))}
+        return out
     for key, value in args.items():
         if name == "alert_family" and key == "note":
             out[key] = "<omitted>"  # the note may repeat her words
@@ -112,7 +125,7 @@ class ClaudeAgent:
                                      getattr(self.session, "person_pronoun", "she"),
                                      getattr(self.session, "person_age", None),
                                      getattr(self.session, "person_about", ()))
-        tools = self.handlers.tool_definitions()
+        tools = [turn_plan.tool_definition(self.handlers.tool_definitions())]
         messages: List[Dict[str, Any]] = [{"role": "user", "content": FIRST_MESSAGE}]
         schema_streak = 0
         refused_streak = 0
@@ -152,18 +165,22 @@ class ClaudeAgent:
                 await self._fallback("no_tool_use")
                 return
             stale = self.session.event_version != version
-            self._record_turn("stale" if stale else "completed", messages, content, stop_reason,
-                              first=None if stale else uses[0])
-            messages.append({"role": "assistant", "content": content})
-
             first = uses[0]
             name, args = first["name"], first["raw_input"]
+            steps, plan_problem = None, None
+            if name == turn_plan.TOOL_NAME and not stale:
+                steps, plan_problem = turn_plan.actions(args, self.handlers)
+            self._record_turn("stale" if stale else "completed", messages, content, stop_reason,
+                              first=None if stale else first,
+                              steps=steps if plan_problem is None else None)
+            messages.append({"role": "assistant", "content": content})
+
             fallback_reason: Optional[str] = None
             if stale:
                 self.session.note("agent_stale", turn=self.turns, tool=name)
                 payload: Dict[str, Any] = {"stale": True, "state": self.handlers.plain_state()}
             else:
-                problem = self.handlers.validate(name, args)
+                problem = plan_problem if name == turn_plan.TOOL_NAME else self.handlers.validate(name, args)
                 if problem is not None:
                     schema_streak += 1
                     self.session.note("agent_refused", turn=self.turns, tool=name, reason="invalid input: %s" % problem)
@@ -174,7 +191,10 @@ class ClaudeAgent:
                 else:
                     schema_streak = 0
                     self.session.note("agent_tool", turn=self.turns, name=name, input=_loggable(name, args))
-                    payload = await self.handlers.execute(name, args)
+                    if name == turn_plan.TOOL_NAME:
+                        payload = await self._execute_plan(steps or [])
+                    else:
+                        payload = await self.handlers.execute(name, args)
                     if self.session.hung_up or payload.get("error") == "call ended":
                         return
                     error = payload.get("error")
@@ -195,6 +215,31 @@ class ClaudeAgent:
             if self.handlers.ended:
                 return
 
+    # ---- plan execution --------------------------------------------------------------------------------
+
+    async def _execute_plan(self, steps: List[turn_plan.Action]) -> Dict[str, Any]:
+        """Run in order, stopping at failure, hang-up or a changed resource state. Never run past new input."""
+        version = self.session.event_version
+        completed: List[str] = []
+        payload: Dict[str, Any] = {}
+        try:
+            for name, args in steps:
+                if self.handlers.ended:
+                    return {"error": "call ended", "completed_steps": completed}
+                if self.session.event_version != version:
+                    self.session.note("agent_plan_stopped", reason="state_changed", completed_steps=completed)
+                    return {"stale": True, "state": self.handlers.plain_state(), "completed_steps": completed}
+                self.session.note("agent_plan_step", turn=self.turns, name=name, input=_loggable(name, args))
+                payload = await self.handlers.execute(name, args)
+                if "error" in payload or payload.get("played") is False:
+                    return {**payload, "error": payload.get("error", "playback failed"),
+                            "failed_step": name, "completed_steps": completed}
+                completed.append(name)
+            # Keep the final result (including the new transcript or task facts) at the top level.
+            return {**payload, "completed_steps": completed}
+        finally:
+            self._rec("plan_finished")
+
     # ---- recording (optional; never raises) -------------------------------------------------------------
 
     def _rec(self, hook: str, *args: Any, **kwargs: Any) -> None:
@@ -207,7 +252,8 @@ class ClaudeAgent:
 
     def _record_turn(self, state: str, messages: List[Dict[str, Any]], content: Optional[List[Dict[str, Any]]] = None,
                      stop_reason: Optional[str] = None, error_code: Optional[str] = None,
-                     first: Optional[Dict[str, Any]] = None) -> None:
+                     first: Optional[Dict[str, Any]] = None,
+                     steps: Optional[List[turn_plan.Action]] = None) -> None:
         """One finished model request for the database: the output with free text left out (`_loggable`)."""
         if self.recorder is None:
             return
@@ -221,9 +267,12 @@ class ClaudeAgent:
                 elif block.get("type") == "text":
                     blocks.append({"type": "text", "text": str(block.get("text", ""))[:300]})
         model_id = getattr(self.client, "model", None) or ("fake-claude" if self.client is not None else "none")
+        binding: Dict[str, Any] = {
+            "tool_use": {"id": first["id"], "name": first["name"]} if first is not None else None}
+        if steps is not None and first is not None:
+            binding["tool_uses"] = turn_plan.action_uses(first["id"], steps)
         self._rec("model_turn", state=state, messages=messages, content=blocks, stop_reason=stop_reason,
-                  error_code=error_code, model_id=str(model_id),
-                  tool_use={"id": first["id"], "name": first["name"]} if first is not None else None)
+                  error_code=error_code, model_id=str(model_id), **binding)
 
     # ---- pieces -----------------------------------------------------------------------------------------
 

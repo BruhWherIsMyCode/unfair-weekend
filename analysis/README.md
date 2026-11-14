@@ -1,5 +1,27 @@
 # Face tool (first version)
 
+## Current Claude turn execution
+
+Claude chooses one `advance_call` plan for the whole next turn. A plan can record the answer already heard,
+record a concern, play a short reaction, and then ask/listen, run a check, recover a resource or finish.
+The first plan plays the fixed greeting and asks the medicine question together. Every action still uses
+`ToolHandlers` in order and waits for actual playback; the model sees the next answer or task result before
+choosing another plan. A playback failure, hang-up or resource change stops the remaining actions. The existing
+follow-up budget and family publication rules still apply.
+
+This replaces separate model requests for saving an answer, acknowledging it and choosing the next step.
+The same synthetic call with three answers, three reactions and two checks uses **6 requests instead of 13**,
+with matching spoken lines, saved answers, task attempts and final status. Both API and subscription clients
+use this plan schema; individual tool responses remain executable for compatibility. Database action rows
+share the real model turn that selected them, rather than creating extra model turns for local bookkeeping.
+
+Verification uses mocked models/speech and synthetic measurements; real provider and iPhone latency for this
+change has not been measured. From the repo root, with the backend environment active:
+
+```bash
+python -m pytest -q analysis/tests/test_turn_plan.py analysis/tests/test_claude_sub_client.py analysis/tests/test_storage_call.py
+```
+
 ## Quick start (no keys)
 
 ```

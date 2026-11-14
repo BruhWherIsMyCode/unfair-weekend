@@ -94,6 +94,27 @@ def test_create_returns_a_tool_use_block_and_numbers_the_ids():
     asyncio.run(scenario())
 
 
+def test_subscription_runs_a_compound_turn_and_returns_the_new_answer_to_its_session():
+    from analysis.tests.test_turn_plan import plan
+
+    async def scenario():
+        replies = [json.dumps({"tool": "advance_call", "input": plan(
+            "ask", {"question_id": "q_medicine"}, greet=True)["content"][0]["input"]}),
+                   json.dumps({"tool": "advance_call", "input": plan(
+                       "finish_call", answer={"question_id": "q_medicine", "value": "yes"},
+                       reaction="Thank you for telling me.")["content"][0]["input"]})]
+        client, holder = make(replies)
+        rig = CallRig(required_tasks=())
+        await rig.drive(ClaudeAgent(rig.session, rig.handlers, client, rig.clock).run())
+        assert len(holder["sdk"].prompts) == 2 and rig.session.answers["medicine"] == "yes"
+        assert '"transcript":"Yes, after breakfast."' in holder["sdk"].prompts[1]
+        assert rig.adapter.said == ["greet", "q_medicine", "bye"]
+        assert rig.adapter.own_said == ["Thank you for telling me."] and rig.session.finished
+        await client.close()
+
+    asyncio.run(scenario())
+
+
 def test_options_close_every_tool_and_the_prompt_gets_the_answer_format():
     async def scenario():
         client, holder = make(['{"tool": "say", "input": {}}'])

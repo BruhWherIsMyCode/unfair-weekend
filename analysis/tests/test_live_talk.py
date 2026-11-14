@@ -370,8 +370,12 @@ def test_a_claude_call_with_say_own_and_ask_followup_runs_to_the_end():
         assert rig.adapter.own_said == ["Good, thank you.", "How is your sleep?", "Next one is quick."]
         logged = json.dumps(rig.session.log, default=str)
         assert "I feel fine, thank you." not in logged  # her words are never in the log
-        tools = [t["name"] for t in client.requests[0]["tools"]]
-        assert "say_own" in tools and "ask_followup" in tools
+        tools = client.requests[0]["tools"]
+        assert [t["name"] for t in tools] == ["advance_call"]
+        properties = tools[0]["input_schema"]["properties"]
+        assert "reaction" in properties
+        assert "ask_followup" in [choice["properties"]["tool"]["enum"][0]
+                                  for choice in properties["next"]["oneOf"]]
 
     asyncio.run(scenario())
 

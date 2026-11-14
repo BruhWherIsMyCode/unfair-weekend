@@ -123,6 +123,7 @@ class SessionRecorder:
         self._dead: set = set()
         self._tool: Optional[Dict[str, Any]] = None
         self._bind: Optional[Dict[str, Any]] = None
+        self._plan: Optional[Dict[str, Any]] = None
         self._turn_seq = 0
         self._turn_t0 = 0
         self._turn_ctx = 0
@@ -274,23 +275,40 @@ class SessionRecorder:
 
     def model_turn(self, *, state: str, messages: List[Dict[str, Any]], content: Optional[List[Dict[str, Any]]] = None,
                    stop_reason: Optional[str] = None, error_code: Optional[str] = None, model_id: str = "unknown",
-                   tool_use: Optional[Dict[str, Any]] = None) -> None:
+                   tool_use: Optional[Dict[str, Any]] = None,
+                   tool_uses: Optional[List[Dict[str, str]]] = None) -> None:
         """One finished Claude request. state: completed / stale / failed / cancelled. A completed turn whose tool is
         about to run is written WITH that tool (one transaction); every other turn is written at once. A stale turn
         keeps its output but no tool ever follows it."""
         self._flush_bind()
+        self.plan_finished()
         request = {"turn": self._turn_seq + 1, "message_count": len(messages or []),
                    "context": _redact_messages(messages)}
         response = {"content": content or [], "stop_reason": stop_reason} if state in ("completed", "stale") else None
         turn = self._turn_row(state=state, model_id=model_id, request=request, response=response,
                               error_code=error_code, created=self._turn_t0 or None)
+        if state == "completed" and tool_uses:
+            # A compound decision is one model request. Its guarded actions share that turn, with child ids.
+            self._submit("model turn", lambda db: repo.insert_turn(db, turn))
+            self._plan = {"turn": turn, "steps": list(tool_uses)}
+            return
         if state == "completed" and tool_use and tool_use.get("name") in repo.DB_TOOLS:
             self._bind = {"turn": turn, "tool_use_id": tool_use["id"], "tool_name": tool_use["name"]}
             return
         self._submit("model turn", lambda db: repo.insert_turn(db, turn))
 
+    def plan_finished(self) -> None:
+        """Discard actions that were not reached; fallback actions must never inherit an old model decision."""
+        self._plan = None
+
     def _take_turn(self, name: str) -> Dict[str, Any]:
         """(turn row, tool id) for a tool that starts now: the Claude turn bound to it, or a fixed-order turn."""
+        if self._plan is not None:
+            steps = self._plan["steps"]
+            if steps and steps[0]["name"] == name:
+                step = steps.pop(0)
+                return {"turn": self._plan["turn"], "tool_id": step["id"], "turn_recorded": True}
+            self.plan_finished()
         bind, self._bind = self._bind, None
         if bind is not None and bind["tool_name"] == name:
             return {"turn": bind["turn"], "tool_id": bind["tool_use_id"]}
@@ -307,7 +325,7 @@ class SessionRecorder:
         stamp = self._stamp()
         return {"id": taken["tool_id"], "name": name, "args": args if isinstance(args, dict) else {},
                 "turn": taken["turn"], "created": stamp, "persisted": False, "done": False,
-                "stored": name in repo.DB_TOOLS}
+                "stored": name in repo.DB_TOOLS, "turn_recorded": taken.get("turn_recorded", False)}
 
     def _tool_row(self, tool: Dict[str, Any]) -> Dict[str, Any]:
         return {"tool_call_id": tool["id"], "call_id": self.call_id, "turn_id": tool["turn"]["turn_id"],
@@ -320,7 +338,8 @@ class SessionRecorder:
         self._tool = tool
         if not tool["stored"]:  # alert_family has no tool row: its turn is kept, the concern lives in the summary
             turn = tool["turn"]
-            self._submit("model turn", lambda db: repo.insert_turn(db, turn))
+            if not tool["turn_recorded"]:
+                self._submit("model turn", lambda db: repo.insert_turn(db, turn))
             return
         if name == "run_task":  # written together with the attempt it starts (one transaction)
             return
@@ -331,7 +350,8 @@ class SessionRecorder:
         tool["persisted"] = True
 
         def fn(db: Any) -> None:
-            repo.insert_turn(db, turn)
+            if not tool["turn_recorded"]:
+                repo.insert_turn(db, turn)
             repo.insert_tool(db, row)
 
         self._submit("tool started", fn)
@@ -353,7 +373,8 @@ class SessionRecorder:
         tool["persisted"] = True
 
         def fn(db: Any) -> None:
-            repo.insert_turn(db, turn)
+            if not tool["turn_recorded"]:
+                repo.insert_turn(db, turn)
             repo.insert_tool(db, row)
             repo.finish_tool(db, tool_id, state, result, stamp)
 
@@ -407,7 +428,8 @@ class SessionRecorder:
         stamp = self._stamp()
 
         def fn(db: Any) -> None:
-            repo.insert_turn(db, turn)
+            if not tool["turn_recorded"]:
+                repo.insert_turn(db, turn)
             repo.insert_tool(db, tool_row)
             repo.insert_attempt(db, call_id=self.call_id, attempt_id=stored, wire_attempt_id=attempt.attempt_id,
                                 task=attempt.task, tool_call_id=tool_row["tool_call_id"], ordinal=attempt.ordinal,
