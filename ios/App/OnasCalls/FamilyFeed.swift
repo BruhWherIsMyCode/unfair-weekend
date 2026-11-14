@@ -182,6 +182,27 @@ final class FamilyFeed {
         return try Self.decoder.decode(Body.self, from: data).clips
     }
 
+    /// The backend's choice for the alert (`GET /v1/calls/{call_id}/comparison`): the task, today's attempts at it
+    /// and one earlier video from her learned usual or the last calm call.
+    struct ComparisonChoice: Decodable {
+        let task: String?
+        let today: [AttemptClip]
+        let earlier: AttemptClip?
+        /// `baseline` or `recent_as_usual`.
+        let earlierSource: String?
+        /// `expired`, `not_retained` or `no_matching_source` when `earlier` is null.
+        let earlierMissing: String?
+    }
+
+    /// Nil when the backend predates the route (404), so the app chooses on its own.
+    func fetchComparison(_ callId: String) async throws -> ComparisonChoice? {
+        guard let base = url else { throw URLError(.badURL) }
+        let (data, response) = try await URLSession.shared.data(for: Self.request(base, "/v1/calls/\(callId)/comparison", key: demoKey))
+        if (response as? HTTPURLResponse)?.statusCode == 404 { return nil }
+        try Self.check(response)
+        return try Self.decoder.decode(ComparisonChoice.self, from: data)
+    }
+
     enum VideoError: Error { case preparing, failed, expired, missing }
 
     /// Downloads an attempt video to this phone once (`GET /v1/clips/{clip_id}/video`) and returns the file.

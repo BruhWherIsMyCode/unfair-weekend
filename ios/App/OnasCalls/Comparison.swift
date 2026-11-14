@@ -5,10 +5,10 @@ import SwiftUI
 /// The alert's clip area: an earlier check-in next to today's, same person, same task
 /// (docs: Claude Design "HeartLine · Earlier check-in next to today", backend/proposals/baseline-video-comparison).
 ///
-/// Today's clips are the attempt videos of the alert's call at the task with the most tries. The earlier clip is
-/// picked on this phone: the newest earlier backend call in the history that was as usual or still learning,
-/// with a finished, ready, not acted video of the same task. Nothing in the backend marks it as part of the
-/// person's usual yet; that needs Agent 3's frozen-baseline selection.
+/// The backend chooses (`GET /v1/calls/{call_id}/comparison`, backend/checkin_backend/comparison.py): the task behind
+/// the alert, today's attempt videos at it, and an earlier video from her learned usual, else from the last calm
+/// call. A backend without that route gets the phone's own choice: the task with the most tries, and the newest
+/// earlier call in the history that was as usual or still learning with a finished, not acted video of that task.
 @MainActor
 @Observable
 final class Comparison {
@@ -61,29 +61,51 @@ final class Comparison {
         phase = .loading
         loader = Task { [weak self] in
             guard let self else { return }
-            let clips: [AttemptClip]
+            let task: CheckTask
+            let todayClips: [AttemptClip]
+            var earlierClip: AttemptClip?
+            var chosenByBackend = false
             do {
-                clips = try await feed.fetchCallClips(callId)
+                if let choice = try await feed.fetchComparison(callId) {
+                    guard let wire = choice.task, let chosen = CheckTask(wire: wire) else {
+                        self.phase = .legacy
+                        return
+                    }
+                    task = chosen
+                    todayClips = choice.today
+                    earlierClip = choice.earlier
+                    chosenByBackend = true
+                } else {
+                    let clips = try await feed.fetchCallClips(callId)
+                    history.setAttempts(clips, callId: callId)
+                    guard let chosen = Self.alertTask(clips) else {
+                        self.phase = .legacy
+                        return
+                    }
+                    task = chosen
+                    todayClips = clips.filter { $0.checkTask == chosen }
+                }
             } catch {
                 if !Task.isCancelled { self.phase = .failed }
                 return
             }
             guard !Task.isCancelled else { return }
-            history.setAttempts(clips, callId: callId)
-            guard let task = Self.alertTask(clips) else {
-                self.phase = .legacy
-                return
-            }
             self.task = task
             var today: [Source] = []
-            for clip in clips.filter({ $0.checkTask == task && $0.status != .failed }).sorted(by: { $0.recordedAt < $1.recordedAt }) {
+            for clip in todayClips.filter({ $0.status != .failed }).sorted(by: { $0.recordedAt < $1.recordedAt }) {
                 if let url = try? await feed.downloadVideo(clip) {
                     today.append(Source(url: url, recorded: clip.recorded, acted: clip.isActed))
                 }
             }
             guard !Task.isCancelled else { return }
             self.today = today
-            self.earlier = await Self.findEarlier(task: task, excluding: callId, before: date, feed: feed, history: history)
+            if chosenByBackend {
+                if let clip = earlierClip, let url = try? await feed.downloadVideo(clip) {
+                    self.earlier = Source(url: url, recorded: clip.recorded, acted: false)
+                }
+            } else {
+                self.earlier = await Self.findEarlier(task: task, excluding: callId, before: date, feed: feed, history: history)
+            }
             guard !Task.isCancelled else { return }
             await self.prepare(keepTime: false)
             self.phase = .ready
@@ -119,8 +141,8 @@ final class Comparison {
         player.setSources(left: left, right: right, keepTime: keepTime)
     }
 
-    /// The task that showed the change. The message does not name it, but a change is checked again, so that task
-    /// has the most tries. A tie (one try each, or no retry) goes to the smile.
+    /// Older backends: the task that showed the change. The message does not name it, but a change is checked again,
+    /// so that task has the most tries. A tie (one try each, or no retry) goes to the smile.
     static func alertTask(_ clips: [AttemptClip]) -> CheckTask? {
         let tries = Dictionary(grouping: clips.compactMap(\.checkTask), by: { $0 }).mapValues(\.count)
         guard !tries.isEmpty else { return nil }
