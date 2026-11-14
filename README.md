@@ -14,6 +14,18 @@ HeartLine gives no health verdict and does not call emergency services. It notic
 
 We built it at Unfair Weekend 2026 in Vilnius, 12 to 15 November.
 
+## Video
+
+<p align="center">
+  <a href="docs/assets/heartline-film.mp4">
+    <img src="docs/assets/heartline-film-thumbnail.png" alt="HeartLine submission video. Click to open the MP4." width="640">
+  </a>
+</p>
+
+Our submission video (3 minutes, vertical): [docs/assets/heartline-film.mp4](docs/assets/heartline-film.mp4). The call, the measuring and the family alert are real. The facial droop was acted.
+
+Music: "Dreamy Flashback" Kevin MacLeod (incompetech.com), licensed under [Creative Commons: By Attribution 4.0](http://creativecommons.org/licenses/by/4.0/).
+
 ## Two apps
 
 <table>
