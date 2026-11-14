@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/heartline-preview.png" alt="HeartLine. The daily video call that checks on your parent. The phone shows an incoming Daily check-in video call with Answer and Not now buttons." width="860">
+</p>
+
 # HeartLine
 
 HeartLine is a short daily video call for an older person who lives alone. An AI avatar rings her iPhone, asks how she is, and asks her to smile and to hold up each hand. HeartLine compares her face and hands with her own earlier calls. If something looks different from her usual, or she says something that worries the avatar, her family gets one plain message on their phone so they can call her.
@@ -9,6 +13,23 @@ A family message reads like this:
 HeartLine gives no health verdict and does not call emergency services. It notices a change from her own usual and asks her family to call her.
 
 We built it at Unfair Weekend 2026 in Vilnius, 12 to 15 November.
+
+## Two apps
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/assets/icon-parent.png" alt="HeartLine icon for the parent's app, a white heart on red" width="96"><br>
+      <b>For the parent</b><br>
+      It rings like a normal phone call. She answers, talks with the avatar and does two short checks.
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/assets/icon-family.png" alt="HeartLine icon for the family's app, a red heart on white" width="96"><br>
+      <b>For the family</b><br>
+      It gets one message when something looks different from her usual, with today's video next to an earlier check-in.
+    </td>
+  </tr>
+</table>
 
 ## How a call goes
 
