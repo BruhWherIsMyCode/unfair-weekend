@@ -399,6 +399,14 @@ class Store:
             return dict(row) if row is not None else None
         return await asyncio.to_thread(self._read, read, clip_id)
 
+    async def comparison(self, call_id: str) -> dict[str, Any] | None:
+        """The earlier-versus-today videos of a call's alert (comparison.py); None for an unknown call."""
+        from .comparison import select_comparison  # comparison -> attempt_clips -> store
+
+        await self.flush()
+        stamp = now_ms()
+        return await asyncio.to_thread(self._read, lambda db, key: select_comparison(db, key, stamp), call_id)
+
     async def clips_for_cleanup(self, stamp: int) -> list[dict[str, Any]]:
         await self.flush()
         return await asyncio.to_thread(self._read, lambda db, key: [dict(row) for row in db.execute(

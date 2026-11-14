@@ -82,6 +82,16 @@ The current single-demo shared key does not provide separate-family account auth
   202 with `Retry-After: 1` while queued, 409 after encoding failure, 410 after expiry and 404 for missing
   files/IDs or disabled recording. Credentials stay in the header. Responses use `Cache-Control: no-store`.
 
+- `GET /v1/calls/{call_id}/comparison` returns what the family alert shows side by side (`checkin_backend/comparison.py`):
+  `task` (from the first confirmed face/arm sign of the call's stored summary, `task_source: "alert_sign"`; without one,
+  the task with the most videos, `"most_tries"`), `today` (that task's entries in recording order), and `earlier`: one
+  ready, finished, not acted entry of the same task from an earlier call of the same person, or null.
+  `earlier_source` is `"baseline"` for an attempt in her learned usual (`baseline_members`, the snapshot frozen for
+  this call first) or `"recent_as_usual"` for the newest earlier live/normal call whose final summary was as usual or
+  learning and that never noticed a change. A null `earlier` has `earlier_missing`: `expired`, `not_retained` or
+  `no_matching_source`. Only the person and task are matched; the task-definition version and the arm's hand are not
+  yet. Unknown call: 404. Proposed for canonical publication with the routes above.
+
 For example, after a call:
 
 ```bash
@@ -90,9 +100,9 @@ curl -H "X-Demo-Key: $DEMO_KEY" \
 ```
 
 The existing `/v1/clips/{id}` JSON alert shelf still expires after 30 minutes and contains available attempts
-as before. Its frame sequence and the new per-attempt MP4s are separate outputs. The iPhone continues its
-existing frame playback and local saving until Agent 1 adopts MP4 retrieval. No family-app update or
-earlier-versus-today UI is included here.
+as before. Its frame sequence and the new per-attempt MP4s are separate outputs. The family app (ios/App) plays the
+per-attempt MP4s side by side through the comparison route and keeps the frame clip only when a backend records
+no videos.
 
 ## Retention and verification
 
