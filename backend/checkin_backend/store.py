@@ -314,6 +314,9 @@ class Store:
                        summary: dict[str, Any] | None, family_devices: list[str]) -> None:
         stamp = now_ms()
         kind = message["kind"]
+        # The original schema predates concern_raised. Match the analysis recorder's compatibility status;
+        # the exact template_id keeps the published kind even without a summary or after a calmer final.
+        stored_kind = "incomplete" if kind == "concern_raised" else kind
 
         def job(db: Any) -> None:
             revision = db.execute("SELECT coalesce(max(revision), 0) + 1 FROM session_summaries WHERE call_id = ?",
@@ -321,7 +324,7 @@ class Store:
             db.execute(
                 "INSERT INTO session_summaries (call_id, revision, status, phase, summary_json, created_at_ms) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                (call_id, revision, kind, phase, dumps(summary or {}), stamp),
+                (call_id, revision, stored_kind, phase, dumps(summary or {}), stamp),
             )
             db.execute(
                 "INSERT INTO family_messages (message_id, call_id, family_id, summary_revision, kind, template_id, "
@@ -329,7 +332,7 @@ class Store:
                 "ON CONFLICT (message_id) DO UPDATE SET summary_revision = excluded.summary_revision, "
                 "kind = excluded.kind, template_id = excluded.template_id, text = excluded.text, "
                 "updated_at_ms = max(excluded.updated_at_ms, family_messages.created_at_ms)",
-                (message["message_id"], call_id, family_id, revision, kind, f"family.{kind}.v1", message["text"],
+                (message["message_id"], call_id, family_id, revision, stored_kind, f"family.{kind}.v1", message["text"],
                  stamp, stamp),
             )
             for target in family_devices:
@@ -362,12 +365,15 @@ class Store:
 
     @staticmethod
     def _message_dict(row: Any) -> dict[str, Any]:
+        # Decode only this known compatibility pair; summary.status can differ from the retained family alert.
+        kind = "concern_raised" if (row["kind"] == "incomplete"
+                                    and row["template_id"] == "family.concern_raised.v1") else row["kind"]
         return {"message_id": row["message_id"], "call_id": row["call_id"], "person_id": row["person_id"],
-                "kind": row["kind"], "text": row["text"], "phase": row["phase"], "clip_url": None,
+                "kind": kind, "text": row["text"], "phase": row["phase"], "clip_url": None,
                 "created_at": iso(row["created_at_ms"]), "updated_at": iso(row["updated_at_ms"])}
 
     _MESSAGE_SQL = (
-        "SELECT m.message_id, m.call_id, c.person_id, m.kind, m.text, s.phase, m.created_at_ms, m.updated_at_ms "
+        "SELECT m.message_id, m.call_id, c.person_id, m.kind, m.template_id, m.text, s.phase, m.created_at_ms, m.updated_at_ms "
         "FROM family_messages m JOIN calls c USING (call_id) "
         "JOIN session_summaries s ON s.call_id = m.call_id AND s.revision = m.summary_revision "
     )

@@ -146,6 +146,12 @@ Built here: migration tooling, schema constraints and synthetic storage tests. [
 - `family_messages`, `notification_outbox`, `delivery_attempts`: one message per call with its SSE deliveries, plus the ring deliveries.
 - `session_summaries`: the summary that came with each published message. A family message must reference one. Agent 3's coordinator should take this table over.
 
+The original SQLite schema has no `concern_raised` enum value. The store writes its relational status/kind as
+`incomplete`, matching the analysis recorder, while retaining `family.concern_raised.v1` as the message template
+and preserving the original summary JSON. Stored feed and call lookups restore the published `concern_raised`
+kind from that template, including when no summary was supplied or a calmer final summary retained the alert.
+SSE and notification payloads keep the published alert kind throughout. This requires no schema rewrite.
+
 `GET /v1/families/{id}/messages` reads the stored feed, and `GET /v1/calls/{id}` falls back to the stored record (with `"stored": true`) for calls from an earlier process.
 
 Limits: delivery is write-behind (the SSE push happens before its outbox row commits). Task capture commands have `attempt_id` NULL until Agent 3's `task_attempts` exist. Wire command and client event IDs are only unique per call, so they are stored as `<call_id>.<wire_id>`. `tests/test_store.py` runs whole calls through Uvicorn into a temporary database and checks the rows, foreign keys and journal order, a restart that reads the same history, and recovery of a call left open by a crash.

@@ -458,6 +458,109 @@ def test_say_own_never_asks_a_question():
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("text", [
+    "I couldn't see your hand that time. Hold the phone a little steadier, and raise your left hand beside your face.",
+    "Lift it a little higher beside your face for me.",
+    "Let's try again with your hand up beside your face.",
+    "I couldn't see your hand that time. Let's try that one again, with your hand up beside your face.",
+    "Please raise your left hand.",
+    " Raise your left hand. ",
+    "\nRaise your left hand.\n",
+    "Lift your right arm.",
+    "Show me your hands.",
+    "Hold your arm out.",
+    "Keep both hands raised.",
+    "Extend your left arm.",
+    "Swap hands now.",
+    "Change hands now.",
+    "Switch your hands.",
+    "Now smile.",
+    "Please smile for me.",
+    "Give me a big smile.",
+    "Hold your smile.",
+    "Keep your face relaxed until I say smile.",
+    "Hold the phone in your right hand.",
+    "Thank you, please lift your left hand again.",
+])
+def test_say_own_refuses_exercise_instructions_without_playback_or_budget_use(text):
+    async def scenario():
+        rig = CallRig()
+        await rig.greet()
+        before = rig.adapter.client_calls()
+        out = await rig.handlers.execute("say_own", {"text": text})
+        assert refused(out) and "run_task" in out["error"]
+        assert rig.adapter.client_calls() == before
+        assert rig.adapter.own_said == [] and rig.handlers.own_lines == 0
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("text", [
+    "I couldn't see your hand that time.",
+    "Your smile started before the cue.",
+    "Thank you. Just one more little exercise.",
+    "Take your time, there is no hurry.",
+    "Thank you for telling me about your arm.",
+    "Let's try that once more.",
+    "I hear that your arm feels weak.",
+    "No smile was seen that time.",
+    "You said it hurts to lift your arm.",
+    "You said you cannot raise your left hand. Thank you for telling me.",
+    "I couldn't see your smile that time.",
+    "Thank you for showing your hand.",
+])
+def test_say_own_keeps_reasons_thanks_and_bridges_without_exercise_directions(text):
+    async def scenario():
+        rig = CallRig()
+        await rig.greet()
+        assert await rig.handlers.execute("say_own", {"text": text}) == {"said": "own", "played": True}
+        assert rig.adapter.own_said == [text] and rig.handlers.own_lines == 1
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("question", ["Have you been able to raise your arm today?", "Show me where your arm hurts?"])
+def test_symptom_followup_can_mention_raising_an_arm(question):
+    async def scenario():
+        rig = CallRig(answers={"q_feeling": ["My arm hurts", "Since this morning"]})
+        await rig.greet()
+        await rig.handlers.execute("ask", {"question_id": "q_feeling"})
+        out = await rig.handlers.execute("ask_followup", {"question_id": "q_feeling", "text": question})
+        assert out == {"heard": True, "transcript": "Since this morning"}
+        assert rig.adapter.own_said == [question]
+
+    asyncio.run(scenario())
+
+
+def test_a_claude_retry_explains_the_reason_and_leaves_the_instruction_to_run_task():
+    async def scenario():
+        rig = CallRig(required_tasks=("arms",))
+        await rig.greet()
+        rig.hands.usable = lambda side, ts: False
+        first = await rig.run_tool("run_task", {"task": "arms"})
+        assert first["needs_another_reading"] and first["retry_hint"] == "hand_not_seen"
+        rig.hands.usable = lambda side, ts: True
+        reason = "I couldn't see your hand that time. Let's try once more."
+        duplicate = "I couldn't see your hand that time. Raise your left hand beside your face."
+        script = [tool_use_response("say_own", {"text": duplicate}),
+                  tool_use_response("say_own", {"text": reason}),
+                  tool_use_response("run_task", {"task": "arms"}),
+                  tool_use_response("finish_call", {})]
+        client = FakeClaudeClient(script, rig.clock)
+        agent = ClaudeAgent(rig.session, rig.handlers, client, rig.clock)
+        await rig.drive(agent.run())
+        assert rig.session.finished and rig.kinds("agent_fallback") == []
+        assert rig.adapter.own_said == [reason] and rig.handlers.own_lines == 1
+        assert rig.adapter.said.count("task_arms") == 1
+        assert rig.adapter.said.count("repeat_arms") == 1
+        assert rig.adapter.said.count("swap_hands") == 1  # only the second attempt reached the swap
+        assert any(e["tool"] == "say_own" and "run_task" in e["reason"] for e in rig.kinds("agent_refused"))
+        calls = rig.adapter.client_calls()
+        assert calls.index(("say_text", (reason,))) < calls.index(("say", ("repeat_arms",)))
+
+    asyncio.run(scenario())
+
+
 def test_the_set_up_line_is_refused_before_the_questions():
     # acted phone run: the agent played setup_phone before the questions and the call lost ~10 s
     async def scenario():

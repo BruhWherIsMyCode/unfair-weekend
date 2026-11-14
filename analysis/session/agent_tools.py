@@ -8,7 +8,7 @@ her own words for the agent) say_own, ask_followup. The two need the adapter cap
 for a text that breaks a guard (empty, over 25 words / 200 characters, a digit or %, a banned word), or while an
 attempt runs, after the call ended, past OWN_LINES_MAX, past one follow-up per question, for a question that is
 already recorded, or in the last FINISH_GUARD_S seconds, they are refused and nothing is played. The fixed-order
-driver never uses them.
+driver never uses them. say_own also refuses common exercise directions: run_task owns those instructions.
 A refused step returns {"error": "not allowed: <plain reason>", "allowed": [<tool names allowed now>]} and changes
 nothing. After hang-up every tool returns {"error": "call ended"} and nothing reaches the client.
 
@@ -49,6 +49,21 @@ def _banned_pattern() -> "re.Pattern[str]":
 
 
 _BANNED = _banned_pattern()
+# Common English exercise directions belong to run_task. Match imperative clauses,
+# not acknowledgments such as "You said you cannot raise your arm"; this is not a
+# general language classifier, so the prompt also keeps retry remarks reason-only.
+_EXERCISE_DIRECTION = re.compile(
+    r"(?:^|[.!;:,]\s*|\b(?:and|then)\s+)(?:(?:please|now|just)\s+)*"
+    r"(?:(?:you\s+can|let['’]s)\s+)?(?:"
+    r"(?:raise|lift|show|hold|keep|extend)\b[^.!?;:]{0,45}\b(?:hands?|arms?|smile|phone)\b"
+    r"|(?:hold|keep)\b[^.!?;:]{0,25}\bface\s+relaxed\b"
+    r"|(?:raise|lift|hold|keep)\s+it\b[^.!?;:]{0,25}\b(?:up|higher|beside)\b"
+    r"|(?:swap|switch|change)\s+(?:your\s+)?hands?\b"
+    r"|give\b[^.!?;:]{0,25}\bsmile\b|smile\b)"
+    r"|\b(?:try(?:\s+again)?|again|once\s+more)[,\s]+with\s+your\s+"
+    r"(?:(?:left|right)\s+)?(?:hands?|arms?)\s+up\b",
+    re.IGNORECASE,
+)
 
 
 def own_text_problem(text: Any) -> Optional[str]:
@@ -371,7 +386,9 @@ class ToolHandlers:
                  "required": ["reason", "note"], "additionalProperties": False}},
             {"name": "say_own", "description": "Say one or two short sentences of your own to her: react to what she "
              "just said or to what just happened, or tell her in a few words why a check is repeated (use the "
-             "result's retry_hint). Never a question. At most %d words, no digits, none of these words: %s. At most %d own lines in the "
+             "result's retry_hint, e.g. 'I couldn't see your hand that time.'). Never give exercise or phone set-up "
+             "directions: run_task plays those instructions. Never a question. At most %d words, no digits, "
+             "none of these words: %s. At most %d own lines in the "
              "call (say_own and ask_followup together); not while a check runs."
              % (limits.OWN_LINE_MAX_WORDS, ", ".join(limits.OWN_LINE_BANNED_WORDS), limits.OWN_LINES_MAX),
              "input_schema": {"type": "object", "properties": {"text": {"type": "string",
@@ -379,7 +396,8 @@ class ToolHandlers:
                               "required": ["text"], "additionalProperties": False}},
             {"name": "ask_followup", "description": "Ask her ONE short clarifying question about her answer to a "
              "question you asked, and listen. At most one follow-up per question, only before you record that "
-             "answer. Same limits on the text as say_own. Returns heard (true/false) and transcript (what she said, "
+             "answer. Same length, word, digit and banned-word limits as say_own. Returns heard (true/false) and "
+             "transcript (what she said, "
              "or null).",
              "input_schema": {"type": "object", "properties": {
                  "question_id": {"type": "string", "enum": list(limits.QUESTIONS)},
@@ -471,6 +489,8 @@ class ToolHandlers:
             if reason is None and name == "say_own" and "?" in str(args["text"]):
                 # v12b: its reactions asked the next question in its own words, then ask() asked it again
                 reason = "say_own never asks a question: the questions are ask() and ask_followup()"
+            if reason is None and name == "say_own" and _EXERCISE_DIRECTION.search(args["text"].strip()):
+                reason = "run_task plays the exercise instructions; say_own may explain only why a retry is needed"
             return reason or own_text_problem(args["text"])
         return None
 
