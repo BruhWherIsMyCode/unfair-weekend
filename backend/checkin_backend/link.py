@@ -23,13 +23,14 @@ from uuid import uuid4
 
 from .delivery import FamilyDelivery
 from .avatar import ClipGateway
+from .attempt_clips import AttemptClips
 from .hub import DeviceHub
 from .learning import introduction
 from .media import MAX_ATTEMPT_BYTES
 from .logging_config import log_event
 from .people import Person
 from .speech import SpeechError, SpeechGateway, load_script, render_line
-from .store import NoStore, Store
+from .store import NoStore, Store, now_ms
 from .session_logging import SessionEventLog
 
 log = logging.getLogger(__name__)
@@ -99,6 +100,8 @@ class Capture:
     total_bytes: int = 0
     closed: bool = False
     finish_print: str | None = None
+    recorded_at_ms: int = field(default_factory=now_ms)
+    captured_until_ms: int | None = None
 
 
 def fingerprint(*parts: object) -> str:
@@ -129,9 +132,11 @@ class ClientLink:
         script: dict[str, str] | None = None,
         clips: ClipGateway | None = None,
         store: Store | None = None,
+        attempt_clips: AttemptClips | None = None,
     ) -> None:
         self.call_id = call_id
         self.store = store if store is not None else NoStore()
+        self.attempt_clips = attempt_clips
         self.person = person
         self.hub = hub
         self.speech = speech
@@ -543,6 +548,7 @@ class ClientLink:
         if last_sequence != capture.last_sequence:
             raise LinkRejected("conflict", "last_sequence does not match the last accepted sample.", 409)
         capture.finish_print = print_
+        capture.captured_until_ms = captured_until_ms
         self._note("capture_finished", attempt_id=attempt_id, samples=len(capture.prints),
                    total_bytes=capture.total_bytes, captured_until_ms=captured_until_ms)
         self.store.record_command_done(self.call_id, attempt_id, "completed")
@@ -563,6 +569,19 @@ class ClientLink:
         if capture.closed:
             return
         capture.closed = True
+        if self.attempt_clips is not None and capture.media_format == "jpeg":
+            frames = self._frames.get(capture.attempt_id, (capture.task, []))[1]
+            try:
+                self.attempt_clips.submit(
+                    call_id=self.call_id, attempt_id=capture.attempt_id, task=capture.task,
+                    session_label=self.person.label,
+                    capture_status="finished" if capture.finish_print is not None else "interrupted",
+                    frames=frames, recorded_at_ms=capture.recorded_at_ms,
+                    captured_until_ms=capture.captured_until_ms,
+                )
+            except Exception as exc:
+                log_event(log, logging.WARNING, "clip.submit_failed", call_id=self.call_id,
+                          attempt_id=capture.attempt_id, error_type=type(exc).__name__)
         while True:
             try:
                 capture.queue.put_nowait(None)

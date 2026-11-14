@@ -2,6 +2,7 @@ import Foundation
 import LiveKit
 import Observation
 import ParentCallKit
+import os
 
 /// What the call screen shows of the live avatar: its video track while connected.
 @MainActor
@@ -40,9 +41,12 @@ final class SimliLiveAvatar: NSObject, LiveAvatarPlayer, RoomDelegate, @unchecke
     private var line = 0
     private var lineWaiter: CheckedContinuation<Void, Error>?
     private var spoke = false
+    private var lineStartedAt: TimeInterval = 0
+    private var submittedBytes = 0
+    private let log = Logger(subsystem: "HeartCall", category: "live-avatar")
 
     static let connectTimeout: TimeInterval = 15
-    /// No `SPEAK` this long after the audio was sent: the line failed (the caller falls back to the clip).
+    /// No `SPEAK` this long after the audio was sent: playback is uncertain and must not be replayed.
     static let speakTimeout: TimeInterval = 8
     /// Lets the last WebRTC audio drain before the microphone opens for her answer.
     static let drainNs: UInt64 = 300_000_000
@@ -76,6 +80,7 @@ final class SimliLiveAvatar: NSObject, LiveAvatarPlayer, RoomDelegate, @unchecke
             self.room = room
             return generation
         }
+        trace("connect", ticket: ticket)
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 lock.withLock { connectWaiter = continuation }
@@ -84,60 +89,104 @@ final class SimliLiveAvatar: NSObject, LiveAvatarPlayer, RoomDelegate, @unchecke
                 Task { [weak self] in
                     try? await Task.sleep(nanoseconds: UInt64(Self.connectTimeout * 1_000_000_000))
                     guard let self, self.lock.withLock({ self.connectWaiter != nil }) else { return }
-                    self.fail(LiveError.timedOut, ticket: ticket)
+                    self.fail(LiveError.timedOut, ticket: ticket, reason: "connect_timeout")
                 }
             }
         } onCancel: {
-            self.fail(CancellationError(), ticket: ticket)
+            self.fail(CancellationError(), ticket: ticket, reason: "connect_cancelled")
         }
     }
 
     func speak(pcm16k: Data, durationMs: Int) async throws {
+        try Task.checkCancellation()
         let (task, current) = lock.withLock { () -> (URLSessionWebSocketTask?, Int) in
             line += 1
             spoke = false
+            lineStartedAt = ProcessInfo.processInfo.systemUptime
+            submittedBytes = 0
             return (broken ? nil : socket, line)
         }
         guard let task else {
-            throw LiveError.closed
+            trace("not_started", line: current)
+            throw LivePlaybackFailure.notStarted
         }
-        try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                lock.withLock { lineWaiter = continuation }
-                Task { [weak self] in
-                    do {
-                        // Like simli-client: the whole line at once, in 6000-byte binary messages.
-                        var offset = 0
-                        while offset < pcm16k.count {
-                            let end = min(offset + 6000, pcm16k.count)
-                            try await task.send(.data(pcm16k.subdata(in: offset..<end)))
-                            offset = end
+        trace("line_begin", line: current)
+        do {
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    // A disconnect between preflight and registration must resolve this line too.
+                    let registered = lock.withLock { () -> Bool in
+                        guard !broken else { return false }
+                        lineWaiter = continuation
+                        return true
+                    }
+                    guard registered else {
+                        continuation.resume(throwing: LivePlaybackFailure.notStarted)
+                        return
+                    }
+                    if Task.isCancelled {
+                        finishLine(current, error: CancellationError())
+                        return
+                    }
+                    Task { [weak self] in
+                        do {
+                            // Like simli-client: the whole line at once, in 6000-byte binary messages.
+                            var offset = 0
+                            while offset < pcm16k.count {
+                                guard let self,
+                                      self.lock.withLock({ self.line == current && self.lineWaiter != nil && !self.broken })
+                                else { return }
+                                let end = min(offset + 6000, pcm16k.count)
+                                try await task.send(.data(pcm16k.subdata(in: offset..<end)))
+                                self.lock.withLock {
+                                    if self.line == current {
+                                        self.submittedBytes += end - offset
+                                    }
+                                }
+                                offset = end
+                            }
+                            self?.trace("audio_submitted", line: current)
+                        } catch {
+                            self?.trace("audio_send_failed", line: current)
+                            self?.finishLine(current, error: LiveError.closed)
+                            return
                         }
-                    } catch {
-                        self?.finishLine(current, error: LiveError.closed)
-                        return
+                        try? await Task.sleep(nanoseconds: UInt64(Self.speakTimeout * 1_000_000_000))
+                        guard let self,
+                              self.lock.withLock({ self.line == current && self.lineWaiter != nil }) else { return }
+                        if !self.lock.withLock({ self.spoke }) {
+                            self.trace("speak_timeout", line: current)
+                            self.finishLine(current, error: LiveError.neverSpoke)
+                            return
+                        }
+                        // Preserve the existing duration allowance when no SILENT arrives.
+                        let rest = max(0, Double(durationMs) / 1000 + 6 - Self.speakTimeout)
+                        try? await Task.sleep(nanoseconds: UInt64(rest * 1_000_000_000))
+                        self.finishLine(current, error: nil)
                     }
-                    try? await Task.sleep(nanoseconds: UInt64(Self.speakTimeout * 1_000_000_000))
-                    guard let self else { return }
-                    if !self.lock.withLock({ self.spoke }) {
-                        self.finishLine(current, error: LiveError.neverSpoke)
-                        return
-                    }
-                    // It started speaking but no SILENT came long after the line's length: take it as spoken
-                    // rather than replaying it as a clip on top.
-                    let rest = max(0, Double(durationMs) / 1000 + 6 - Self.speakTimeout)
-                    try? await Task.sleep(nanoseconds: UInt64(rest * 1_000_000_000))
-                    self.finishLine(current, error: nil)
                 }
+            } onCancel: {
+                self.finishLine(current, error: CancellationError())
             }
-        } onCancel: {
-            self.finishLine(current, error: CancellationError())
+            try await Task.sleep(nanoseconds: Self.drainNs)
+        } catch {
+            if error is CancellationError || Task.isCancelled {
+                trace("line_cancelled", line: current)
+                throw CancellationError()
+            }
+            if let failure = error as? LivePlaybackFailure, failure == .notStarted {
+                trace("not_started", line: current)
+                throw failure
+            }
+            // A failed send or missing signal cannot prove that the person heard nothing.
+            trace("line_interrupted", line: current)
+            throw LivePlaybackFailure.interrupted
         }
-        try await Task.sleep(nanoseconds: Self.drainNs)
     }
 
     func stop() async {
         let (task, current) = lock.withLock { (broken ? nil : socket, line) }
+        trace("stop", line: current)
         try? await task?.send(.string("SKIP"))
         finishLine(current, error: CancellationError())
     }
@@ -172,7 +221,7 @@ final class SimliLiveAvatar: NSObject, LiveAvatarPlayer, RoomDelegate, @unchecke
             guard let self, self.isCurrent(ticket) else { return }
             switch result {
             case .failure:
-                self.fail(LiveError.closed, ticket: ticket)
+                self.fail(LiveError.closed, ticket: ticket, reason: "socket_receive_failed")
             case .success(let message):
                 if case .string(let text) = message {
                     self.handle(text, ticket: ticket)
@@ -189,18 +238,21 @@ final class SimliLiveAvatar: NSObject, LiveAvatarPlayer, RoomDelegate, @unchecke
             return
         case "SPEAK":
             lock.withLock { spoke = true }
+            trace("speak", ticket: ticket)
         case "SILENT":
+            trace("silent", ticket: ticket)
             let (spoken, current) = lock.withLock { (spoke, line) }
             if spoken {
                 finishLine(current, error: nil)
             }
         case "STOP", "CLOSING", "RATE", "ERROR", "ERROR:":
-            fail(LiveError.closed, ticket: ticket)
+            let category = first == "ERROR:" ? "error" : first.lowercased()
+            fail(LiveError.closed, ticket: ticket, reason: "provider_\(category)")
         default:
             if first.contains("LIVEKIT") || first.contains("SDP") {
                 join(text, ticket: ticket)
             } else if first.contains("ENDFRAME") {
-                fail(LiveError.closed, ticket: ticket)
+                fail(LiveError.closed, ticket: ticket, reason: "provider_end_frame")
             }
             // DESTINATION, VIDEO_METADATA, warnings: nothing to do.
         }
@@ -210,14 +262,14 @@ final class SimliLiveAvatar: NSObject, LiveAvatarPlayer, RoomDelegate, @unchecke
         guard let info = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
               let url = info["livekit_url"] as? String, let token = info["livekit_token"] as? String,
               let room = lock.withLock({ isCurrentLocked(ticket) ? self.room : nil }) else {
-            fail(LiveError.badSession, ticket: ticket)
+            fail(LiveError.badSession, ticket: ticket, reason: "invalid_room_data")
             return
         }
         Task { [weak self] in
             do {
                 try await room.connect(url: url, token: token)
             } catch {
-                self?.fail(LiveError.closed, ticket: ticket)
+                self?.fail(LiveError.closed, ticket: ticket, reason: "room_join_failed")
             }
         }
     }
@@ -241,12 +293,12 @@ final class SimliLiveAvatar: NSObject, LiveAvatarPlayer, RoomDelegate, @unchecke
 
     func room(_ room: Room, didDisconnectWithError error: LiveKitError?) {
         guard let ticket = lock.withLock({ self.room === room ? generation : nil }) else { return }
-        fail(LiveError.closed, ticket: ticket)
+        fail(LiveError.closed, ticket: ticket, reason: "room_disconnected")
     }
 
     func room(_ room: Room, didFailToConnectWithError error: LiveKitError?) {
         guard let ticket = lock.withLock({ self.room === room ? generation : nil }) else { return }
-        fail(LiveError.closed, ticket: ticket)
+        fail(LiveError.closed, ticket: ticket, reason: "room_connect_failed")
     }
 
     // MARK: helpers
@@ -259,8 +311,9 @@ final class SimliLiveAvatar: NSObject, LiveAvatarPlayer, RoomDelegate, @unchecke
         ticket == generation && !broken
     }
 
-    /// The session is unusable: wake whoever waits; the next `speak` throws so the call falls back to clips.
-    private func fail(_ error: Error, ticket: Int) {
+    /// The session is unusable. The current line's playback is uncertain; future lines may use the fallback.
+    private func fail(_ error: Error, ticket: Int, reason: String) {
+        trace(reason, ticket: ticket)
         let (connecting, speaking) = lock.withLock {
             () -> (CheckedContinuation<Void, Error>?, CheckedContinuation<Void, Error>?) in
             guard isCurrentLocked(ticket) else { return (nil, nil) }
@@ -284,11 +337,22 @@ final class SimliLiveAvatar: NSObject, LiveAvatarPlayer, RoomDelegate, @unchecke
             defer { lineWaiter = nil }
             return lineWaiter
         }
+        guard let waiter else { return }
+        trace(error == nil ? "line_completed" : "line_failed", line: current)
         if let error {
-            waiter?.resume(throwing: error)
+            waiter.resume(throwing: error)
         } else {
-            waiter?.resume()
+            waiter.resume()
         }
+    }
+
+    /// Diagnostics contain only local counters and fixed categories, never credentials, URLs or media.
+    private func trace(_ event: String, line current: Int? = nil, ticket: Int? = nil) {
+        let state = lock.withLock {
+            (generation, line, spoke, submittedBytes,
+             lineStartedAt == 0 ? 0 : Int(max(0, ProcessInfo.processInfo.systemUptime - lineStartedAt) * 1000))
+        }
+        log.info("event=\(event, privacy: .public) session=\(ticket ?? state.0) line=\(current ?? state.1) spoke=\(state.2) submitted_bytes=\(state.3) elapsed_ms=\(state.4)")
     }
 
     @MainActor

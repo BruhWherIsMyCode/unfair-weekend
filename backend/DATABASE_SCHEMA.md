@@ -1,7 +1,8 @@
 # Shared SQLite storage contract
 
-Version: migration `0001_initial.sql`, 13 Nov 2026. **Executable source:**
-[the SQL migration](storage/migrations/0001_initial.sql). This guide explains
+Version: migrations `0001_initial.sql` and `0002_attempt_clips.sql`, 14 Nov 2026. **Executable sources:**
+[the initial schema](storage/migrations/0001_initial.sql) and
+[attempt video metadata](storage/migrations/0002_attempt_clips.sql). This guide explains
 ownership and behavior; do not create another handwritten ORM schema that can
 silently diverge from the migration.
 
@@ -41,6 +42,12 @@ metric formulas. Writers must implement the transactions below before claiming
 that part of persistence works in the running backend.
 
 The application wheel includes `storage` and `storage/migrations/*.sql`.
+
+Optional camera-task video recording adds `attempt_clips` (owner 2). Each row links a generated MP4 ID to
+its `calls` row and `client_commands` capture ID (`<call_id>.<wire_attempt_id>`), with task/session identity,
+capture completion, encoding state, timestamps, duration and expiry. It does not require an analysis
+`task_attempts` row and makes no baseline-eligibility decision. MP4 files live outside SQLite and outside
+git; [clip storage](CLIP_STORAGE.md) defines configuration, retrieval, limits and retention.
 
 SQLite 3.38+ with JSON functions is required. Use one application process,
 short write transactions and a bounded database worker/connection owner. Do not

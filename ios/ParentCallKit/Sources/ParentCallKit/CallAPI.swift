@@ -77,7 +77,8 @@ public struct CallAPI: Sendable {
         if let lastEventId {
             req.setValue(lastEventId, forHTTPHeaderField: "Last-Event-ID")
         }
-        return SSEConnection(request: req)
+        // Keep the injected transport configuration for the event stream as well as HTTP requests.
+        return SSEConnection(request: req, configuration: session.configuration)
     }
 
     public func answer(callId: String) async throws -> AnswerResponse {

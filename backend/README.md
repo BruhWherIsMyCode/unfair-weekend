@@ -28,6 +28,16 @@ uv build --out-dir .cache/python-dist
 
 Tests exercise a complete HTTP/SSE call with mocked voice, transcripts and video transport, plus lifecycle, cache, cancellation, authentication and provider-error paths. The Simli readiness fix reproduces delayed 404/429 responses and the permitted CDN redirect, with bounded retries and cancellation. One real ElevenLabs/Simli greeting was generated, downloaded and decoded successfully; [VOICE_VIDEO.md](VOICE_VIDEO.md#verification-and-limits) records that trial and its limits. Real answer STT and iPhone audio/video playback remain untested by Agent 2. No provider credits are used by the automated tests. The separate iOS family stage shell remains mocked.
 
+## Retained task videos
+
+The server can optionally keep one MP4 per camera task attempt, linked to its call and wire attempt ID.
+This includes learning calls, separate retries and interrupted captures. Enable it with `CLIP_STORAGE_DIR`
+on a persistent disk outside this repository, with `DATABASE_PATH` enabled and ffmpeg/libx264 installed.
+The default retention when enabled is seven days; `CLIP_RETENTION_DAYS` changes it.
+
+See [clip storage, retrieval and limits](CLIP_STORAGE.md). The existing family JPEG clip response remains
+compatible. The new MP4 retrieval routes are additive; the family app has not switched to them.
+
 ## The call person's profile
 
 The person who is called lives in `checkin_backend/data/person.json`: `name`, `pronoun` (`she` or `he`), `age` (positive whole number) and `about` (a list of short sentences). The call agent's prompt and the family text use it. The file's values win; `DEMO_PERSON_NAME` and `DEMO_PERSON_PRONOUN` only fill a field the file lacks or stand in when the file is missing (a warning is logged when they differ from the file). `DEMO_PERSON_FILE` points at another file. A broken file (bad JSON, empty name, pronoun not she/he, age not a positive whole number, `about` not a list of strings) stops the start-up with a clear error. The start-up log has one line such as `person: Feodor (he, 21) from data/person.json`.

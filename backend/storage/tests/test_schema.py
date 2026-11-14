@@ -14,7 +14,7 @@ class MigrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "test.sqlite3"
             with closing(connect_database(path)) as db:
-                self.assertEqual(apply_migrations(db), ["0001_initial.sql"])
+                self.assertEqual(apply_migrations(db), ["0001_initial.sql", "0002_attempt_clips.sql"])
                 db.execute("INSERT INTO families VALUES ('synthetic', 0)")
             with closing(connect_database(path)) as db:
                 self.assertEqual(apply_migrations(db), [])

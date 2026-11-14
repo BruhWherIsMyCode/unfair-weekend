@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(os)
+import os
+#endif
+
+private struct PlaybackAcknowledgmentFailed: Error {}
 
 /// The parent-side call engine. It owns no UI: it registers the phone, listens to the device event stream,
 /// rings, executes the backend's commands with the injected devices and reports everything back.
@@ -23,6 +28,9 @@ public actor CallClient {
     private var resourceState: [Resource: Bool] = [:]
     private var eventCounter = 0
     private var stopped = false
+    #if canImport(os)
+    private let playbackLog = Logger(subsystem: "HeartCall", category: "playback")
+    #endif
 
     private enum LiveState {
         case off
@@ -221,6 +229,10 @@ public actor CallClient {
             }
         } catch is CancellationError {
             return
+        } catch is PlaybackAcknowledgmentFailed {
+            // The line played. Its receipt was not confirmed; never contradict it with playback_failed
+            // or replay audio. The server's command deadline still bounds the pending acknowledgment.
+            return
         } catch {
             if cancelled.contains(id) || callId == nil {
                 return
@@ -244,32 +256,43 @@ public actor CallClient {
             let audio = try await api.speech(path: say.audioPath)
             try Task.checkCancellation()
             onEvent(.speaking(lineId: say.lineId, text: say.text, durationMs: say.durationMs, at: Date()))
+            playbackNote("start", commandId: say.commandId, mode: "live")
+            var played = false
             do {
                 try await live.speak(pcm16k: audio, durationMs: say.durationMs)
                 try Task.checkCancellation()
-                try await post(["type": "playback.completed", "command_id": say.commandId, "error": nil])
-                return
+                played = true
             } catch {
+                playbackNote("failed", commandId: say.commandId, mode: "live", error: error)
                 await live.stop()
                 if error is CancellationError || Task.isCancelled {
                     throw CancellationError()
                 }
-                // The live session broke: this line and the rest of the call play as clips or voice.
                 await dropLiveAvatar()
+                // Once audio might have been heard, replaying this command repeats its instruction.
+                // Only an explicit pre-submission failure permits fallback for this same line.
+                guard error as? LivePlaybackFailure == .notStarted else { throw error }
+            }
+            if played {
+                playbackNote("completed", commandId: say.commandId, mode: "live")
+                try await acknowledgePlayback(say.commandId)
+                return
             }
         }
         if let videoPath = say.videoPath, let clips = devices.clips {
             if try await playClip(say, path: videoPath, with: clips) {
-                try await post(["type": "playback.completed", "command_id": say.commandId, "error": nil])
+                try await acknowledgePlayback(say.commandId)
                 return
             }
         }
         let audio = try await api.speech(path: say.audioPath)
         try Task.checkCancellation()
         onEvent(.speaking(lineId: say.lineId, text: say.text, durationMs: say.durationMs, at: Date()))
+        playbackNote("start", commandId: say.commandId, mode: "voice")
         try await devices.player.play(pcm16k: audio, durationMs: say.durationMs)
         try Task.checkCancellation()
-        try await post(["type": "playback.completed", "command_id": say.commandId, "error": nil])
+        playbackNote("completed", commandId: say.commandId, mode: "voice")
+        try await acknowledgePlayback(say.commandId)
     }
 
     // MARK: live avatar
@@ -343,10 +366,13 @@ public actor CallClient {
             let mp4 = try await api.video(path: path)
             try Task.checkCancellation()
             onEvent(.speaking(lineId: say.lineId, text: say.text, durationMs: say.durationMs, at: Date()))
+            playbackNote("start", commandId: say.commandId, mode: "clip")
             try await clips.play(mp4: mp4)
             try Task.checkCancellation()
+            playbackNote("completed", commandId: say.commandId, mode: "clip")
             return true
         } catch {
+            playbackNote("failed", commandId: say.commandId, mode: "clip", error: error)
             await clips.stop()
             if error is CancellationError || Task.isCancelled {
                 throw CancellationError()
@@ -441,6 +467,45 @@ public actor CallClient {
     }
 
     // MARK: helpers
+
+    /// Retry only the receipt, using one event ID/body even when its first response was lost.
+    private func acknowledgePlayback(_ commandId: String) async throws {
+        guard let targetCall = callId else { throw CancellationError() }
+        let body: [String: Any?] = ["type": "playback.completed", "command_id": commandId,
+                                   "event_id": nextEventId(), "error": nil]
+        for attempt in 1...3 {
+            try Task.checkCancellation()
+            guard callId == targetCall else { throw CancellationError() }
+            playbackNote("ack_send", commandId: commandId, mode: "ack", attempt: attempt)
+            do {
+                try await api.postEvent(callId: targetCall, body)
+                playbackNote("ack_confirmed", commandId: commandId, mode: "ack", attempt: attempt)
+                return
+            } catch {
+                playbackNote("ack_failed", commandId: commandId, mode: "ack", attempt: attempt, error: error)
+                if error is CancellationError || Task.isCancelled { throw CancellationError() }
+                if attempt == 3 { throw PlaybackAcknowledgmentFailed() }
+                try await Task.sleep(nanoseconds: UInt64(attempt) * 200_000_000)
+            }
+        }
+    }
+
+    private func playbackNote(_ action: String, commandId: String, mode: String, attempt: Int = 0,
+                              error: Error? = nil) {
+        #if canImport(os)
+        let category: String
+        if let failure = error as? LivePlaybackFailure {
+            category = failure == .notStarted ? "not_started" : "interrupted"
+        } else if let failure = error as? URLError {
+            category = "url_\(failure.code.rawValue)"
+        } else if let failure = error as? APIError, case .http(let status, _) = failure {
+            category = "http_\(status)"
+        } else {
+            category = error == nil ? "none" : (error is CancellationError ? "cancelled" : "other")
+        }
+        playbackLog.info("\(action, privacy: .public) command_id=\(commandId, privacy: .public) mode=\(mode, privacy: .public) ack_attempt=\(attempt) error=\(category, privacy: .public)")
+        #endif
+    }
 
     private func nextEventId() -> String {
         eventCounter += 1
