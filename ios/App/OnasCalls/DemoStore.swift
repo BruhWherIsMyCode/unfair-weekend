@@ -94,6 +94,7 @@ final class DemoStore {
         #endif
         callMonitor.onChange = { [weak self] in self?.callsChanged() }
         feed.onMessage = { [weak self] message in self?.receive(message) }
+        feed.onResend = { [weak self] message in self?.renotify(message) }
     }
 
     // MARK: Backend
@@ -138,6 +139,16 @@ final class DemoStore {
                 }
             }
         } else if message.asksToCall, isNew {
+            notify(title: String(localized: "Daily check-in"), body: message.text, loud: false)
+        }
+    }
+
+    /// Debug (`resend-alert.sh`): the earlier message's notification again, nothing else. No new alert, no history
+    /// row, the screen stays as it is.
+    func renotify(_ message: FamilyMessage) {
+        if message.isAlert {
+            notify(title: callNow + ".", body: message.text, loud: true)
+        } else if message.asksToCall {
             notify(title: String(localized: "Daily check-in"), body: message.text, loud: false)
         }
     }

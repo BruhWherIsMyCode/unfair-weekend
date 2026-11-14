@@ -5,7 +5,7 @@ import json
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import asdict
-from secrets import compare_digest
+from secrets import compare_digest, token_hex
 from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, Header, Request
@@ -32,6 +32,7 @@ from .store import NoStore, Store, now_ms
 
 IdStr = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,128}$")]
 KEEPALIVE_S = 15.0
+RESEND_KINDS = ("change_noticed", "concern_raised", "incomplete", "no_answer")  # the kinds the family app notifies
 log = logging.getLogger(__name__)
 
 
@@ -639,5 +640,28 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
             # Stored messages survive restarts; the in-memory list only covers this process.
             return await desk.store.family_messages(family_id)
         return [asdict(m) for m in desk.delivery.for_family(family_id, desk.people.all())]
+
+    @app.post("/v1/debug/families/{family_id}/resend", dependencies=auth)
+    async def resend_alert(family_id: str, request: Request, call_id: str | None = None) -> dict[str, Any]:
+        # Debug: shows an earlier family message's notification on the family phones again. Nothing is created
+        # or stored: `message.resend` carries the same message, and the app only shows its notification.
+        desk = desk_of(request)
+        found = await messages(family_id, request)
+        if call_id is not None:
+            found = [m for m in found if m["call_id"] == call_id and m["kind"] in RESEND_KINDS]
+        else:
+            found = [m for m in found if m["kind"] in ("change_noticed", "concern_raised")]
+        if not found:
+            raise ApiError(404, "not_found", "No alert to resend for this family.")
+        message = found[0]
+        devices = desk.hub.families_of(family_id)
+        if not devices:
+            raise ApiError(409, "no_family_device", "No family phone has registered since the backend started.")
+        desk.hub.send_many(devices, "message.resend", message,
+                           event_id=f"{message['message_id']}_resend_{token_hex(4)}")
+        log_event(log, logging.INFO, "family.message_resent", call_id=message["call_id"],
+                  message_id=message["message_id"], kind=message["kind"], family_devices=len(devices))
+        return {"message_id": message["message_id"], "call_id": message["call_id"], "kind": message["kind"],
+                "text": message["text"], "family_devices": len(devices)}
 
     return app

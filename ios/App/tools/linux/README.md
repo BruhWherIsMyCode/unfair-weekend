@@ -21,6 +21,11 @@ and runs it from there, up to date on every start. Your own checkout and branch 
 5. To see one call's state and log afterwards, run:
    `ios/App/tools/linux/start-call.sh <call_id>`
 
+6. To show the last family alert's notification on the family phone again (debug), run:
+   `ios/App/tools/linux/resend-alert.sh`, or `resend-alert.sh <call_id>` for one call's message.
+   It only rings the notification again: no new alert, no new history row, nothing stored.
+   The family app must be running and connected to this backend.
+
 Options: `--port 8000`, `--branch main` (another branch to run, e.g. one under review),
 `--runner auto|analysis|fake|scripted`, `--reset-keys`.
 The demo key is made once and kept in `~/.local/share/checkin-backend/demo_key`, outside the repo.

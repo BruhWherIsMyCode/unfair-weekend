@@ -43,6 +43,8 @@ final class FamilyFeed {
     private(set) var status: Status = .off
 
     @ObservationIgnored var onMessage: (FamilyMessage) -> Void = { _ in }
+    /// Debug (`resend-alert.sh`): an earlier message whose notification should show again.
+    @ObservationIgnored var onResend: (FamilyMessage) -> Void = { _ in }
     @ObservationIgnored private let defaults = UserDefaults.standard
     @ObservationIgnored private var loop: Task<Void, Never>?
     @ObservationIgnored private var lastEventId: String?
@@ -149,6 +151,9 @@ final class FamilyFeed {
                 let data = Data(line.dropFirst(5).trimmingCharacters(in: .whitespaces).utf8)
                 if event == "message.new", let message = try? Self.decoder.decode(FamilyMessage.self, from: data) {
                     onMessage(message)
+                } else if event == "message.resend",
+                          let message = try? Self.decoder.decode(FamilyMessage.self, from: data) {
+                    onResend(message)
                 }
                 event = "message"
             }
