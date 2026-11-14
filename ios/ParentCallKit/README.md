@@ -34,8 +34,15 @@ camera or microphone is lost. The design team builds the screens on top of `Call
     changes, media-services reset, the app going to the background or inactive, the end of every call, and CallKit
     deactivating the audio session. To see restarts, filter Console.app by category "keepalive".
   - Limit: if iOS ends the app (low memory, phone restart, force quit from the app switcher) it cannot ring until
-    opened again. The full fix is a VoIP push (PushKit), which needs the Apple developer account and the backend.
-    Written, not compiled, not tried on a device.
+    opened again. The full fix is a VoIP push (PushKit), which needs a paid Apple developer account (a free team
+    has no push entitlement) and the backend.
+  - Right after a CallKit call the system still holds the audio, so reactivation can fail ("insufficient
+    priority"); the loop then retries twice a second under a background task until the session is back. Every app
+    transition (`ensureRunning(force: true)`) stops and replays the loop, because after CallKit deactivated the
+    session the player can report "playing" while silent, and iOS then suspends the app.
+  - Tried on an iPhone (iOS 27, free team, 14 Nov): background for minutes, ring through CallKit, answer from the
+    banner (the app comes to the front with the camera), a missed call in the background, then the next call
+    rings again.
   - `FakeDevices.make()`: synthetic input for tests, previews and the simulator executable.
 - `Ringer`: the ring the app plays itself on its own Accept/Decline screen while the app is in the foreground.
   `start()` loops a generated two-tone ring (about 2 s of ringing, then 2 s of silence) on the loudspeaker and

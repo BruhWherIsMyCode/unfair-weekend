@@ -116,11 +116,13 @@ final class AppState {
         connect()
     }
 
-    /// Restarts the silent loop if it stopped (logged under "keepalive"). No-op in the Simulator, which has no
+    /// Restarts the silent loop (logged under "keepalive"), even if the player claims to be playing: called at
+    /// transitions (background, end of a call, CallKit releasing the audio). No-op in the Simulator, which has no
     /// keep-alive.
     func keepAwake(reason: String) {
         #if !targetEnvironment(simulator)
-        keepAlive.ensureRunning(reason: reason)
+        keepAlive.ensureRunning(reason: reason, force: true)
+        Diag.log("keepAwake \(reason): loop=\(keepAlive.isPlaying) err=\(keepAlive.lastError ?? "-")")
         #endif
     }
 
@@ -175,6 +177,9 @@ final class AppState {
                                                queue: .main) { [weak self] note in
             guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
                   let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+            let reason = note.userInfo?[AVAudioSessionInterruptionReasonKey] as? UInt
+            Diag.log("audio interruption \(type == .began ? "BEGAN" : "ended") reason=\(reason.map(String.init) ?? "nil")"
+                     + " category=\(AVAudioSession.sharedInstance().category.rawValue)")
             let available = type == .ended
             MainActor.assumeIsolated {
                 self?.model?.resourceChanged(.microphone, available: available,

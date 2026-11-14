@@ -59,27 +59,51 @@ public final class BackgroundKeepAlive: @unchecked Sendable {
     private var player: AVAudioPlayer?
     private var observers: [NSObjectProtocol] = []
     private var watchdog: Timer?
+    private var retryTimer: Timer?
+    private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    /// The last activation failed: the player may report playing although the session is not active.
+    private var activationFailed = false
     private let log = Logger(subsystem: "HeartCall", category: "keepalive")
 
     public init() {}
 
+    /// Main thread. Whether the silent loop is playing right now.
+    public var isPlaying: Bool { player?.isPlaying == true }
+    /// Main thread. The last error from starting the loop, for diagnostics.
+    public private(set) var lastError: String?
+
     /// Main thread. Safe to call any number of times: re-activates the session, recreates the player if needed
     /// and plays the loop if it is not playing. Also starts the 5 s watchdog and the notification hooks once.
     public func start() {
-        _ = startLoop()
+        _ = startLoop(force: false)
     }
 
     /// Main thread. Like `start()`, plus one log line (category "keepalive") when the loop really had to be
     /// restarted. Nothing is logged when it was already running.
-    public func ensureRunning(reason: String) {
-        if startLoop() {
+    ///
+    /// `force` stops and replays the loop even when the player says it is playing. After CallKit or an
+    /// interruption has deactivated the session under it, the player can keep saying so while no sound flows,
+    /// and iOS then suspends the app. Replaying silence costs nothing, so pass it at every app transition.
+    public func ensureRunning(reason: String, force: Bool = false) {
+        if startLoop(force: force) {
             log.info("keep-alive loop restarted, reason: \(reason, privacy: .public)")
         }
     }
 
     /// Returns true when the loop was not playing or the session had to be activated again.
-    private func startLoop() -> Bool {
+    private func startLoop(force: Bool) -> Bool {
         var restarted = false
+        if observers.isEmpty {
+            observe()
+        }
+        if watchdog == nil {
+            // Fires only while the app runs; `retrySoon` holds a background task when a restart fails.
+            let timer = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
+                self?.ensureRunning(reason: "watchdog")
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            watchdog = timer
+        }
         do {
             if player?.isPlaying != true {
                 restarted = true
@@ -90,25 +114,55 @@ public final class BackgroundKeepAlive: @unchecked Sendable {
                 player?.numberOfLoops = -1
                 player?.prepareToPlay()
             }
-            if observers.isEmpty {
-                observe()
-            }
-            if watchdog == nil {
-                // Fires only while the app runs, which is the window before iOS suspends it (~30 s).
-                let timer = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
-                    self?.ensureRunning(reason: "watchdog")
-                }
-                RunLoop.main.add(timer, forMode: .common)
-                watchdog = timer
+            if activationFailed || force {
+                // The session was taken from under the player, which may still say it is playing: start it again.
+                player?.stop()
+                restarted = true
             }
             if player?.isPlaying == false {
                 restarted = player?.play() == true || restarted
             }
+            activationFailed = false
+            lastError = nil
+            stopRetrying()
         } catch {
             // Without the loop the app still works in the foreground; it just will not ring in the background.
+            activationFailed = true
+            lastError = "\(error)"
             log.error("keep-alive could not start: \(error.localizedDescription, privacy: .public)")
+            retrySoon()
         }
         return restarted
+    }
+
+    /// Right after a CallKit call the system still holds the audio, so activation fails ("insufficient priority").
+    /// Without sound iOS suspends the app within seconds and the next call cannot ring. Hold a background task and
+    /// retry twice a second until the session is back (iOS ends the task after about 30 s at most).
+    private func retrySoon() {
+        MainActor.assumeIsolated {
+            if backgroundTask == .invalid {
+                backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "keep-alive") { [weak self] in
+                    self?.stopRetrying()
+                }
+            }
+        }
+        guard retryTimer == nil else { return }
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            self?.ensureRunning(reason: "retry")
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        retryTimer = timer
+    }
+
+    private func stopRetrying() {
+        retryTimer?.invalidate()
+        retryTimer = nil
+        MainActor.assumeIsolated {
+            if backgroundTask != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTask)
+                backgroundTask = .invalid
+            }
+        }
     }
 
     private func observe() {
@@ -120,7 +174,7 @@ public final class BackgroundKeepAlive: @unchecked Sendable {
                 [weak self] note in
                 guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
                       AVAudioSession.InterruptionType(rawValue: raw) == .ended else { return }
-                self?.ensureRunning(reason: "interruption-ended")
+                self?.ensureRunning(reason: "interruption-ended", force: true)
             },
             center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) {
                 [weak self] _ in
@@ -129,7 +183,7 @@ public final class BackgroundKeepAlive: @unchecked Sendable {
             center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil,
                                queue: .main) { [weak self] _ in
                 self?.player = nil
-                self?.ensureRunning(reason: "media-services-reset")
+                self?.ensureRunning(reason: "media-services-reset", force: true)
             },
         ]
     }

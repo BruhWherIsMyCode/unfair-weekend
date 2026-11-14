@@ -132,6 +132,9 @@ final class SSEConnection: NSObject, URLSessionDataDelegate, @unchecked Sendable
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        // One session per connection, and a URLSession keeps its delegate: release both now, or every reconnect
+        // leaks one.
+        session.finishTasksAndInvalidate()
         if let error {
             continuation.finish(throwing: error)
         } else {

@@ -46,7 +46,9 @@ final class SystemCalls: NSObject {
         update.supportsGrouping = false
         update.supportsUngrouping = false
         update.supportsDTMF = false
+        Diag.log("callkit reportNewIncomingCall")
         provider.reportNewIncomingCall(with: id, update: update) { [weak self] error in
+            Diag.log("callkit reported: \(error.map { String(describing: $0) } ?? "ok")")
             guard error != nil else { return }
             Task { @MainActor in
                 if self?.current == id {
@@ -85,11 +87,13 @@ extension SystemCalls: CXProviderDelegate {
     }
 
     nonisolated func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
+        Diag.log("callkit didActivate audio")
         // Nothing needed: the call's audio session is shared with the app's own players.
     }
 
     nonisolated func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
         // The system deactivates the session without any interruption notice: the silent loop stops with it.
+        Diag.log("callkit didDeactivate audio")
         MainActor.assumeIsolated {
             onAudioDeactivated()
         }
