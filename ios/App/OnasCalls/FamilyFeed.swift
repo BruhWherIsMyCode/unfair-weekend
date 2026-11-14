@@ -172,6 +172,45 @@ final class FamilyFeed {
         return frames.isEmpty ? nil : AlertClip(url: path, frames: frames, periodMs: body.periodMs)
     }
 
+    /// Every task attempt's video of a call (`GET /v1/calls/{call_id}/clips`). Empty when the backend does not
+    /// record videos (no `CLIP_STORAGE_DIR`).
+    func fetchCallClips(_ callId: String) async throws -> [AttemptClip] {
+        guard let base = url else { throw URLError(.badURL) }
+        struct Body: Decodable { let clips: [AttemptClip] }
+        let (data, response) = try await URLSession.shared.data(for: Self.request(base, "/v1/calls/\(callId)/clips", key: demoKey))
+        try Self.check(response)
+        return try Self.decoder.decode(Body.self, from: data).clips
+    }
+
+    enum VideoError: Error { case preparing, failed, expired, missing }
+
+    /// Downloads an attempt video to this phone once (`GET /v1/clips/{clip_id}/video`) and returns the file.
+    /// Waits while the backend is still encoding it (202), up to about 15 s.
+    func downloadVideo(_ clip: AttemptClip) async throws -> URL {
+        if let cached = AttemptVideos.cached(clip.clipId) { return cached }
+        guard let base = url else { throw URLError(.badURL) }
+        for _ in 0..<15 {
+            var request = Self.request(base, clip.videoPath, key: demoKey)
+            request.timeoutInterval = 30
+            let (temp, response) = try await URLSession.shared.download(for: request)
+            guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+            switch http.statusCode {
+            case 200:
+                let dest = AttemptVideos.file(clip.clipId)
+                try? FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? FileManager.default.removeItem(at: dest)
+                try FileManager.default.moveItem(at: temp, to: dest)
+                return dest
+            case 202: try await Task.sleep(for: .seconds(1))
+            case 409: throw VideoError.failed
+            case 410: throw VideoError.expired
+            case 404: throw VideoError.missing
+            default: try Self.check(response); throw URLError(.badServerResponse)
+            }
+        }
+        throw VideoError.preparing
+    }
+
     private static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase

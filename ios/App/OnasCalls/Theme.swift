@@ -33,6 +33,8 @@ enum Palette {
     static let thumbStripes = (Color(hex: 0xEBD5AE), Color(hex: 0xF3E3C7))
     static let clipStripes = (Color(hex: 0xD9CCB8), Color(hex: 0xE4D9C8))
     static let clipLabel = Color(hex: 0x6B5E4D)
+    /// Around an aspect-fit comparison clip (the light clip stripe).
+    static let letterbox = Color(hex: 0xE4D9C8)
     static let callAvatarStripes = (Color(hex: 0x5A5047), Color(hex: 0x655A50))
     static let callAvatarText = Color(hex: 0xC9C1B5)
 }
@@ -179,7 +181,15 @@ enum Clock {
         f.setLocalizedDateFormatFromTemplate("EEEEdMMMM")
         return f
     }()
+    private static let shortDayFormat: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_GB")
+        f.setLocalizedDateFormatFromTemplate("EEEdMMM")
+        return f
+    }()
     static func time(_ d: Date) -> String { hm.string(from: d) }
+    /// "Fri 13 Nov"
+    static func shortDay(_ d: Date) -> String { shortDayFormat.string(from: d).replacingOccurrences(of: ",", with: "") }
     /// "Thursday 12 November" (en_GB puts no comma here; strip one if a future OS adds it).
     static func date(_ d: Date) -> String { day.string(from: d).replacingOccurrences(of: ",", with: "") }
 }

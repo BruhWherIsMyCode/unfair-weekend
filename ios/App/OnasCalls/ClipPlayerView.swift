@@ -5,6 +5,8 @@ import SwiftUI
 /// Every caller copes with them being missing.
 enum LocalAssets {
     static let clipURL = Bundle.main.url(forResource: "clip", withExtension: "mp4")
+    /// The staged scene's earlier check-in, next to clip.mp4 on the alert. Optional.
+    static let earlierClipURL = Bundle.main.url(forResource: "earlier", withExtension: "mp4")
     static let fedyaPhoto: UIImage? = Bundle.main.path(forResource: "fedya", ofType: "jpg").flatMap(UIImage.init(contentsOfFile:))
 
     static func clipThumbnail() async -> UIImage? {

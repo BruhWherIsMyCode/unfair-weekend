@@ -39,6 +39,8 @@ final class DemoStore {
     /// Her frames for `liveMessage`, once downloaded.
     private(set) var clip: AlertClip?
     let feed = FamilyFeed()
+    /// The alert's earlier check-in next to today's.
+    let comparison = Comparison()
 
     // Profile
     var profile = PersonProfile() { didSet { ProfileStorage.save(profile) } }
@@ -103,6 +105,7 @@ final class DemoStore {
             keepAlive.start()
         }
         loadClipIfNeeded()
+        loadComparison()
     }
 
     /// A family message from the check-in call. An alert (a change from her usual, or a concern) rings with a
@@ -114,8 +117,10 @@ final class DemoStore {
             seenMessages.insert(message.messageId)
             defaults.set(Array(seenMessages.suffix(200)), forKey: Key.seen)
         }
-        history.upsert(CallRecord(id: message.messageId, date: Self.parse(message.createdAt) ?? Date(),
-                                  outcome: .init(kind: message.kind), text: message.text, live: true))
+        var record = CallRecord(id: message.messageId, date: ISODate.parse(message.createdAt) ?? Date(),
+                                outcome: .init(kind: message.kind), text: message.text, live: true)
+        record.callId = message.callId
+        history.upsert(record)
         if message.isAlert {
             if isNew {
                 resetScene()
@@ -127,6 +132,10 @@ final class DemoStore {
                 liveMessage = message
                 save()
                 loadClipIfNeeded()
+                if isNew || comparison.callId != message.callId || comparison.phase == .legacy
+                    || comparison.phase == .failed {
+                    loadComparison()
+                }
             }
         } else if message.asksToCall, isNew {
             notify(title: String(localized: "Daily check-in"), body: message.text, loud: false)
@@ -155,12 +164,32 @@ final class DemoStore {
         UNUserNotificationCenter.current().add(request)
     }
 
-    private static func parse(_ iso: String) -> Date? {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = f.date(from: iso) { return d }
-        f.formatOptions = [.withInternetDateTime]
-        return f.date(from: iso)
+    /// The alert's clip area: the live call's attempt videos with an earlier check-in, or the staged clips.
+    func loadComparison() {
+        if let message = liveMessage {
+            comparison.loadLive(callId: message.callId, feed: feed, history: history,
+                                before: ISODate.parse(message.createdAt) ?? alertTime)
+        } else if phase != .asUsual {
+            comparison.loadStaged(at: alertTime)
+        } else {
+            comparison.clear()
+        }
+    }
+
+    /// Opening the alert: try again when the clips failed or the backend had none yet (still encoding).
+    func refreshComparisonIfStale() {
+        if comparison.phase == .failed || comparison.phase == .legacy || comparison.phase == .idle {
+            loadComparison()
+        }
+    }
+
+    /// The profile: the backend's current state of every recent call's attempt videos (ready, expired…).
+    func refreshAttempts(_ records: [CallRecord]) async {
+        guard feed.isConfigured else { return }
+        for record in records.prefix(15) {
+            guard record.live, let id = record.callId, let clips = try? await feed.fetchCallClips(id) else { continue }
+            history.setAttempts(clips, callId: id)
+        }
     }
 
     // MARK: Derived text
@@ -188,6 +217,7 @@ final class DemoStore {
         armedFor = fire
         recordStaged(at: fire)
         save()
+        loadComparison()
 
         let content = UNMutableNotificationContent()
         content.title = callNow + "."
@@ -206,6 +236,7 @@ final class DemoStore {
         enterAlert(at: Date())
         recordStaged(at: Date())
         save()
+        loadComparison()
     }
 
     /// The staged alert goes into the history too, with the staged report and clip.
@@ -244,6 +275,7 @@ final class DemoStore {
         overlay = .none
         liveMessage = nil
         clip = nil
+        comparison.clear()
         calledAt = nil
         declinedAt = nil
         armedFor = nil
@@ -290,6 +322,7 @@ final class DemoStore {
         fakeTimer?.cancel()
         liveMessage = nil
         clip = nil
+        comparison.clear()
         phase = .asUsual
         screen = .home
         overlay = .none

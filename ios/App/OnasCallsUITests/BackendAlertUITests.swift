@@ -1,7 +1,7 @@
 import XCTest
 
 /// A real alert from the check-in backend: the app registers as a family device, the backend sends a change
-/// message with a clip, the amber card appears, and the alert shows the backend's text and the frames.
+/// message with a clip, the amber card appears, and the alert shows the backend's text and the clips.
 ///
 ///     TEST_RUNNER_ONAS_BASE_URL=http://127.0.0.1:8766 TEST_RUNNER_ONAS_DEMO_KEY=... \
 ///     TEST_RUNNER_SCREENSHOT_DIR=/tmp/shots xcodebuild test -scheme OnasCalls \
@@ -30,7 +30,12 @@ final class BackendAlertUITests: XCTestCase {
         let report = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "different from his usual"))
             .firstMatch
         XCTAssertTrue(report.waitForExistence(timeout: 5), "The report does not show the backend's text.")
-        XCTAssertTrue(app.staticTexts["clip, both tries"].waitForExistence(timeout: 10), "The clip did not load.")
+        // With attempt videos (CLIP_STORAGE_DIR) the comparison; without them the old frame clip.
+        let comparison = app.buttons["comparison.play"]
+        let frames = app.staticTexts["clip, both tries"]
+        let loaded = NSPredicate { _, _ in (comparison.exists && comparison.isEnabled) || frames.exists }
+        expectation(for: loaded, evaluatedWith: nil)
+        waitForExpectations(timeout: 25)
         sleep(2)
         snap("alert-with-clip")
     }
