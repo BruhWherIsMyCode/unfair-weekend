@@ -26,6 +26,16 @@ Options: `--port 8000`, `--branch main` (another branch to run, e.g. one under r
 The demo key is made once and kept in `~/.local/share/checkin-backend/demo_key`, outside the repo.
 To set your own key, set `DEMO_KEY` before you start.
 
+To keep live animation for fixed lines and Claude's generated questions, with prepared avatar videos disabled:
+
+```bash
+AVATAR_MODE=live AVATAR_PREGENERATED_CLIPS=off ios/App/tools/linux/start-backend.sh
+```
+
+`AVATAR_PREGENERATED_CLIPS=off` skips MP4 preparation and prevents cached MP4s from being offered to the phone.
+It keeps voice preparation and live Simli sessions available, and leaves existing cached files on disk.
+Unset or `on` preserves prepared-video behavior. The backend must restart to apply the setting.
+
 On the first run the script asks for the ElevenLabs key (voice, transcription) and the Simli key
 (avatar clips). Typing is hidden, and Enter skips one. They are saved in
 `~/.local/share/checkin-backend/keys.env` (only you can read it, never in the repo) and reused after

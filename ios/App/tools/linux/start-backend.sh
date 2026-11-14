@@ -28,6 +28,7 @@
 # Keys: DEMO_KEY is made once. ELEVENLABS_API_KEY (voice, transcription) and SIMLI_API_KEY (avatar clips) are asked
 #       for on the first run (Enter skips) and stored in ~/.local/share/checkin-backend/ (mode 600), never in the repo.
 #       A key set in the environment wins; --reset-keys asks again.
+# Set AVATAR_MODE=live AVATAR_PREGENERATED_CLIPS=off to keep live animation without preparing or offering MP4s.
 set -euo pipefail
 
 BRANCH="main"
@@ -265,6 +266,8 @@ step "Settings of this run"
 if [ "$CLAUDE" = "off" ]; then echo "  Claude:    off (fixed-order call)"; else echo "  Claude:    $CLAUDE"; fi
 if [ -n "$MEASURING_PROBLEM" ]; then echo "  Measuring: NOT ready ($RUNNER call)"; else echo "  Measuring: ready"; fi
 echo "  Runner:    $RUNNER"
+echo "  Avatar:    ${AVATAR_MODE:-live}"
+echo "  Prepared avatar clips: ${AVATAR_PREGENERATED_CLIPS:-on}"
 if [ "$MIRRORED" = 1 ]; then echo "  Camera:    mirrored"; else echo "  Camera:    not mirrored"; fi
 if [ -n "$BASELINE_NEEDED" ]; then
     echo "  Baseline:  needs $BASELINE_NEEDED normal calls"
