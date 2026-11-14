@@ -73,18 +73,24 @@ class ClipGateway:
     def __init__(
         self, *, api_key: str = "", face_id: str = DEFAULT_FACE_ID,
         cache_dir: Path | None = None, transport: httpx.AsyncBaseTransport | None = None,
+        enabled: bool = True,
     ) -> None:
         self._key = api_key.strip()
         self._face_id = face_id
+        self._enabled = enabled
         self._cache_dir = cache_dir or Path(__file__).resolve().parents[1] / ".cache" / "avatar"
         self._client = httpx.AsyncClient(timeout=90, transport=transport, follow_redirects=False)
         self._pending = PendingAssets()
 
     @classmethod
     def from_environment(cls) -> "ClipGateway":
+        mode = os.environ.get("AVATAR_PREGENERATED_CLIPS", "on").strip().lower()
+        if mode not in ("on", "off"):
+            raise ValueError("AVATAR_PREGENERATED_CLIPS must be on or off")
         return cls(
             api_key=os.environ.get("SIMLI_API_KEY") or os.environ.get("SMILI_API_KEY", ""),
             face_id=os.environ.get("SIMLI_FACE_ID", DEFAULT_FACE_ID),
+            enabled=mode == "on",
         )
 
     def _path(self, audio: bytes) -> Path:
@@ -93,8 +99,14 @@ class ClipGateway:
         ]).encode()).hexdigest()
         return self._cache_dir / f"{key}.mp4"
 
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
     def ready(self, audio: bytes) -> Path | None:
         """Never performs generation or network I/O on the call's critical path."""
+        if not self.enabled:
+            return None
         path = self._path(audio)
         try:
             if not 16 <= path.stat().st_size <= MAX_VIDEO_BYTES:
@@ -107,6 +119,8 @@ class ClipGateway:
         return None
 
     async def prepare(self, audio: bytes) -> Path:
+        if not self.enabled:
+            raise ProviderError("Prepared avatar videos are disabled")
         check_pcm(audio)
         cached = self.ready(audio)
         if cached is not None:

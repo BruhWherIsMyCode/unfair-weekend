@@ -22,6 +22,9 @@ async def prepare(*, video: bool, only_line: str | None) -> int:
         return 1
     speech = SpeechGateway.from_environment()
     clips = ClipGateway.from_environment()
+    if video and not clips.enabled:
+        print("Prepared avatar videos are disabled; preparing voice only.")
+        video = False
     failed = 0
     try:
         for line_id in line_ids:

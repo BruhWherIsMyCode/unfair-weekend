@@ -287,7 +287,7 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
         app.state.debug = DebugDesk(demo_person.person_id, demo_person)
         try:
             log_event(log, logging.INFO, "application.started", voiced=gateway.voiced,
-                      live_avatar=live_avatar.available)
+                      live_avatar=live_avatar.available, prepared_avatar_clips=avatar.enabled)
             yield
         finally:
             log.info("application.stopping")
