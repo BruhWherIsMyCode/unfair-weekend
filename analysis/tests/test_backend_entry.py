@@ -110,7 +110,8 @@ def usual(tmp_path: Path) -> Dict[str, Any]:
 @pytest.mark.parametrize("name,value", [("CALL_DRIVER", "gpt"), ("UW_CLAUDE_BACKEND", "bedrock"),
                                         ("UW_MIRRORED", "yes"), ("UW_BASELINE_NEEDED", "0"),
                                         ("UW_BASELINE_NEEDED", "-3"), ("UW_BASELINE_NEEDED", "five"),
-                                        ("UW_CALL_LOG", "loud")])
+                                        ("UW_CALL_LOG", "loud"), ("UW_CLAUDE_FALLBACK", "yes"),
+                                        ("UW_CLAUDE_FALLBACK", "off")])
 def test_an_invalid_value_is_a_clear_error_before_the_call_starts(name, value, tmp_path):
     link = Link()
     with pytest.raises(ValueError, match=name):
@@ -246,7 +247,8 @@ def test_a_crash_still_publishes_one_final_message_with_a_pending_concern(tmp_pa
 def test_the_persons_profile_reaches_the_session(tmp_path, monkeypatch):
     seen: Dict[str, Any] = {}
 
-    async def fake_run_call(session, adapter, mode=None, client=None, script=None, agent_clock=None, backend="api"):
+    async def fake_run_call(session, adapter, mode=None, client=None, script=None, agent_clock=None, backend="api",
+                            allow_fallback=None):
         seen.update(pronoun=session.person_pronoun, age=session.person_age, about=session.person_about)
         return session.build_session_result().to_dict()
 
@@ -284,7 +286,8 @@ def test_an_unwritable_runs_dir_is_not_an_error(tmp_path):
 def test_claude_through_the_subscription_removes_the_api_key_and_passes_the_backend(tmp_path, monkeypatch):
     seen: Dict[str, Any] = {}
 
-    async def fake_run_call(session, adapter, mode=None, client=None, script=None, agent_clock=None, backend="api"):
+    async def fake_run_call(session, adapter, mode=None, client=None, script=None, agent_clock=None, backend="api",
+                            allow_fallback=None):
         seen.update(mode=mode, backend=backend, key=backend_entry.os.environ.get("ANTHROPIC_API_KEY"))
         return session.build_session_result().to_dict()
 
@@ -299,7 +302,8 @@ def test_claude_through_the_subscription_removes_the_api_key_and_passes_the_back
 def test_the_api_backend_keeps_the_key_in_place(tmp_path, monkeypatch):
     seen: Dict[str, Any] = {}
 
-    async def fake_run_call(session, adapter, mode=None, client=None, script=None, agent_clock=None, backend="api"):
+    async def fake_run_call(session, adapter, mode=None, client=None, script=None, agent_clock=None, backend="api",
+                            allow_fallback=None):
         seen.update(mode=mode, backend=backend, key=backend_entry.os.environ.get("ANTHROPIC_API_KEY"))
         return session.build_session_result().to_dict()
 
@@ -307,3 +311,32 @@ def test_the_api_backend_keeps_the_key_in_place(tmp_path, monkeypatch):
     monkeypatch.setattr(backend_entry, "run_call", fake_run_call)
     run(Link(), seeded_env(tmp_path, CALL_DRIVER="claude"))
     assert seen == {"mode": "claude", "backend": "api", "key": "not-a-real-key"}
+
+
+def test_disabled_fallback_is_passed_from_the_injected_environment(tmp_path, monkeypatch):
+    seen = []
+
+    async def fake_run_call(session, adapter, mode=None, **kwargs):
+        seen.append(kwargs["allow_fallback"])
+        return await session.finish()
+
+    monkeypatch.setenv("UW_CLAUDE_FALLBACK", "on")
+    monkeypatch.setattr(backend_entry, "run_call", fake_run_call)
+    run(Link(), seeded_env(tmp_path, CALL_DRIVER="claude", UW_CLAUDE_FALLBACK="off"))
+    assert seen == [False]
+
+
+def test_strict_failure_is_rethrown_after_the_final_call_record_is_saved(tmp_path, monkeypatch):
+    from analysis.session import run_call as driver
+    from analysis.session.agent import ClaudeFailed
+    from analysis.session.claude_client import FakeClaudeClient
+
+    monkeypatch.setattr(driver, "build_client", lambda backend: FakeClaudeClient([RuntimeError("provider failed")]))
+    link = Link()
+    with pytest.raises(ClaudeFailed):
+        run(link, seeded_env(tmp_path, CALL_DRIVER="claude", UW_CLAUDE_FALLBACK="off"))
+    record = json.loads((tmp_path / "runs" / "call_t1.json").read_text("utf-8"))
+    assert record["summary"]["status"] == "incomplete"
+    assert len(link.published) == 1 and link.said == ["bye"]
+    assert any(e["kind"] == "agent_failed" for e in record["session_log"])
+    assert not any(e["kind"] in ("agent_fallback", "fallback_step") for e in record["session_log"])

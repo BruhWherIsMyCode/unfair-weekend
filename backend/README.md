@@ -115,15 +115,23 @@ A synthetic-image smoke test with real MediaPipe models completed 24 cancellatio
 closing all 26 readers without inference/cleanup overlap. A live phone call still needs to be repeated.
 The separate SQLite recording warnings are tracked with Agent 3 in [issue #24](https://github.com/BruhWherIsMyCode/unfair-weekend/issues/24).
 
-Optional environment variables (all can stay empty; see `.env.example`). They are read for each call and checked before it starts; an invalid value ends the call with an `incomplete` family message.
+Optional environment variables (all can stay empty; see `.env.example`). Analysis variables are read for each call
+and checked before it starts; an invalid value ends the call with an `incomplete` family message. The backend
+checks runner selection and the Claude fallback setting at startup.
 
 - `CALL_RUNNER`: `auto`, `analysis`, `fake` (stand-in tasks, never a reading), `scripted`.
 - `CALL_DRIVER`: `fixed` (default; the fixed order, no model) or `claude`. Empty follows `UW_CLAUDE=on`.
 - `UW_CLAUDE_BACKEND`: `api` (default, needs `ANTHROPIC_API_KEY`) or `subscription` (the `claude` CLI login; the API key variable is removed from the process first).
+- `UW_CLAUDE_FALLBACK`: `on` (default) permits the fixed script after a Claude failure. `off` requires `CALL_DRIVER=claude` (or `UW_CLAUDE=on`), refuses a scripted runner or an unavailable analysis setup at startup, and ends a failing Claude call with an operator error. It still closes the session, saves the call record and publishes its final summary, including any concern already recorded. It does not control avatar clips or voice playback.
 - `UW_MIRRORED`: `on` when the phone frames are mirrored (default `off`).
 - `UW_BASELINE_PERSON`: the key her usual is stored under (default: the person id). `UW_DATA_DIR`: the folder of the JSON baseline files (default `analysis/data`). `UW_BASELINE_NEEDED`: successful normal/live calls before her usual is ready (backend default 2). In a learning call, after the greeting the avatar explains that it is learning her usual and says the total and remaining call counts, including the current call. Each required check needs enough usable measurements; an unusable check does not advance its count. Calls labelled `acted` never train her usual and do not play the learning introduction. The learning settings do not change how concerns raised during a call reach her family.
 - `UW_SAFETY_FLOOR`: only `off` turns off the mid-call message for two same-side readings outside her usual. Experiments only.
 - `UW_CALL_LOG`: `off` hides the live log (one plain line per step, prefixed `[call <id>]`). `UW_RUNS_DIR`: where the call record JSON is written (default `analysis/runs/calls`).
+
+For the Linux launcher, export the setting before starting the backend, or prefix the command from
+`ios/App/tools/linux`: `UW_CLAUDE_FALLBACK=off ./start-backend.sh`. The launcher must select Claude;
+if it downgrades to fixed/scripted mode because a dependency is missing, the backend refuses to start.
+Changing the setting requires restarting the backend.
 
 `DATABASE_PATH` (default: unset, database off): the shared SQLite file of [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md). When set, the backend applies the migrations once at startup and passes the path to Agent 3's `run_backend_call`, which reads her usual from the database (the JSON store stays the fallback), records the call in the tables Agent 3 owns (`analysis/storage/README.md` lists them, the transactions they implement and what Agent 2's writers must provide) and adds a baseline snapshot after an eligible normal call. It needs the `calls` row of an answered call, written by the call service's own store; without that row (this branch has no such writer) recording switches itself off for the call with one log line and the call is unchanged. Added by Agent 3 for Agent 2's review.
 

@@ -11,7 +11,8 @@ stops the loop at once with no further request.
 
 Fixed-order fallback, for the REST of the call (never switched back): the client could not be built; a request
 failed or timed out; a response without any tool_use (or malformed); a tool call failing its schema twice in a
-row (unknown tool counts); three refused steps in a row; more than CLAUDE_MAX_TURNS requests.
+row (unknown tool counts); three refused steps in a row; more than CLAUDE_MAX_TURNS requests. With
+allow_fallback=False these failures log agent_failed and raise ClaudeFailed for the caller to finalize.
 
 The agent never reads or changes readings, confirmation or the family message: those stay in CallSession code, so
 a confirmed change is published even if Claude fails right after. Every decision goes to session.log: kinds
@@ -38,6 +39,16 @@ CAUSABLE_LINES = ("greet", "q_medicine", "q_feeling", "q_unusual", "setup_phone"
 
 class _RequestTimeout(Exception):
     pass
+
+
+class ClaudeFailed(RuntimeError):
+    """Claude could not continue and the operator disabled the fixed-script fallback."""
+
+    code = "claude_failed"
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__("Claude stopped: %s; fixed-script fallback is disabled" % reason)
 
 
 PRONOUN_WORDS = {"she": ("she", "her", "her"), "he": ("he", "his", "him")}  # {she} {her} {her_obj}
@@ -99,7 +110,7 @@ class ClaudeAgent:
     def __init__(self, session: Any, handlers: Any, client: Any, clock: Any = None,
                  prompt_path: Optional[Path] = None, unavailable_reason: Optional[str] = None,
                  max_turns: int = limits.CLAUDE_MAX_TURNS, timeout_s: float = limits.CLAUDE_TIMEOUT_S,
-                 recorder: Any = None) -> None:
+                 recorder: Any = None, allow_fallback: bool = True) -> None:
         self.session = session
         # Optional database recorder: defaults to the session's. None = no recording. Hooks never raise.
         self.recorder = recorder if recorder is not None else getattr(session, "recorder", None)
@@ -112,11 +123,12 @@ class ClaudeAgent:
         self.timeout_s = timeout_s
         self.turns = 0
         self.using_fallback = False
+        self.allow_fallback = allow_fallback
 
     # ---- the loop ---------------------------------------------------------------------------------------
 
     async def run(self) -> None:
-        """Drive the call until it is finished or the client hung up. Never raises for a model failure."""
+        """Drive the call to its end. With fallback disabled, model failure raises ClaudeFailed."""
         if self.client is None:
             await self._fallback(self.unavailable_reason or "no_client")
             return
@@ -326,6 +338,9 @@ class ClaudeAgent:
         return block
 
     async def _fallback(self, reason: str) -> None:
+        if not self.allow_fallback:
+            self.session.note("agent_failed", reason=reason, turn=self.turns)
+            raise ClaudeFailed(reason)
         self.using_fallback = True
         self.session.note("agent_fallback", reason=reason, turn=self.turns)
         await FixedOrderDriver(self.handlers).run()

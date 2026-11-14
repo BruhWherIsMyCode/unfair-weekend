@@ -152,7 +152,8 @@ class CallDesk:
         self.links: dict[str, ClientLink] = {}
         self.results: dict[str, dict[str, Any] | None] = {}
         self.tasks: set[asyncio.Task[Any]] = set()
-        self.driver = choose_driver(settings.call_runner, settings.database_path)
+        self.driver = choose_driver(settings.call_runner, settings.database_path,
+                                    allow_fallback=settings.claude_fallback)
 
     def _spawn(self, coro: Any, call_id: str) -> None:
         task = asyncio.create_task(coro)
@@ -250,13 +251,13 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
     settings = settings if settings is not None else Settings.from_environment()
     if settings.logging is not None:
         configure_logging(settings.logging, secrets=(settings.demo_key,))
-    if settings.call_runner == "analysis":
-        choose_driver("analysis")  # refuses now, with the problems block, when measuring is not ready (not mid-call)
+    if settings.call_runner == "analysis" or not settings.claude_fallback:
+        choose_driver(settings.call_runner, allow_fallback=settings.claude_fallback)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         log_event(log, logging.INFO, "application.starting", call_runner=settings.call_runner,
-                  database_enabled=bool(settings.database_path))
+                  database_enabled=bool(settings.database_path), claude_fallback=settings.claude_fallback)
         calls = CallService(ring_timeout_s=settings.ring_timeout_s, call_timeout_s=settings.call_timeout_s)
         hub = DeviceHub()
         gateway = speech if speech is not None else SpeechGateway.from_environment()

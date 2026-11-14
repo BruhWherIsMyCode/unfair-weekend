@@ -25,6 +25,7 @@ class Settings:
     # Explicit opt-in for retaining camera task attempts as MP4. Needs the shared database.
     clip_storage_dir: str | None = None
     clip_retention_days: float = 7.0
+    claude_fallback: bool = True
 
     def __post_init__(self) -> None:
         if not self.demo_key or self.demo_key.isspace():
@@ -37,14 +38,27 @@ class Settings:
         positive_seconds(self.clip_retention_days * 86_400_000, "CLIP_RETENTION_DAYS")
         if self.clip_storage_dir and not self.database_path:
             raise ValueError("CLIP_STORAGE_DIR requires DATABASE_PATH")
+        if not isinstance(self.claude_fallback, bool):
+            raise ValueError("claude_fallback must be a boolean")
+        if not self.claude_fallback and self.call_runner == "scripted":
+            raise ValueError("UW_CLAUDE_FALLBACK=off cannot use CALL_RUNNER=scripted")
 
     @classmethod
     def from_environment(cls) -> "Settings":
+        fallback = os.environ.get("UW_CLAUDE_FALLBACK", "").strip().lower() or "on"
+        if fallback not in ("on", "off"):
+            raise ValueError("UW_CLAUDE_FALLBACK must be on or off")
+        if fallback == "off":
+            driver = os.environ.get("CALL_DRIVER", "").strip().lower()
+            driver = driver or ("claude" if os.environ.get("UW_CLAUDE", "").strip().lower() == "on" else "fixed")
+            if driver != "claude":
+                raise ValueError("UW_CLAUDE_FALLBACK=off requires CALL_DRIVER=claude")
         return cls(
             demo_key=os.environ.get("DEMO_KEY", ""),
             ring_timeout_s=float(os.environ.get("RING_TIMEOUT_S", "30")),
             call_timeout_s=float(os.environ.get("CALL_TIMEOUT_S", "180")),
             call_runner=os.environ.get("CALL_RUNNER", "auto"),
+            claude_fallback=fallback == "on",
             database_path=os.environ.get("DATABASE_PATH", ".cache/checkin.sqlite3"),
             logging=LoggingSettings.from_environment(),
             clip_storage_dir=os.environ.get("CLIP_STORAGE_DIR", "").strip() or None,
