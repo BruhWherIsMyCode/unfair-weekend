@@ -25,6 +25,14 @@ camera or microphone is lost. The design team builds the screens on top of `Call
 - `BackgroundKeepAlive`: demo workaround, not for the App Store. A silent audio loop keeps the app running in the
   background so the event stream stays open; the app then rings through CallKit (no VoIP push).
   - `FakeDevices.make()`: synthetic input for tests, previews and the simulator executable.
+- `Ringer`: the ring the app plays itself on its own Accept/Decline screen while the app is in the foreground.
+  `start()` loops a generated two-tone ring (about 2 s of ringing, then 2 s of silence) on the loudspeaker and
+  vibrates once per ring; `stop()` stops both. It leaves the audio session and `BackgroundKeepAlive` alone. The app
+  rings only while the screen is `.ringing`, the app is in front and CallKit is not ringing. If the app goes to the
+  background while ringing, the ring is handed to CallKit. Written, not compiled, not tried on a device.
+- With the phone unlocked and another app (or the home screen) in front, iOS shows a CallKit call as a small
+  banner. For the full-screen Accept/Decline call screen, set Settings > Apps > Phone > Incoming Calls > Full Screen
+  on the parent's phone (on the lock screen the call is always full screen).
 - `parent-call-sim`: a command-line run of the real client against a backend, using fake devices.
 
 ## Minimal screen wiring

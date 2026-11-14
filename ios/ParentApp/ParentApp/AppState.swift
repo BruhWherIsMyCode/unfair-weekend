@@ -70,6 +70,8 @@ final class AppState {
     private(set) var debugFrames: CameraSource?
     /// Rings through the system call screen while the app is in the background.
     let systemCalls = SystemCalls()
+    /// Rings out loud on the app's own call screen while the app is in the foreground.
+    @ObservationIgnored let ringer = Ringer()
     @ObservationIgnored private let keepAlive = BackgroundKeepAlive()
 
     @ObservationIgnored private var devices: ParentDevices?
