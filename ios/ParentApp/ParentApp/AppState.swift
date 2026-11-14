@@ -116,6 +116,14 @@ final class AppState {
         connect()
     }
 
+    /// Restarts the silent loop if it stopped (logged under "keepalive"). No-op in the Simulator, which has no
+    /// keep-alive.
+    func keepAwake(reason: String) {
+        #if !targetEnvironment(simulator)
+        keepAlive.ensureRunning(reason: reason)
+        #endif
+    }
+
     func update(_ newSettings: AppSettings) {
         newSettings.save()
         settings = newSettings

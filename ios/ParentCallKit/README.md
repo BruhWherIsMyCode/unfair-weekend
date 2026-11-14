@@ -24,6 +24,12 @@ camera or microphone is lost. The design team builds the screens on top of `Call
   clips and PCM for the rest of the call (backend/VOICE_VIDEO.md).
 - `BackgroundKeepAlive`: demo workaround, not for the App Store. A silent audio loop keeps the app running in the
   background so the event stream stays open; the app then rings through CallKit (no VoIP push).
+  - The loop is restarted by a 5 s watchdog timer, by interruption-ended (even without "should resume"), route
+    changes, media-services reset, the app going to the background or inactive, the end of every call, and CallKit
+    deactivating the audio session. To see restarts, filter Console.app by category "keepalive".
+  - Limit: if iOS ends the app (low memory, phone restart, force quit from the app switcher) it cannot ring until
+    opened again. The full fix is a VoIP push (PushKit), which needs the Apple developer account and the backend.
+    Written, not compiled, not tried on a device.
   - `FakeDevices.make()`: synthetic input for tests, previews and the simulator executable.
 - `Ringer`: the ring the app plays itself on its own Accept/Decline screen while the app is in the foreground.
   `start()` loops a generated two-tone ring (about 2 s of ringing, then 2 s of silence) on the loudspeaker and

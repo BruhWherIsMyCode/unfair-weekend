@@ -1,6 +1,7 @@
 #if canImport(AVFoundation) && canImport(UIKit)
 import AVFoundation
 import UIKit
+import os
 
 /// Real phone devices. Written for iOS 17; NOT compiled or run yet (built on Linux without AVFoundation).
 /// Check on a device: playback end timing, frame orientation/mirroring, PCM conversion and permissions.
@@ -57,40 +58,78 @@ final class AudioSessionBox: @unchecked Sendable {
 public final class BackgroundKeepAlive: @unchecked Sendable {
     private var player: AVAudioPlayer?
     private var observers: [NSObjectProtocol] = []
+    private var watchdog: Timer?
+    private let log = Logger(subsystem: "HeartCall", category: "keepalive")
 
     public init() {}
 
-    /// Main thread. Safe to call again; restarts the loop after an interruption or a media-services reset.
+    /// Main thread. Safe to call any number of times: re-activates the session, recreates the player if needed
+    /// and plays the loop if it is not playing. Also starts the 5 s watchdog and the notification hooks once.
     public func start() {
+        _ = startLoop()
+    }
+
+    /// Main thread. Like `start()`, plus one log line (category "keepalive") when the loop really had to be
+    /// restarted. Nothing is logged when it was already running.
+    public func ensureRunning(reason: String) {
+        if startLoop() {
+            log.info("keep-alive loop restarted, reason: \(reason, privacy: .public)")
+        }
+    }
+
+    /// Returns true when the loop was not playing or the session had to be activated again.
+    private func startLoop() -> Bool {
+        var restarted = false
         do {
+            if player?.isPlaying != true {
+                restarted = true
+            }
             try AudioSessionBox.shared.activate()
             if player == nil {
                 player = try AVAudioPlayer(data: Self.silentWAV(seconds: 2))
                 player?.numberOfLoops = -1
                 player?.prepareToPlay()
+            }
+            if observers.isEmpty {
                 observe()
             }
+            if watchdog == nil {
+                // Fires only while the app runs, which is the window before iOS suspends it (~30 s).
+                let timer = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
+                    self?.ensureRunning(reason: "watchdog")
+                }
+                RunLoop.main.add(timer, forMode: .common)
+                watchdog = timer
+            }
             if player?.isPlaying == false {
-                player?.play()
+                restarted = player?.play() == true || restarted
             }
         } catch {
             // Without the loop the app still works in the foreground; it just will not ring in the background.
+            log.error("keep-alive could not start: \(error.localizedDescription, privacy: .public)")
         }
+        return restarted
     }
 
     private func observe() {
         let center = NotificationCenter.default
         observers = [
+            // `.began` needs nothing: the watchdog and the app hooks restart the loop afterwards.
+            // `.ended` restarts regardless of `shouldResume`; iOS does not always send it.
             center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) {
                 [weak self] note in
                 guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
                       AVAudioSession.InterruptionType(rawValue: raw) == .ended else { return }
-                self?.start()
+                self?.ensureRunning(reason: "interruption-ended")
+            },
+            center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) {
+                [weak self] _ in
+                self?.ensureRunning(reason: "route")
             },
             center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil,
                                queue: .main) { [weak self] _ in
                 self?.player = nil
-                self?.start()
+                self?.ensureRunning(reason: "media-services-reset")
             },
         ]
     }

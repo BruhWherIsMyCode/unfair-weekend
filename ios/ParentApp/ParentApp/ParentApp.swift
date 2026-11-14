@@ -91,6 +91,7 @@ struct RootView: View {
                 app.model?.dismissDone()
             }
             app.systemCalls.onHangUp = { app.model?.hangUp() }
+            app.systemCalls.onAudioDeactivated = { app.keepAwake(reason: "callkit-deactivated") }
             await app.launch()
         }
     }
@@ -117,6 +118,9 @@ struct RootView: View {
     /// Coming back to the front: ring on the app's own screen again, unless CallKit still rings.
     private func followScene(_ phase: ScenePhase) {
         let mode = (app.model?.screen ?? CallScreen()).mode
+        if phase == .background || phase == .inactive {
+            app.keepAwake(reason: "scene-\(phase == .background ? "background" : "inactive")")
+        }
         if phase == .background, case .ringing = mode {
             app.ringer.stop()
             app.systemCalls.reportIncoming(title: title)
@@ -151,9 +155,21 @@ struct RootView: View {
             app.camera.stopPreview()
             app.systemCalls.reportEnded(unanswered: app.systemCalls.isRinging)
             app.model?.dismissDone()
+            keepAwakeAfterCall(reason: "call-ended")
         case .idle, .done:
             app.camera.stopPreview()
             app.systemCalls.reportEnded(unanswered: app.systemCalls.isRinging)
+            keepAwakeAfterCall(reason: "call-idle-or-done")
+        }
+    }
+
+    /// End of every call (answered, declined or missed): restart the silent loop now, and once more after the
+    /// live avatar has had time to disconnect (that disconnect can deactivate the audio session).
+    private func keepAwakeAfterCall(reason: String) {
+        app.keepAwake(reason: reason)
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            app.keepAwake(reason: "\(reason)-after-disconnect")
         }
     }
 
@@ -161,6 +177,7 @@ struct RootView: View {
     /// the background (BackgroundKeepAlive) and rings through CallKit next time. Demo only: `suspend` is not
     /// public API.
     private func leaveAfterCall() {
+        app.keepAwake(reason: "leave-after-call")
         UIApplication.shared.perform(#selector(NSXPCConnection.suspend))
         Task {
             // Reset behind the home-screen animation, so reopening shows the waiting screen.
