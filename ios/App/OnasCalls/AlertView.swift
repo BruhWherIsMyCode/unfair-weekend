@@ -1,18 +1,19 @@
 import SwiftUI
 
-/// Design step 4: the clip, the report and the three choices.
+/// Design step 4: what changed, the earlier check-in next to today's, the report and the three choices.
 struct AlertView: View {
     @Environment(DemoStore.self) private var store
 
-    /// The design frame is 956pt tall. On shorter phones the clip gives up the difference,
-    /// so the report and all three buttons stay on screen without scrolling.
+    /// The design frame is 956pt tall with a 290pt clip area. On shorter phones the clip area gives up the
+    /// difference (down to 140), so the report and all three buttons stay on screen without scrolling.
     private static let designHeight: CGFloat = 956
 
     var body: some View {
         GeometryReader { geo in
             let screen = geo.size.height + geo.safeAreaInsets.top + geo.safeAreaInsets.bottom
-            content(clipHeight: min(250, max(160, 250 - (Self.designHeight - screen))))
+            content(clipHeight: min(290, max(140, 290 - (Self.designHeight - screen))))
         }
+        .task { store.refreshComparisonIfStale() }
     }
 
     private func content(clipHeight: CGFloat) -> some View {
@@ -21,22 +22,16 @@ struct AlertView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     who
-                    Group {
-                        if store.liveMessage != nil {
-                            FrameClipView(clip: store.clip, height: clipHeight)
-                        } else {
-                            ClipPlayerView(height: clipHeight)
-                        }
-                    }
-                    .padding(.horizontal, 20)
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 10) {
                         NotUsualLabel()
                         Text(verbatim: store.callNow)
                             .font(.system(size: 30, weight: .bold))
                             .tracking(-0.7)
                             .foregroundStyle(Palette.amberInk)
                     }
-                    .padding(EdgeInsets(top: 22, leading: 24, bottom: 0, trailing: 24))
+                    .padding(EdgeInsets(top: 20, leading: 24, bottom: 20, trailing: 24))
+                    clipArea(height: clipHeight)
+                        .padding(.horizontal, 20)
                     Text("Report")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Palette.secondary)
@@ -70,18 +65,35 @@ struct AlertView: View {
         .padding(.horizontal, 12)
     }
 
+    /// The earlier check-in next to today's. A backend that records no attempt videos keeps the old single
+    /// frame clip, so nothing is lost when recording is off.
+    @ViewBuilder
+    private func clipArea(height: CGFloat) -> some View {
+        if store.liveMessage != nil, store.comparison.phase == .legacy {
+            FrameClipView(clip: store.clip, height: height)
+        } else {
+            ComparisonView(comparison: store.comparison, height: height, retry: store.loadComparison)
+        }
+    }
+
+    /// Photo, name and the task the clips show.
     private var who: some View {
         HStack(spacing: 14) {
             Avatar(size: 48, label: store.name, photo: store.photo)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: store.name).font(.system(size: 22, weight: .bold)).tracking(-0.5)
-                Text(store.liveMessage == nil ? "Check-in at \(Clock.time(store.alertTime)), 1 min 40 s"
-                                              : "Check-in at \(Clock.time(store.alertTime))")
-                    .font(.system(size: 15))
-                    .foregroundStyle(Palette.secondary)
+            Text(verbatim: store.name)
+                .font(.system(size: 22, weight: .bold))
+                .tracking(-0.5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let task = store.comparison.task, store.comparison.phase != .legacy {
+                Text(verbatim: task.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .padding(.horizontal, 11)
+                    .frame(height: 26)
+                    .background(Palette.grey, in: Capsule())
+                    .fixedSize()
             }
         }
-        .padding(EdgeInsets(top: 8, leading: 24, bottom: 18, trailing: 24))
+        .padding(EdgeInsets(top: 12, leading: 24, bottom: 0, trailing: 24))
     }
 
     private var report: some View {

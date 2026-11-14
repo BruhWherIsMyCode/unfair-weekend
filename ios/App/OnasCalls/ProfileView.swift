@@ -1,3 +1,4 @@
+import AVKit
 import PhotosUI
 import SwiftUI
 
@@ -39,6 +40,7 @@ struct ProfileView: View {
         }
         .tint(Palette.back)
         .sheet(isPresented: $editing) { EditProfileView() }
+        .task { await store.refreshAttempts(store.history.records) }
     }
 
     private var backBar: some View {
@@ -153,33 +155,39 @@ struct ProfileView: View {
     }
 }
 
-/// One call in the list: time, outcome pill, the first line of the report, a clip mark.
+/// One call in the list: the clip thumbnail, time, outcome pill, the first lines of the report and the clip's state.
 private struct CallRow: View {
     @Environment(DemoStore.self) private var store
     let record: CallRecord
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Text(verbatim: CallRow.when(record.date))
-                    .font(.system(size: 17, weight: .semibold))
-                Spacer(minLength: 0)
-                if record.clip != nil {
-                    Image(systemName: "video.fill")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Palette.faint)
-                        .accessibilityLabel(Text("Clip"))
-                }
-                OutcomePill(outcome: record.outcome)
+        let badge = ClipBadge(record)
+        HStack(alignment: .top, spacing: 14) {
+            if let badge {
+                ClipThumb(kind: badge.kind, posterClipId: badge.posterClipId)
             }
-            Text(verbatim: record.text)
-                .font(.system(size: 15))
-                .foregroundStyle(Palette.secondary)
-                .lineLimit(2)
-            if let follow = CallRow.followUp(record, pronoun: store.pronoun) {
-                Text(verbatim: follow)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Palette.faint)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(verbatim: CallRow.when(record.date))
+                        .font(.system(size: 17, weight: .semibold))
+                        .monospacedDigit()
+                    Spacer(minLength: 0)
+                    OutcomePill(outcome: record.outcome)
+                }
+                Text(verbatim: record.text)
+                    .font(.system(size: 15))
+                    .foregroundStyle(Palette.secondary)
+                    .lineLimit(2)
+                if let badge {
+                    Text(verbatim: badge.line)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.faint)
+                }
+                if let follow = CallRow.followUp(record, pronoun: store.pronoun) {
+                    Text(verbatim: follow)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.faint)
+                }
             }
         }
         .padding(.vertical, 4)
@@ -205,6 +213,110 @@ private struct CallRow: View {
         let note = record.note.trimmingCharacters(in: .whitespacesAndNewlines)
         if !note.isEmpty { parts.append(String(localized: "Note: \(note)")) }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
+
+/// What a call's clip looks like in the history: one of four states, and the line under the report.
+struct ClipBadge {
+    enum Kind { case ready, preparing, failed, expired }
+    let kind: Kind
+    let line: String
+    /// An attempt video on this phone, for the thumbnail's first frame.
+    let posterClipId: String?
+
+    init?(_ record: CallRecord) {
+        let attempts = record.attempts ?? []
+        let playable = attempts.filter(\.isPlayable)
+        posterClipId = playable.first(where: \.isOnPhone)?.clipId
+        if !playable.isEmpty {
+            kind = .ready
+            line = Self.kept(playable)
+        } else if record.clip != nil {
+            kind = .ready
+            line = String(localized: "Kept on this phone")
+        } else if attempts.isEmpty {
+            return nil
+        } else if attempts.contains(where: { $0.status == .preparing }) {
+            kind = .preparing
+            line = String(localized: "Preparing clip…")
+        } else if attempts.contains(where: { $0.status == .expired }) {
+            kind = .expired
+            line = String(localized: "Clip expired")
+        } else {
+            kind = .failed
+            line = String(localized: "Clip couldn't be saved")
+        }
+    }
+
+    /// One attempt's line in the call detail.
+    static func line(_ clip: AttemptClip) -> String {
+        let state: String
+        if clip.isPlayable {
+            state = kept([clip])
+        } else {
+            switch clip.status {
+            case .preparing: state = String(localized: "Preparing clip…")
+            case .expired: state = String(localized: "Clip expired")
+            case .failed, .ready: state = String(localized: "Clip couldn't be saved")
+            }
+        }
+        return clip.isActed ? String(localized: "Acted · \(state)") : state
+    }
+
+    /// "Kept until Sat 21 Nov" while the backend has it, then "Kept on this phone" if it was downloaded.
+    private static func kept(_ clips: [AttemptClip]) -> String {
+        if let until = clips.filter({ $0.status == .ready }).compactMap(\.expires).max() {
+            return String(localized: "Kept until \(Clock.shortDay(until))")
+        }
+        return String(localized: "Kept on this phone")
+    }
+
+    var a11y: String {
+        switch kind {
+        case .ready: String(localized: "Clip")
+        case .preparing: String(localized: "Preparing clip")
+        case .failed: String(localized: "Clip couldn't be saved")
+        case .expired: String(localized: "Clip expired")
+        }
+    }
+}
+
+/// 48 x 60 clip thumbnail: first frame with a play mark, or the state's mark on the neutral fill.
+struct ClipThumb: View {
+    let kind: ClipBadge.Kind
+    let posterClipId: String?
+    @State private var poster: UIImage?
+
+    var body: some View {
+        ZStack {
+            Palette.grey
+            switch kind {
+            case .ready:
+                if let poster {
+                    Image(uiImage: poster).resizable().scaledToFill()
+                } else {
+                    Stripes(colors: Palette.clipStripes, band: 5)
+                }
+                Image(systemName: "play.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white)
+                    .frame(width: 26, height: 26)
+                    .background(Palette.ink.opacity(0.55), in: Circle())
+            case .preparing:
+                Image(systemName: "ellipsis").font(.system(size: 17, weight: .bold)).foregroundStyle(Palette.faint)
+            case .failed:
+                Image(systemName: "exclamationmark.circle").font(.system(size: 20)).foregroundStyle(Palette.faint)
+            case .expired:
+                Image(systemName: "clock").font(.system(size: 20)).foregroundStyle(Palette.faint)
+            }
+        }
+        .frame(width: 48, height: 60)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .accessibilityHidden(true)
+        .task(id: posterClipId) {
+            guard let id = posterClipId, let url = AttemptVideos.cached(id) else { return }
+            poster = await AttemptVideos.poster(url)
+        }
     }
 }
 
@@ -250,6 +362,9 @@ struct CallDetailView: View {
     @State private var note = ""
     @State private var frames: AlertClip?
     @State private var confirmDelete = false
+    @State private var playing: PlayingVideo?
+    /// Counts finished downloads, so the clip thumbnails redraw with their first frame.
+    @State private var downloads = 0
 
     var body: some View {
         Group {
@@ -313,6 +428,11 @@ struct CallDetailView: View {
                     }
                 }
 
+                if let attempts = record.attempts, !attempts.isEmpty {
+                    heading("Clips")
+                    attemptList(attempts)
+                }
+
                 heading("Your note")
                 card {
                     TextField("Add a note for the family", text: $note, axis: .vertical)
@@ -342,15 +462,58 @@ struct CallDetailView: View {
                 } message: {
                     Text("The report, your note and the clip on this phone are removed.")
                 }
+
+                if record.outcome.needsCall {
+                    Text(verbatim: store.pronoun.unwellLine)
+                        .font(.system(size: 15))
+                        .foregroundStyle(Palette.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 20)
+                }
             }
             .padding(.bottom, 32)
         }
         .scrollDismissesKeyboard(.interactively)
         .onAppear { note = record.note }
         .task(id: recordId) {
-            guard record.clip == .frames else { return }
-            frames = await Task.detached { CallHistory.loadFrames(record) }.value
+            if record.clip == .frames {
+                frames = await Task.detached { CallHistory.loadFrames(record) }.value
+            }
+            await store.refreshAttempts([record])
+            // Short silent videos: keep them on this phone, for the thumbnails and after the backend deletes them.
+            for clip in store.history.record(recordId)?.attempts ?? [] where clip.status == .ready && !clip.isOnPhone {
+                if (try? await store.feed.downloadVideo(clip)) != nil { downloads += 1 }
+            }
         }
+        .sheet(item: $playing) { video in
+            NavigationStack {
+                VideoPlayer(player: AVPlayer(url: video.url))
+                    .background(Color.black)
+                    .navigationTitle(Text(verbatim: video.title))
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) { Button("Done") { playing = nil } }
+                    }
+            }
+        }
+    }
+
+    /// One row per task attempt, each with its own state ("Smile · try 1", kept for 7 days).
+    private func attemptList(_ attempts: [AttemptClip]) -> some View {
+        let rows = AttemptClip.numbered(attempts)
+        return VStack(spacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.element.clip.id) { index, row in
+                if index > 0 {
+                    Rectangle().fill(Palette.divider).frame(height: 0.5).padding(.leading, 78)
+                }
+                AttemptRow(clip: row.clip, title: String(localized: "\(row.task.short) · try \(row.attempt)")) { url in
+                    playing = PlayingVideo(url: url, title: String(localized: "\(row.task.short) · try \(row.attempt)"))
+                }
+            }
+        }
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 22))
+        .padding(.horizontal, 20)
+        .id(downloads)
     }
 
     @ViewBuilder
@@ -388,6 +551,63 @@ struct CallDetailView: View {
             .padding(.vertical, 16)
             .background(Color.white, in: RoundedRectangle(cornerRadius: 22))
             .padding(.horizontal, 20)
+    }
+}
+
+private struct PlayingVideo: Identifiable {
+    let url: URL
+    let title: String
+    var id: URL { url }
+}
+
+/// A task attempt in the call detail. Tapping a playable one downloads it (once) and plays it.
+private struct AttemptRow: View {
+    @Environment(DemoStore.self) private var store
+    let clip: AttemptClip
+    let title: String
+    let play: (URL) -> Void
+    @State private var loading = false
+
+    var body: some View {
+        Button {
+            guard clip.isPlayable, !loading else { return }
+            loading = true
+            Task {
+                defer { loading = false }
+                if let url = try? await store.feed.downloadVideo(clip) { play(url) }
+            }
+        } label: {
+            HStack(spacing: 14) {
+                ClipThumb(kind: kind, posterClipId: clip.isOnPhone ? clip.clipId : nil)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(verbatim: title)
+                        .font(.system(size: 17, weight: .semibold))
+                        .tracking(-0.4)
+                        .foregroundStyle(Palette.ink)
+                    Text(verbatim: ClipBadge.line(clip))
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.faint)
+                }
+                Spacer(minLength: 0)
+                if loading { ProgressView() }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(minHeight: 84)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .disabled(!clip.isPlayable)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var kind: ClipBadge.Kind {
+        if clip.isPlayable { return .ready }
+        switch clip.status {
+        case .preparing: return .preparing
+        case .expired: return .expired
+        case .failed, .ready: return .failed
+        }
     }
 }
 

@@ -6,7 +6,7 @@ A shell for one scripted stage scene on the operator iPhone, which can also rece
 
 In the demo panel, under **Check-in backend**, set the backend address (`http://<mac-ip>:8000`), the demo key and the family (`f_demo`), then **Connect**. The app registers as a family device and listens for `message.new`:
 
-- **Change from her usual, or a concern:** a time-sensitive notification with the alert sound, the amber card, and the alert screen with the backend's own text and the clip. The clip is her camera frames from both tries at the task that showed the change (`GET /v1/clips/{id}`). It is kept only in the backend's memory and expires after 30 min. A real alert never shows the staged `clip.mp4`.
+- **Change from her usual, or a concern:** a time-sensitive notification with the alert sound, the amber card, and the alert screen with the backend's own text and the clip. The clip area shows **an earlier check-in next to today's**: same task, one play button and scrubber for both, **Try 1 / Try 2** when today's task was tried twice. The backend chooses (`GET /v1/calls/{call_id}/comparison`, backend `CLIP_STORAGE_DIR`): the task behind the alert, today's attempt videos at it, and an earlier video from her learned usual, else from the last as-usual call. A backend without that route gets the phone's own choice: the task with the most tries, and the newest earlier as-usual or still-learning call in the history with a finished, not acted video of that task. No earlier call, no video for today, a failed fetch (Retry) and an acted call each have their own panel. A backend that records no videos keeps the old clip: her camera frames from both tries (`GET /v1/clips/{id}`, kept in the backend's memory for 30 min). A real alert never shows the staged `clip.mp4`.
 - **Could not finish, or no answer:** a plain notification with the backend's text.
 - **As usual, or still learning:** nothing.
 
@@ -46,7 +46,8 @@ Set `DEVELOPMENT_TEAM`. A free Personal Team cannot use the Time Sensitive Notif
 Put Fedya's clip and photo here. They are git-ignored and copied into the app at build time:
 
 ```
-ios/App/LocalAssets/clip.mp4   # about 10 s
+ios/App/LocalAssets/clip.mp4     # about 10 s, today's clip in the staged alert
+ios/App/LocalAssets/earlier.mp4  # optional, the staged alert's earlier check-in
 ios/App/LocalAssets/fedya.jpg
 ```
 
@@ -59,6 +60,7 @@ Tap the person's row on Family. The profile shows their name, relation and numbe
 - **Edit** changes the name, relation ("Dad"), he/she, phone number, photo (picked from Photos) and notes. Nothing changes until **Save**. The whole app uses the new name and pronoun; the backend's report text keeps its own.
 - **Calls:** every staged alert and every backend message (as usual and still learning too) goes into the history. A call opens its report, what the family did ("You called at", "You said he was fine"), a note to add, and Delete. **Edit history** or a swipe deletes calls.
 - **Clip:** a call with a clip shows it with **Save to Photos** and **Share** (Files, AirDrop, Messages). A real alert's frames are stored on the phone as soon as they arrive, so the clip stays after the backend forgets it (30 min), and are encoded to an .mp4 when the call is opened. The staged scene's call uses `clip.mp4` if it is present.
+- **Attempt videos:** with a recording backend, each call shows a thumbnail and its clip state: kept until (7 days), preparing, couldn't be saved, or expired. The call opens a **Clips** list with one row per attempt ("Smile · try 1"); a tap downloads it once and plays it, so it stays on the phone after the backend deletes it.
 - First launch fills the history with a sample week of calm calls. **Reset** in the demo panel removes the staged alert it reset from the history; **Reset call history** goes back to the sample week.
 
 Stored in the app's Application Support folder (history, notes, clip frames, photo) and UserDefaults (profile). Nothing leaves the phone except what the family shares.

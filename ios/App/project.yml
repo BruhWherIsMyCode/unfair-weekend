@@ -49,14 +49,14 @@ targets:
         UIBackgroundModes:
           - audio
     postCompileScripts:
-      - name: Copy LocalAssets (clip.mp4, fedya.jpg) if present
+      - name: Copy LocalAssets (clip.mp4, earlier.mp4, fedya.jpg) if present
         basedOnDependencyAnalysis: false
         script: |
           # Private files, never in git. The app shows placeholders when they are missing.
           SRC="${SRCROOT}/LocalAssets"
           DST="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}"
           mkdir -p "$DST"
-          for f in clip.mp4 fedya.jpg; do
+          for f in clip.mp4 earlier.mp4 fedya.jpg; do
             if [ -f "$SRC/$f" ]; then cp -f "$SRC/$f" "$DST/$f"; echo "LocalAssets: copied $f"
             else rm -f "$DST/$f"; echo "LocalAssets: $f missing, placeholder will show"; fi
           done

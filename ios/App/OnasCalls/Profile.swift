@@ -94,6 +94,10 @@ struct CallRecord: Codable, Identifiable, Equatable {
     var markedFineAt: Date?
     /// From the check-in backend (true) or the staged scene / sample history (false).
     var live = false
+    /// The backend's call, for its attempt videos. Nil for staged and sample calls.
+    var callId: String?
+    /// The call's task attempt videos as the backend last reported them; nil until asked.
+    var attempts: [AttemptClip]?
 }
 
 /// The profile's call history. Newest first, kept as JSON in Application Support. Real alert clips are stored
@@ -126,6 +130,8 @@ final class CallHistory {
             merged.calledAt = old.calledAt ?? new.calledAt
             merged.markedFineAt = old.markedFineAt ?? new.markedFineAt
             if merged.clip == nil { merged.clip = old.clip; merged.clipPeriodMs = old.clipPeriodMs }
+            merged.callId = new.callId ?? old.callId
+            merged.attempts = new.attempts ?? old.attempts
             merged.date = old.date
             records[i] = merged
         } else {
@@ -145,6 +151,7 @@ final class CallHistory {
         for id in ids {
             try? fm.removeItem(at: Self.clipDir(id))
             try? fm.removeItem(at: ClipExport.cachedURL(id))
+            AttemptVideos.remove(record(id)?.attempts ?? [])
         }
         records.removeAll { ids.contains($0.id) }
         save()
@@ -158,6 +165,13 @@ final class CallHistory {
     }
 
     // MARK: Clips
+
+    /// The backend's latest list of a call's attempt videos.
+    func setAttempts(_ clips: [AttemptClip], callId: String) {
+        guard let i = records.firstIndex(where: { $0.callId == callId }), records[i].attempts != clips else { return }
+        records[i].attempts = clips
+        save()
+    }
 
     func saveClip(_ clip: AlertClip, for id: String) {
         guard record(id) != nil, record(id)?.clip != .frames else { return }

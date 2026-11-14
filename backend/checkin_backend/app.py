@@ -533,6 +533,17 @@ def create_app(settings: Settings | None = None, *, speech: SpeechGateway | None
         return JSONResponse({"call_id": call_id, "clips": [clip_metadata(row) for row in rows]},
                             headers={"Cache-Control": "no-store"})
 
+    @app.get("/v1/calls/{call_id}/comparison", dependencies=auth)
+    async def call_comparison(call_id: str, request: Request) -> JSONResponse:
+        """The alert's task, today's attempt videos at it and one earlier video of the same task (comparison.py)."""
+        desk = desk_of(request)
+        result = await desk.store.comparison(call_id) if desk.store.enabled else None
+        if result is None:
+            desk.calls.get(call_id)  # an unknown call is a 404; a call outside the database has no videos
+            result = {"call_id": call_id, "task": None, "task_source": None, "today": [], "earlier": None,
+                      "earlier_source": None, "earlier_missing": "not_retained"}
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
     @app.get("/v1/clips/{clip_id}/video", dependencies=auth)
     async def attempt_video(clip_id: str, request: Request) -> Response:
         desk = desk_of(request)
